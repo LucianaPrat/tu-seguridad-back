@@ -9,6 +9,7 @@ import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { EnvNames } from './cross/common/constants';
+import { setupSwagger } from './cross/config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -36,6 +37,8 @@ async function bootstrap() {
   app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)'] });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();
+
+  setupSwagger(app);
 
   const port = configService.get<number>(EnvNames.PORT, 3000);
   await app.listen(port);
