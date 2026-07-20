@@ -13,6 +13,7 @@ import { DataModule } from './data/data.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CamerasModule } from './modules/cameras/cameras.module';
 import { EventsModule } from './modules/events/events.module';
+import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-client.module';
 import { HealthModule } from './modules/health/health.module';
 import { ZonesModule } from './modules/zones/zones.module';
 
@@ -38,6 +39,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     CamerasModule,
     ZonesModule,
     EventsModule,
+    FaceAuthClientModule,
   ],
   controllers: [AppController],
   providers: [
