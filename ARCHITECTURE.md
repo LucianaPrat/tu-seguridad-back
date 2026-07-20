@@ -32,7 +32,8 @@ Accessors are thin. No `Either`, no DTOs, no business rules:
   - Safety is doubled on purpose: `test/setup-int-env.ts` (Jest `setupFiles`) forces `process.env.DATABASE_URL = process.env.DATABASE_URL_TEST` and throws if `DATABASE_URL_TEST` looks wrong; EVERY spec additionally builds its own client with `new PrismaService({ datasourceUrl: process.env.DATABASE_URL_TEST })`. Never rely on ambient `.env` alone in an int-spec — a bug there means truncating the DEV database.
   - `beforeEach` truncates in FK-safe order: `zone_events` → `zones` → `cameras` → `users` → `hits`.
   - Specs bypass Nest DI — plain `new XAccessorService(prisma)`, manual `$connect`/`$disconnect` in `beforeAll`/`afterAll`.
-- **E2E**: not built yet, formalized in T19. Note for whoever writes T19: keep `test:int` wired through `test/jest-int.json` (the env-guard config), don't replace it with a bare `--testRegex` invocation — that form skips the test-DB safety guard entirely.
+- **E2E** (`*.e2e-spec.ts`, `test/`): own config `test/jest-e2e.json`, run via `npm run test:e2e`. Boots the real `AppModule` (HTTP + WebSocket), same test database as int-specs. `test/utils/bootstrap-e2e-app.ts` replicates every piece of `main.ts`'s bootstrap that only lives on the `INestApplication` instance — global prefix, versioning, validation pipe, Swagger setup — since none of that comes for free from `AppModule` alone; skip any of it and routes silently 404 or land at the wrong path. `FaceAuthClientService` is overridden with a fake (`test/utils/bootstrap-e2e-app.ts`) — no real upstream calls in e2e.
+- `test:int` stayed wired through `test/jest-int.json` (the env-guard config) rather than the simplified inline `--testRegex` form from the original plan text — that form skips the test-DB safety guard (`process.env.DATABASE_URL = process.env.DATABASE_URL_TEST`) entirely.
 
 ## Infra
 
