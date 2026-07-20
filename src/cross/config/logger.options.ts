@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import { Options } from 'pino-http';
-import { v4 as uuidv4 } from 'uuid';
 import { EnvNames } from '../common/constants';
 
 const SENSITIVE_KEYS = new Set(['snapshotUrl']);
@@ -43,7 +43,7 @@ export const createPinoHttpOptions = (config: ConfigService): Options => {
 
   return {
     level: config.get<string>(EnvNames.LOG_LEVEL),
-    genReqId: () => uuidv4(),
+    genReqId: () => randomUUID(),
     transport: isProduction
       ? undefined
       : { target: 'pino-pretty', options: { singleLine: true } },

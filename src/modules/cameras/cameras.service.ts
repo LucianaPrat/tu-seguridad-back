@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
+import { AnalysisResult } from '../pipeline/analysis-result';
+import { PipelineService } from '../pipeline/pipeline.service';
 import { CameraStatus, CameraStatusRegistry } from './camera-status.registry';
 import { toCameraDetailDto, toCameraListItemDto } from './camera.mapper';
 import { CameraDto } from './dto/camera.dto';
@@ -13,6 +15,7 @@ export class CamerasService {
   constructor(
     private readonly cameraAccessor: CameraAccessorService,
     private readonly statusRegistry: CameraStatusRegistry,
+    private readonly pipelineService: PipelineService,
   ) {}
 
   async create(dto: CreateCameraDto): Promise<Either<CameraDto>> {
@@ -76,5 +79,13 @@ export class CamerasService {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${id} not found`);
     }
     return buildData(this.statusRegistry.get(id));
+  }
+
+  async analyze(id: string, image: Buffer): Promise<Either<AnalysisResult>> {
+    const camera = await this.cameraAccessor.findById(id);
+    if (!camera) {
+      return buildError(ErrorCode.NOT_FOUND, `Camera ${id} not found`);
+    }
+    return this.pipelineService.processImage(camera, image);
   }
 }

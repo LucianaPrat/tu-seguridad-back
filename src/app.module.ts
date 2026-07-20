@@ -11,6 +11,7 @@ import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { DataModule } from './data/data.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CameraStatusModule } from './modules/cameras/camera-status.module';
 import { CamerasModule } from './modules/cameras/cameras.module';
 import { EventsModule } from './modules/events/events.module';
 import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-client.module';
@@ -36,6 +37,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     DataModule,
     AuthModule,
     HealthModule,
+    CameraStatusModule,
     CamerasModule,
     ZonesModule,
     EventsModule,

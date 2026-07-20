@@ -3,17 +3,25 @@ import {
   Controller,
   Delete,
   Get,
+  HttpStatus,
   Param,
+  ParseFilePipeBuilder,
   Post,
   Put,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Either } from '../../cross/errors/either';
+import { AnalysisResult } from '../pipeline/analysis-result';
 import { CameraStatus } from './camera-status.registry';
 import { CamerasService } from './cameras.service';
 import { CameraDto } from './dto/camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
+
+const MAX_ANALYZE_FILE_BYTES = 10 * 1024 * 1024;
 
 @ApiTags('cameras')
 @ApiBearerAuth()
@@ -52,5 +60,26 @@ export class CamerasController {
   @Get(':id/status')
   status(@Param('id') id: string): Promise<Either<CameraStatus>> {
     return this.camerasService.getStatus(id);
+  }
+
+  @Post(':id/analyze')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  analyze(
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addMaxSizeValidator({ maxSize: MAX_ANALYZE_FILE_BYTES })
+        .build({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
+    )
+    file: Express.Multer.File,
+  ): Promise<Either<AnalysisResult>> {
+    return this.camerasService.analyze(id, file.buffer);
   }
 }

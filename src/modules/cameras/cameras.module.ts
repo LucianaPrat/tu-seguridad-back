@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { CameraStatusRegistry } from './camera-status.registry';
+import { PipelineModule } from '../pipeline/pipeline.module';
 import { CamerasController } from './cameras.controller';
 import { CamerasService } from './cameras.service';
 
 @Module({
+  imports: [PipelineModule],
   controllers: [CamerasController],
-  providers: [CamerasService, CameraStatusRegistry],
-  exports: [CameraStatusRegistry],
+  providers: [CamerasService],
 })
 export class CamerasModule {}
