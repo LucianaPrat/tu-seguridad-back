@@ -19,6 +19,10 @@ export class ZoneEventAccessorService {
     return this.prisma.zoneEvent.create({ data });
   }
 
+  findByEventId(eventId: string): Promise<ZoneEvent | null> {
+    return this.prisma.zoneEvent.findUnique({ where: { eventId } });
+  }
+
   query(filter: ZoneEventQueryFilter): Promise<ZoneEvent[]> {
     const where: Prisma.ZoneEventWhereInput = {};
     if (filter.cameraId) where.cameraId = filter.cameraId;

@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { EnvNames } from './cross/common/constants';
+import { SocketIoAdapter } from './cross/config/socket-io.adapter';
 import { setupSwagger } from './cross/config/swagger.config';
 import { validationExceptionFactory } from './cross/errors/validation-exception.factory';
 
@@ -29,6 +30,7 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   app.enableCors({ origin: corsOrigins, credentials: true });
+  app.useWebSocketAdapter(new SocketIoAdapter(app, corsOrigins));
 
   app.use(compression());
   app.use(cookieParser());
