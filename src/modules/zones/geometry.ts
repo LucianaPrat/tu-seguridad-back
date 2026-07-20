@@ -137,3 +137,40 @@ function segmentsIntersect(
 
   return false;
 }
+
+/**
+ * Ray-casting point-in-polygon test, boundary-inclusive: a point exactly on
+ * an edge or vertex counts as inside, matching Shapely's `covers()`
+ * semantics (architecture README §9.3).
+ */
+export function pointInPolygon(point: Point, polygon: Point[]): boolean {
+  if (isOnBoundary(point, polygon)) {
+    return true;
+  }
+
+  let inside = false;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const pi = polygon[i];
+    const pj = polygon[j];
+    const crossesRay =
+      pi.y > point.y !== pj.y > point.y &&
+      point.x < ((pj.x - pi.x) * (point.y - pi.y)) / (pj.y - pi.y) + pi.x;
+    if (crossesRay) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function isOnBoundary(point: Point, polygon: Point[]): boolean {
+  const n = polygon.length;
+  for (let i = 0; i < n; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % n];
+    if (orientation(a, b, point) === 0 && onSegment(a, point, b)) {
+      return true;
+    }
+  }
+  return false;
+}
