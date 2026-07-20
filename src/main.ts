@@ -11,6 +11,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { EnvNames } from './cross/common/constants';
 import { setupSwagger } from './cross/config/swagger.config';
+import { validationExceptionFactory } from './cross/errors/validation-exception.factory';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -36,6 +37,7 @@ async function bootstrap() {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
+      exceptionFactory: validationExceptionFactory,
     }),
   );
   app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)'] });
