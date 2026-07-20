@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+}
+
+enum ZoneEventType {
+  PERSON_ENTERED_ZONE
+  PERSON_EXITED_ZONE
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(admin)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Camera {
+  id                     String   @id
+  name                   String
+  enabled                Boolean  @default(true)
+  snapshotUrl            String   @map("snapshot_url")
+  pollingIntervalSeconds Int      @default(5) @map("polling_interval_seconds")
+  confidenceThreshold    Float    @default(0.45) @map("confidence_threshold")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  zones      Zone[]
+  zoneEvents ZoneEvent[]
+
+  @@map("cameras")
+}
+
+model Zone {
+  id              String   @id
+  cameraId        String   @map("camera_id")
+  name            String
+  enabled         Boolean  @default(true)
+  polygon         Json
+  geometryVersion Int      @default(1) @map("geometry_version")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  camera     Camera      @relation(fields: [cameraId], references: [id], onDelete: Restrict)
+  zoneEvents ZoneEvent[]
+
+  @@map("zones")
+}
+
+model ZoneEvent {
+  id            Int           @id @default(autoincrement())
+  eventId       String        @unique @map("event_id")
+  eventType     ZoneEventType @map("event_type")
+  cameraId      String        @map("camera_id")
+  zoneId        String        @map("zone_id")
+  occurredAt    DateTime      @map("occurred_at")
+  confidence    Float?
+  personsInZone Int           @map("persons_in_zone")
+  anchor        Json?
+
+  camera Camera @relation(fields: [cameraId], references: [id], onDelete: Restrict)
+  zone   Zone   @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+
+  @@index([cameraId, occurredAt])
+  @@index([zoneId, occurredAt])
+  @@map("zone_events")
+}
+
+model Hit {
+  id         Int      @id @default(autoincrement())
+  method     String
+  route      String
+  statusCode Int      @map("status_code")
+  durationMs Int      @map("duration_ms")
+  userId     Int?     @map("user_id")
+  isError    Boolean  @map("is_error")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("hits")
+}
