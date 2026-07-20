@@ -11,6 +11,7 @@ import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { DataModule } from './data/data.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AuthModule } from './modules/auth/auth.module';
     }),
     DataModule,
     AuthModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [
