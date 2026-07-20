@@ -9,6 +9,7 @@ import { envValidationSchema } from './cross/config/env-validation.schema';
 import { createPinoHttpOptions } from './cross/config/logger.options';
 import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
+import { DataModule } from './data/data.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { EitherInterceptor } from './cross/interceptors/either.interceptor';
       inject: [ConfigService],
       useFactory: createThrottlerOptions,
     }),
+    DataModule,
   ],
   controllers: [AppController],
   providers: [
