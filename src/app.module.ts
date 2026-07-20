@@ -10,6 +10,7 @@ import { createPinoHttpOptions } from './cross/config/logger.options';
 import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { DataModule } from './data/data.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { DataModule } from './data/data.module';
       useFactory: createThrottlerOptions,
     }),
     DataModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [
