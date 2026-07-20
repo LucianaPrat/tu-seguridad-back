@@ -3,6 +3,7 @@ import './observability/tracing';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -12,9 +13,12 @@ import { EnvNames } from './cross/common/constants';
 import { setupSwagger } from './cross/config/swagger.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
 
   app.useLogger(app.get(Logger));
+  app.set('trust proxy', 'loopback');
   app.use(helmet());
 
   const configService = app.get(ConfigService);
