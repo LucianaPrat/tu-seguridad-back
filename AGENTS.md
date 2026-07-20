@@ -12,4 +12,6 @@ Stop: "stop caveman" or "normal mode"
 
 Auto-Clarity: drop caveman for security warnings, irreversible actions, user confused. Resume after.
 
-Boundaries: code/commits/PRs written normal.
+Boundaries: code/commits written normal. PR descriptions on THIS repo: caveman-full (project override, see CONTRIBUTING.md).
+
+Project docs, read before touching code: README.md (quickstart), ARCHITECTURE.md (layering, accessor pattern), CONTRIBUTING.md (branch model, no-AI-trace commit rule), docs/BEST_PRACTICES.md (tooling gotchas), plans/01.setup.md + plans/01.setup.tasks.md (full plan + live status).

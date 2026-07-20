@@ -1,98 +1,45 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# tu-seguridad-back
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend for person-detection-in-restricted-zones system. 8 home cameras behind DVR/NVR. This backend owns camera/zone config (MySQL), pipeline orchestration, zone evaluation (point-in-polygon + hysteresis), technical events, live push to frontend. Person detection delegated to external face-auth API.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md). Live status of every task: [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md). Check those before trusting anything below as final — README tracks what exists NOW, plan tracks what's coming.
 
-## Description
+## Stack (so far)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Node 22, NestJS 11 + Express, TypeScript strict, Prisma + MySQL, class-validator, `@nestjs/config` + Joi, `@nestjs/throttler`, helmet + nestjs-pino, `@nestjs/swagger`. Full table: `plans/01.setup.md` §2.
 
-## Project setup
+## Quickstart
 
 ```bash
-$ npm install
+nvm use                          # Node 22, see .nvmrc
+npm ci
+cp .env.example .env              # fill real MySQL creds + face-auth tenant/token
+# MySQL runs in docker (container mysql-local in this dev setup) — start it before anything DB-related
+npx prisma generate
+npx prisma migrate deploy         # against DATABASE_URL
+# create + migrate test DB too (see plans/01.setup.md §6 for DATABASE_URL_TEST)
+npm run prisma:seed               # idempotent, upserts admin from ADMIN_EMAIL/ADMIN_PASSWORD
+npm run start:dev
 ```
 
-## Compile and run the project
+Gotcha: MySQL here runs as **docker container**, not systemd service — `systemctl start mysql` finds nothing. Check `docker ps` for `mysql-local`-style container instead. Details: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-```bash
-# development
-$ npm run start
+## Test levels
 
-# watch mode
-$ npm run start:dev
+- `npm test` — unit, `*.spec.ts`, no DB.
+- `npm run test:int` — integration, `*.int-spec.ts`, hits REAL local test DB (`DATABASE_URL_TEST`). Truncates tables — never point at dev DB.
+- `npm run test:e2e` — full app boot, coming in T19.
 
-# production mode
-$ npm run start:prod
-```
+## Docs map
 
-## Run tests
+| File | What's in it |
+|---|---|
+| [`plans/01.setup.md`](plans/01.setup.md) | full 25-task setup plan, domain model, API surface, env vars |
+| [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) | live status per task — check here first for "what's done" |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | layering rules, Either pattern, accessor conventions, deviations from plan |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | branch model, PR flow, commit rules, git/gh setup gotchas |
+| [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) | tooling/ops gotchas learned building this repo — read before repeating a mistake |
 
-```bash
-# unit tests
-$ npm run test
+## Status
 
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Setup plan in progress. Schema + migrations + seed + data accessor layer done (T01-T08). Auth, cameras, zones, events, pipeline, tests, CI still ahead. See [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) for exact state.
