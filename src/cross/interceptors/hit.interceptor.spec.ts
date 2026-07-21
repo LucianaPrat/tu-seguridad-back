@@ -26,7 +26,9 @@ describe('HitInterceptor', () => {
     } as unknown as ExecutionContext;
   }
 
-  function fakeResponse(statusCode: number): EventEmitter & { statusCode: number } {
+  function fakeResponse(
+    statusCode: number,
+  ): EventEmitter & { statusCode: number } {
     const response = new EventEmitter() as EventEmitter & {
       statusCode: number;
     };
@@ -72,7 +74,11 @@ describe('HitInterceptor', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(hitAccessor.create).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 404, isError: true, userId: undefined }),
+      expect.objectContaining({
+        statusCode: 404,
+        isError: true,
+        userId: undefined,
+      }),
     );
   });
 
