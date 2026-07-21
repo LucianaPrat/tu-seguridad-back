@@ -1,0 +1,64 @@
+name: PR tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+  DATABASE_URL: mysql://root:root@127.0.0.1:3306/tu-seguridad-test
+  DATABASE_URL_TEST: mysql://root:root@127.0.0.1:3306/tu-seguridad-test
+  JWT_SECRET: ci-access-secret
+  JWT_EXPIRES_IN: 15m
+  JWT_REFRESH_SECRET: ci-refresh-secret
+  JWT_REFRESH_EXPIRES_IN: 7d
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: ci-admin-password
+  FACE_AUTH_API_URL: https://api.face-auth.me
+  FACE_AUTH_DOMAIN: ci-dummy-domain
+  FACE_AUTH_TOKEN: ci-dummy-token
+  POLLING_ENABLED: 'false'
+  OTEL_ENABLED: 'false'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: tu-seguridad-test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run build
+
+      - run: npx prisma migrate deploy
+
+      - run: npm run prisma:seed
+
+      - run: npm run test:all
