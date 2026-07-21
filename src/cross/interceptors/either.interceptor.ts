@@ -5,6 +5,7 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import { PinoLogger } from 'nestjs-pino';
 import { Observable } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -52,6 +53,10 @@ export class EitherInterceptor implements NestInterceptor {
           throw error;
         }
         this.logger.error({ err: error }, 'Unhandled exception');
+        // Only unexpected (unmapped) errors reach here — Either failures and
+        // HttpExceptions are handled above, so Sentry stays free of routine
+        // 4xx noise. No-op unless SENTRY_DSN is configured.
+        Sentry.captureException(error);
         throw new HttpException(
           {
             statusCode: ERROR_CODE_HTTP_STATUS[ErrorCode.INTERNAL_ERROR],

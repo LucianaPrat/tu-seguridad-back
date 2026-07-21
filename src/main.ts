@@ -13,6 +13,7 @@ import { EnvNames } from './cross/common/constants';
 import { SocketIoAdapter } from './cross/config/socket-io.adapter';
 import { setupSwagger } from './cross/config/swagger.config';
 import { validationExceptionFactory } from './cross/errors/validation-exception.factory';
+import { initSentry } from './observability/sentry';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -51,4 +52,6 @@ async function bootstrap() {
   const port = configService.get<number>(EnvNames.PORT, 3000);
   await app.listen(port);
 }
-bootstrap();
+
+initSentry();
+void bootstrap();
