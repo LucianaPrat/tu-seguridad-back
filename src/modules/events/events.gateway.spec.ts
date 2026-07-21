@@ -86,4 +86,21 @@ describe('EventsGateway', () => {
       gateway.broadcastZoneEvent({ eventId: 'evt-1' } as never);
     });
   }, 5000);
+
+  it('disconnects connected clients cleanly on module destroy', (done) => {
+    const token = jwtService.sign({
+      sub: 1,
+      email: 'admin@example.com',
+      role: 'admin',
+    });
+    const client = connect(token);
+
+    client.on('connect', () => {
+      client.on('disconnect', () => {
+        client.close();
+        done();
+      });
+      gateway.onModuleDestroy();
+    });
+  }, 5000);
 });

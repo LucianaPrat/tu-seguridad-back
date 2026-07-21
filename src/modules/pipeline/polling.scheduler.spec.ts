@@ -71,6 +71,17 @@ describe('PollingScheduler', () => {
         expect.anything(),
       );
     });
+
+    it('clears the sync timer on module destroy so no new ticks fire', async () => {
+      configService.get.mockReturnValue(true);
+      await scheduler.onApplicationBootstrap();
+
+      const clearSpy = jest.spyOn(global, 'clearInterval');
+      scheduler.onModuleDestroy();
+
+      expect(clearSpy).toHaveBeenCalled();
+      clearSpy.mockRestore();
+    });
   });
 
   describe('pollOnce', () => {
