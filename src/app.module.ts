@@ -12,6 +12,7 @@ import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { DataModule } from './data/data.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CamerasModule } from './modules/cameras/cameras.module';
+import { EventsModule } from './modules/events/events.module';
 import { HealthModule } from './modules/health/health.module';
 import { ZonesModule } from './modules/zones/zones.module';
 
@@ -36,6 +37,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     HealthModule,
     CamerasModule,
     ZonesModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [
