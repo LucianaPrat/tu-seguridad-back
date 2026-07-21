@@ -175,6 +175,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `OTEL_ENABLED` | `false` | Opt-in OpenTelemetry tracing. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector. |
 | `OTEL_SERVICE_NAME` | `tu-seguridad-back` | Reported service name. |
+| `SENTRY_DSN` | — | Opt-in error tracking. Unset = disabled (no network activity). Only unexpected 500s are reported; secrets are scrubbed. |
 
 ## Docs map
 

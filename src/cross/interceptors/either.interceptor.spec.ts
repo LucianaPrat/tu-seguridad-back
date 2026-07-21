@@ -1,9 +1,13 @@
 import { CallHandler, ExecutionContext, HttpException } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import { PinoLogger } from 'nestjs-pino';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { ERROR_CODE_HTTP_STATUS, ErrorCode } from '../common/constants';
 import { buildData, buildError } from '../errors/either';
 import { EitherInterceptor } from './either.interceptor';
+
+jest.mock('@sentry/node');
+const captureException = Sentry.captureException as jest.Mock;
 
 describe('EitherInterceptor', () => {
   let interceptor: EitherInterceptor;
@@ -13,6 +17,7 @@ describe('EitherInterceptor', () => {
   beforeEach(() => {
     logger = { setContext: jest.fn(), error: jest.fn() };
     interceptor = new EitherInterceptor(logger as unknown as PinoLogger);
+    captureException.mockClear();
   });
 
   function handlerOf(value$: ReturnType<typeof of>): CallHandler {
@@ -76,6 +81,7 @@ describe('EitherInterceptor', () => {
       message: 'Internal server error',
     });
     expect(logger.error).toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledTimes(1);
   });
 
   it('passes through an existing HttpException unchanged', async () => {
@@ -83,5 +89,14 @@ describe('EitherInterceptor', () => {
     const err = await expectRejection(handlerOf(throwError(() => original)));
 
     expect(err).toBe(original);
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it('does not report Either failures to Sentry', async () => {
+    await expectRejection(
+      handlerOf(of(buildError(ErrorCode.NOT_FOUND, 'nope'))),
+    );
+
+    expect(captureException).not.toHaveBeenCalled();
   });
 });
