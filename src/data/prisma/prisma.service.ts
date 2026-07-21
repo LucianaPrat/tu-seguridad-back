@@ -19,6 +19,7 @@ export class PrismaService
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.logger.log('Shutting down gracefully, disconnecting Prisma');
     await this.$disconnect();
   }
 }
