@@ -22,6 +22,7 @@ describe('CamerasService', () => {
     countZones: jest.Mock;
   };
   let statusRegistry: { get: jest.Mock };
+  let pipelineService: { processImage: jest.Mock };
   let service: CamerasService;
 
   beforeEach(() => {
@@ -34,9 +35,11 @@ describe('CamerasService', () => {
       countZones: jest.fn(),
     };
     statusRegistry = { get: jest.fn() };
+    pipelineService = { processImage: jest.fn() };
     service = new CamerasService(
       cameraAccessor as never,
       statusRegistry as never,
+      pipelineService as never,
     );
   });
 
@@ -190,6 +193,36 @@ describe('CamerasService', () => {
       if (result.ok) {
         expect(result.data.cameraId).toBe('camera_01');
       }
+    });
+  });
+
+  describe('analyze', () => {
+    it('returns NOT_FOUND for a missing camera', async () => {
+      cameraAccessor.findById.mockResolvedValue(null);
+
+      const result = await service.analyze('camera_missing', Buffer.from(''));
+
+      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+      expect(pipelineService.processImage).not.toHaveBeenCalled();
+    });
+
+    it('delegates to PipelineService.processImage for an existing camera', async () => {
+      cameraAccessor.findById.mockResolvedValue(camera);
+      const analysisResult = {
+        persons: [],
+        zoneResults: [],
+        eventsEmitted: [],
+      };
+      pipelineService.processImage.mockResolvedValue({
+        ok: true,
+        data: analysisResult,
+      });
+      const image = Buffer.from('jpeg-bytes');
+
+      const result = await service.analyze('camera_01', image);
+
+      expect(pipelineService.processImage).toHaveBeenCalledWith(camera, image);
+      expect(result).toEqual({ ok: true, data: analysisResult });
     });
   });
 });
