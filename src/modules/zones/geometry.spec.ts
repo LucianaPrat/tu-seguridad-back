@@ -1,4 +1,4 @@
-import { validatePolygon } from './geometry';
+import { pointInPolygon, validatePolygon } from './geometry';
 
 describe('validatePolygon', () => {
   it('accepts a valid square', () => {
@@ -113,5 +113,30 @@ describe('validatePolygon', () => {
     ]);
 
     expect(violations.some((v) => v.rule === 'self-intersection')).toBe(true);
+  });
+});
+
+describe('pointInPolygon', () => {
+  const square = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
+
+  it('returns true for a point strictly inside', () => {
+    expect(pointInPolygon({ x: 0.5, y: 0.5 }, square)).toBe(true);
+  });
+
+  it('returns false for a point strictly outside', () => {
+    expect(pointInPolygon({ x: 1.5, y: 0.5 }, square)).toBe(false);
+  });
+
+  it('returns true for a point exactly on an edge (boundary-inclusive)', () => {
+    expect(pointInPolygon({ x: 0.5, y: 0 }, square)).toBe(true);
+  });
+
+  it('returns true for a point exactly on a vertex (boundary-inclusive)', () => {
+    expect(pointInPolygon({ x: 0, y: 0 }, square)).toBe(true);
   });
 });
