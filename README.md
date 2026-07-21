@@ -176,6 +176,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector. |
 | `OTEL_SERVICE_NAME` | `tu-seguridad-back` | Reported service name. |
 | `SENTRY_DSN` | — | Opt-in error tracking. Unset = disabled (no network activity). Only unexpected 500s are reported; secrets are scrubbed. |
+| `METRICS_TOKEN` | — | Shared secret for `GET /metrics` (`X-Metrics-Token` header). Required in production; unset in dev leaves `/metrics` open. |
 
 ## Docs map
 

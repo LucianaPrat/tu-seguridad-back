@@ -5,18 +5,25 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Response } from 'express';
+import { Histogram } from 'prom-client';
 import { Observable } from 'rxjs';
 import { HitAccessorService } from '../../data/accessors/hit.accessor';
 import { RequestWithUser } from '../guards/jwt-auth.guard';
+import { MetricNames } from '../metrics/metric-names';
 
-const SKIPPED_PATH_PREFIXES = ['/health', '/docs'];
+const SKIPPED_PATH_PREFIXES = ['/health', '/docs', '/metrics'];
 
 @Injectable()
 export class HitInterceptor implements NestInterceptor {
   private readonly logger = new Logger(HitInterceptor.name);
 
-  constructor(private readonly hitAccessor: HitAccessorService) {}
+  constructor(
+    private readonly hitAccessor: HitAccessorService,
+    @InjectMetric(MetricNames.HTTP_REQUEST_DURATION_SECONDS)
+    private readonly httpDuration: Histogram<string>,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') {
@@ -36,6 +43,15 @@ export class HitInterceptor implements NestInterceptor {
 
     response.once('finish', () => {
       const statusCode = response.statusCode;
+      const durationSeconds = (Date.now() - startedAt) / 1000;
+      // route label uses the matched pattern when available to bound
+      // cardinality; falls back to the concrete path.
+      const routeLabel =
+        (request.route as { path?: string } | undefined)?.path ?? route;
+      this.httpDuration.observe(
+        { method, route: routeLabel, status: String(statusCode) },
+        durationSeconds,
+      );
       this.hitAccessor
         .create({
           method,
