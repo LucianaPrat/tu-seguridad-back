@@ -22,7 +22,7 @@ If a tool you're using appends this kind of trailer or footer automatically, str
 - `develop` — integration branch. All feature work merges here first.
 - `feature/*`, `fix/*`, `chore/*` — cut from `main`, descriptive name (e.g. `feature/prisma-schema-and-data-accessors`), PR target is always `develop`.
 
-PR descriptions on this repo are written caveman-full style (short, no filler, technical substance intact) — session-level convention for this project, not a general tool default.
+PR titles and descriptions on this repo are always written in English, caveman-full style (short, no filler, technical substance intact) — session-level convention for this project, not a general tool default. Applies regardless of the language the assistant session itself is conducted in.
 
 ## Setup gotchas
 
