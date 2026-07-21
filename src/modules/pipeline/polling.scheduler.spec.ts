@@ -19,6 +19,8 @@ describe('PollingScheduler', () => {
     addInterval: jest.Mock;
     deleteInterval: jest.Mock;
   };
+  let pollTotal: { inc: jest.Mock };
+  let pollDuration: { observe: jest.Mock };
   let scheduler: PollingScheduler;
 
   beforeEach(() => {
@@ -31,6 +33,8 @@ describe('PollingScheduler', () => {
     pipelineService = { processImage: jest.fn() };
     statusRegistry = { record: jest.fn(), incrementSkipped: jest.fn() };
     schedulerRegistry = { addInterval: jest.fn(), deleteInterval: jest.fn() };
+    pollTotal = { inc: jest.fn() };
+    pollDuration = { observe: jest.fn() };
     scheduler = new PollingScheduler(
       configService as never,
       cameraAccessor as never,
@@ -38,6 +42,8 @@ describe('PollingScheduler', () => {
       pipelineService as never,
       statusRegistry as never,
       schedulerRegistry as never,
+      pollTotal as never,
+      pollDuration as never,
     );
   });
 
@@ -103,6 +109,8 @@ describe('PollingScheduler', () => {
         'camera_01',
         expect.objectContaining({ lastErrorCode: ErrorCode.UPSTREAM_TIMEOUT }),
       );
+      expect(pollTotal.inc).toHaveBeenCalledWith({ status: 'error' });
+      expect(pollDuration.observe).toHaveBeenCalledWith(expect.any(Number));
     });
 
     it('calls processImage with the fetched snapshot on success', async () => {
@@ -113,6 +121,17 @@ describe('PollingScheduler', () => {
       await scheduler.pollOnce('camera_01');
 
       expect(pipelineService.processImage).toHaveBeenCalledWith(camera, buffer);
+      expect(pollTotal.inc).toHaveBeenCalledWith({ status: 'success' });
+      expect(pollDuration.observe).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it('records no poll metric when the camera is unknown or disabled', async () => {
+      cameraAccessor.findById.mockResolvedValue(null);
+
+      await scheduler.pollOnce('camera_missing');
+
+      expect(pollTotal.inc).not.toHaveBeenCalled();
+      expect(pollDuration.observe).not.toHaveBeenCalled();
     });
 
     it('does nothing for an unknown or disabled camera', async () => {

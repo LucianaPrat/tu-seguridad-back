@@ -6,11 +6,16 @@ import { RequestWithUser } from '../guards/jwt-auth.guard';
 
 describe('HitInterceptor', () => {
   let hitAccessor: { create: jest.Mock };
+  let httpDuration: { observe: jest.Mock };
   let interceptor: HitInterceptor;
 
   beforeEach(() => {
     hitAccessor = { create: jest.fn().mockResolvedValue({}) };
-    interceptor = new HitInterceptor(hitAccessor as never);
+    httpDuration = { observe: jest.fn() };
+    interceptor = new HitInterceptor(
+      hitAccessor as never,
+      httpDuration as never,
+    );
   });
 
   function contextFor(
@@ -58,6 +63,14 @@ describe('HitInterceptor', () => {
         userId: 42,
         isError: false,
       }),
+    );
+    expect(httpDuration.observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        route: '/api/v1/cameras',
+        status: '200',
+      }),
+      expect.any(Number),
     );
   });
 

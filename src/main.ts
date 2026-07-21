@@ -43,7 +43,9 @@ async function bootstrap() {
       exceptionFactory: validationExceptionFactory,
     }),
   );
-  app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)'] });
+  app.setGlobalPrefix('api', {
+    exclude: ['docs', 'health/(.*)', 'metrics'],
+  });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();
 
