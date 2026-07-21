@@ -19,6 +19,31 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 - VS Code Prisma extension flags `datasource db { url, shadowDatabaseUrl }` in `schema.prisma` as deprecated (bundled language server validates ahead against Prisma 7 rules, even though installed CLI is `6.19.3` and still supports inline `url`/`shadowDatabaseUrl` today). Prisma 7 splits this in two: Migrate's connection URL moves to `prisma.config.ts`; `PrismaClient` (`src/data/prisma/prisma.service.ts`) stops reading `DATABASE_URL` implicitly and instead takes an `adapter` (direct connection) or `accelerateUrl` in its constructor. Not urgent — revisit when actually bumping to Prisma 7, confirm exact `defineConfig`/adapter API at that time rather than guessing now.
 - MySQL in dev runs as a docker container (`mysql-local`), NOT a systemd service. Don't waste a step on `systemctl start mysql`.
 
+## Production secrets: sops + age
+
+Production secrets are **not** kept as plaintext `.env` on the host. They live git-encrypted with [`sops`](https://github.com/getsops/sops) + [`age`](https://github.com/FiloSottile/age) (both free CLI tools, no running service — ruled out AWS Secrets Manager / Vault for the same cost reason as Redis). The deploy workflow (`.github/workflows/deploy.yml`) decrypts them to `.env` on the host right before `pm2 reload`.
+
+**One-time setup (repo owner, needs prod host access):**
+
+1. Generate an age keypair: `age-keygen -o keys.txt`. It prints the **public** key (`age1...`).
+2. Put the private key **only** on the prod host at `~/.config/sops/age/keys.txt` (never commit it — `.gitignore` blocks `keys.txt`/`*.age`), and also store it as the GitHub Actions secret `SOPS_AGE_KEY` if a runner ever needs to decrypt.
+3. Commit a `.sops.yaml` at the repo root pinning the recipient (replace with the real public key):
+   ```yaml
+   creation_rules:
+     - path_regex: secrets\.enc\.ya?ml$
+       age: age1yourrealpublickeyhere...
+   ```
+4. Create the plaintext secrets file (e.g. `secrets.yaml`, gitignored) with the real production values for `JWT_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`, `FACE_AUTH_TOKEN`, `SNAPSHOT_URL_ENCRYPTION_KEY`, `METRICS_TOKEN`, `SENTRY_DSN`, etc., then encrypt it:
+   ```bash
+   sops -e secrets.yaml > secrets.enc.yaml
+   ```
+   Commit **only** `secrets.enc.yaml`. The plaintext `secrets.yaml` is gitignored; delete it after encrypting.
+5. Required repo secrets for the deploy workflow: `PROD_HOST`, `PROD_SSH_USER`, `PROD_SSH_KEY`, `PROD_APP_DIR` (absolute path of the checkout on the host). Optional repo variable `PROD_APP_PORT` (defaults to `3000` for the health gate).
+
+**Key rotation:** generate a new age keypair, add the new public key as a second recipient in `.sops.yaml`, re-encrypt (`sops updatekeys secrets.enc.yaml`), deploy so the host picks up the new file, then remove the old recipient and re-encrypt again. Never edit `secrets.enc.yaml` by hand — always go through `sops`.
+
+`git grep -iE "(password|secret|token|mysql://)" -- ':!*.example' ':!*.md' ':!*spec*'` must never surface a real value.
+
 ## Working with AI agents on this repo
 
 - Never leave Claude/Codex/agent traces in commits or PRs — human identity only. Full rule: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
