@@ -59,6 +59,12 @@ jobs:
 
       - run: npm run build
 
+      - name: Check OpenAPI contract is up to date
+        run: |
+          npm run openapi:export
+          git diff --exit-code -- openapi.json \
+            || (echo "::error::OpenAPI contract changed. Run 'npm run openapi:export' and commit openapi.json." && exit 1)
+
       - run: npx prisma migrate deploy
 
       - run: npm run prisma:seed
