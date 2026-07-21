@@ -168,6 +168,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `SHADOW_DATABASE_URL` | — | Optional; Prisma's shadow DB for `migrate dev`. Not in the original plan spec, added when it was needed. |
 | `FACE_AUTH_API_URL` / `FACE_AUTH_DOMAIN` / `FACE_AUTH_TOKEN` | — | Upstream face-auth tenant. Required in production. |
 | `DETECT_TIMEOUT_MS` | `10000` | face-auth request timeout. |
+| `SNAPSHOT_URL_ENCRYPTION_KEY` | dev default | 32-byte AES-256-GCM key (64 hex chars or base64) for `snapshotUrl` encryption at rest. Required in production, fails fast at boot if missing/malformed. |
 | `POLLING_ENABLED` | `false` | Master switch for the DVR polling scheduler. |
 | `SNAPSHOT_TIMEOUT_MS` | `5000` | DVR snapshot fetch timeout. |
 | `ENTER_CONSECUTIVE_POLLS` / `EXIT_CONSECUTIVE_POLLS` | `2` / `3` | Occupancy hysteresis thresholds. |
