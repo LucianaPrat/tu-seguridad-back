@@ -59,6 +59,8 @@ export class PollingScheduler
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
     }
+    // In-flight polls are left to finish; only new ticks are stopped.
+    this.logger.log('polling scheduler stopped, no new ticks will start');
   }
 
   async syncIntervals(): Promise<void> {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -16,7 +16,9 @@ import { ZoneEventDto } from './dto/zone-event.dto';
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
-export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class EventsGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   private readonly logger = new Logger(EventsGateway.name);
   // Client ids that passed auth, so the gauge only counts (and decrements)
   // genuinely connected clients — never the ones rejected at handshake.
@@ -57,6 +59,15 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleDisconnect(client: Socket): void {
     if (this.authenticated.delete(client.id)) {
       this.wsConnections.dec();
+    }
+  }
+
+  // On shutdown (SIGINT/SIGTERM via enableShutdownHooks), disconnect every
+  // client cleanly so they get a `disconnect` event instead of a dropped socket.
+  // Runs before PrismaService's teardown thanks to Nest's reverse destroy order.
+  onModuleDestroy(): void {
+    if (this.server) {
+      this.server.disconnectSockets(true);
     }
   }
 
