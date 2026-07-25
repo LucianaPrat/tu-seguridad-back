@@ -169,4 +169,67 @@ describe('FaceAuthClientService', () => {
 
     expect(result).toMatchObject({ ok: false, code: ErrorCode.UPSTREAM_ERROR });
   });
+
+  async function driveOpen(): Promise<void> {
+    httpService.post.mockReturnValue(throwError(() => new Error('boom')));
+    for (let i = 0; i < 5; i++) {
+      await service.detectPersons(Buffer.from('img'), 'a.jpg');
+    }
+  }
+
+  it('opens the circuit after repeated upstream failures', async () => {
+    await driveOpen();
+
+    expect(service.circuitState).toBe('open');
+  });
+
+  it('short-circuits without calling the upstream once open', async () => {
+    await driveOpen();
+    expect(service.circuitState).toBe('open');
+
+    httpService.post.mockClear();
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(httpService.post).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: false,
+      code: ErrorCode.UPSTREAM_ERROR,
+    });
+    if (!result.ok) {
+      expect(result.message).toBe('face-auth circuit open');
+    }
+  });
+
+  it('attempts a single probe call after the reset timeout (half-open)', async () => {
+    jest.useFakeTimers();
+    service = new FaceAuthClientService(
+      httpService as never,
+      configService as never,
+    );
+    try {
+      await driveOpen();
+      expect(service.circuitState).toBe('open');
+
+      jest.advanceTimersByTime(30000);
+      expect(service.circuitState).toBe('halfOpen');
+
+      httpService.post.mockClear();
+      httpService.post.mockReturnValue(
+        of({
+          data: {
+            personsDetected: false,
+            imageWidth: 0,
+            imageHeight: 0,
+            persons: [],
+          },
+        }),
+      );
+      const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+      expect(httpService.post).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ ok: true });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
