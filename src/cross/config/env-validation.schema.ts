@@ -53,4 +53,6 @@ export const envValidationSchema = Joi.object({
     'http://localhost:4318',
   ),
   [EnvNames.OTEL_SERVICE_NAME]: Joi.string().default('tu-seguridad-back'),
+
+  [EnvNames.SENTRY_DSN]: Joi.string().optional(),
 });
