@@ -4,3 +4,12 @@ node_modules/
 coverage/
 .claude/settings.local.json
 .pm2/
+
+# Plaintext secrets never get committed — only the sops-encrypted *.enc.yaml.
+secrets.yaml
+secrets.*.yaml
+!secrets.enc.yaml
+!secrets.*.enc.yaml
+# age private keys
+*.age
+keys.txt
