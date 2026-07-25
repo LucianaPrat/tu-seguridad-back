@@ -1,8 +1,8 @@
 import { INestApplication } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 
-export function setupSwagger(app: INestApplication): void {
-  const config = new DocumentBuilder()
+export function buildSwaggerConfig() {
+  return new DocumentBuilder()
     .setTitle('Tu Seguridad API')
     .setVersion('1.0')
     .addBearerAuth()
@@ -12,7 +12,13 @@ export function setupSwagger(app: INestApplication): void {
     .addTag('events')
     .addTag('health')
     .build();
+}
 
-  const document = SwaggerModule.createDocument(app, config);
+export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
+  return SwaggerModule.createDocument(app, buildSwaggerConfig());
+}
+
+export function setupSwagger(app: INestApplication): void {
+  const document = createOpenApiDocument(app);
   SwaggerModule.setup('docs', app, document);
 }
