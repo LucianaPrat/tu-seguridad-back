@@ -14,4 +14,4 @@ Auto-Clarity: drop caveman for security warnings, irreversible actions, user con
 
 Boundaries: code/commits written normal. PR descriptions on THIS repo: caveman-full (project override, see CONTRIBUTING.md).
 
-Project docs, read before touching code: README.md (quickstart), ARCHITECTURE.md (layering, accessor pattern), CONTRIBUTING.md (branch model, no-AI-trace commit rule), docs/BEST_PRACTICES.md (tooling gotchas), plans/01.setup.md + plans/01.setup.tasks.md (full plan + live status).
+Project docs, read before touching code: README.md (quickstart + framework map under *Observability, resilience & supply chain*), AGENT.md (hard rules + infra-integration conventions), ARCHITECTURE.md (layering, accessor pattern, resilience/observability decisions), CONTRIBUTING.md (branch model, CI checks, no-AI-trace commit rule), docs/BEST_PRACTICES.md (tooling gotchas), plans/01.setup.md + plans/01.setup.tasks.md and plans/02.infra-hardening.md + plans/02.infra-hardening.tasks.md (full plans + live status).
