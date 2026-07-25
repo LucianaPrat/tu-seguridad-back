@@ -24,6 +24,19 @@ If a tool you're using appends this kind of trailer or footer automatically, str
 
 PR titles and descriptions on this repo are always written in English, caveman-full style (short, no filler, technical substance intact) — session-level convention for this project, not a general tool default. Applies regardless of the language the assistant session itself is conducted in.
 
+## CI checks (what runs on every PR)
+
+`.github/workflows/pr-tests.yml` runs, in order, against a throwaway MySQL service:
+
+1. `npm ci`
+2. `npm audit --omit=dev --audit-level=critical` — production-dependency **critical** vulnerabilities block the merge (dev tooling and high transitive advisories don't; those are Dependabot's job). Fix by bumping/replacing the dep, not by silencing the gate.
+3. `npm run lint`
+4. `npm run build`
+5. **OpenAPI drift check** — regenerates `openapi.json` and fails if it differs from the committed file. If it fails: `npm run openapi:export`, commit the result.
+6. `npx prisma migrate deploy` + seed, then `npm run test:all` (unit + integration + e2e).
+
+Dependabot opens **weekly, grouped** dependency-update PRs targeting `develop` — review and merge those like any other PR.
+
 ## Setup gotchas
 
 - Verify git identity before your first commit in a new clone/worktree: `git config user.name` / `user.email` must resolve to the repo-level identity (`danielfrascarelli` / `dsanfra@gmail.com`), not whatever your global git config says.

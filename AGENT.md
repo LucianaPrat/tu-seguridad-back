@@ -24,6 +24,17 @@ Work in this repo is driven by numbered plans under `plans/` (e.g. `plans/01.set
 5. Wire the module into `AppModule`.
 6. If it changes API surface in a way another module cares about (routes, DTOs, WS events), update the API table in `README.md`.
 
+## Infra integrations (plan 02)
+
+Merged infra frameworks and the rules for touching them. Full rationale in [`ARCHITECTURE.md`](ARCHITECTURE.md) → *Resilience & observability*; framework map in `README.md` → *Observability, resilience & supply chain*.
+
+- **OpenAPI contract is a committed artifact.** After ANY change to a DTO, controller route, `@Api*` decorator, or versioning, run `npm run openapi:export` and commit the updated `openapi.json` **in the same commit**. CI regenerates and `diff`s it — a stale file fails the build. The export needs no DB/network (it never calls `app.listen()`).
+- **Opt-in integrations must no-op when their env var is unset.** Sentry (`SENTRY_DSN`), OTel (`OTEL_ENABLED`), and any future metrics/token gate follow this. Never make local dev, tests, or CI require a new external service. Mirror `stringRequiredInProduction` in the Joi schema when a var must be required in prod but optional in dev.
+- **Sentry only reports unexpected errors.** Report new failure signals through the existing `EitherInterceptor` unexpected-500 path — never call `Sentry.captureException` for `Either` failures or `HttpException`s, and add any new sensitive field to both the Pino redaction list and the Sentry `beforeSend` scrub.
+- **face-auth calls go through the `opossum` circuit breaker.** Don't add a second raw path to the upstream that bypasses it. The breaker is global (one upstream); expose breaker-adjacent state on the service, not the per-camera `CameraStatusRegistry`.
+- **Health checks: keep `/health/ready` DB-only.** New external-dependency reachability checks go in `/health/dependencies` (add a Terminus indicator), so a degraded dependency never marks the whole app not-ready.
+- **CI supply-chain gate.** `npm audit --omit=dev --audit-level=critical` runs on every PR. A new **production** dependency carrying a critical advisory blocks the merge — pick a patched version or a different dependency; don't silence the gate.
+
 ## Prisma migrations
 
 Schema change → `npx prisma migrate dev --name <description>` (applies to `DATABASE_URL`, generates the migration) → commit the new file under `prisma/migrations/` alongside the schema change, same commit. Then apply the same migration to the test database: `DATABASE_URL="$DATABASE_URL_TEST" npx prisma migrate deploy`. Never edit a migration file that's already been applied anywhere — add a new one.
@@ -31,4 +42,5 @@ Schema change → `npx prisma migrate dev --name <description>` (applies to `DAT
 ## Before finishing a task
 
 - `npm run build && npm run lint && npm run test:all` all clean.
+- If you changed any DTO/route/`@Api*` decorator: `npm run openapi:export` and commit the updated `openapi.json` (CI diff-checks it).
 - If you touched anything in `src/`, prefer a manual smoke check against the real running app over trusting tests alone for anything user-facing (see [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) for the local MySQL/docker setup this needs).

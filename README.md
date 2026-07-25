@@ -6,7 +6,7 @@ Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md).
 
 ## Status
 
-All 25 setup-plan tasks are done — see [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) for the task-by-task record (what was built, how it was verified, and any deviations). Out-of-scope-for-now items (per-track events, alerting, notifications) are listed under [Roadmap](#roadmap).
+All 25 setup-plan tasks are done — see [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) for the task-by-task record (what was built, how it was verified, and any deviations). A second plan, [`02.infra-hardening`](plans/02.infra-hardening.md), is in progress: dependency scanning, the face-auth circuit breaker, Sentry error tracking, deeper health checks + graceful shutdown, and the OpenAPI contract artifact are **merged** (see [Observability, resilience & supply chain](#observability-resilience--supply-chain)); Prometheus metrics, the deploy pipeline, and `snapshotUrl` encryption + `sops` secrets are still open — live status in [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md). Out-of-scope-for-now items (per-track events, alerting, notifications) are listed under [Roadmap](#roadmap).
 
 ## Stack
 
@@ -20,16 +20,20 @@ All 25 setup-plan tasks are done — see [`plans/01.setup.tasks.md`](plans/01.se
 | Auth | `@nestjs/jwt` (access + refresh), users in MySQL, bcrypt |
 | Rate limiting | `@nestjs/throttler`, global guard, production only |
 | Security | helmet, CORS allowlist, cookie-parser, compression |
-| Health | `@nestjs/terminus` — `/health/live`, `/health/ready` (DB ping) |
+| Health | `@nestjs/terminus` — `/health/live`, `/health/ready` (DB ping), `/health/dependencies` (face-auth reachability) |
 | Logging | `nestjs-pino`, structured JSON, request id, redaction |
 | Tracing | OpenTelemetry, opt-in via `OTEL_ENABLED`, `withSpan` helper |
+| Error tracking | `@sentry/node`, opt-in via `SENTRY_DSN`, unexpected 500s only, secrets scrubbed |
+| Resilience | `opossum` circuit breaker around the face-auth upstream (in-memory, no infra) |
+| API contract | committed `openapi.json`, exported by `scripts/export-openapi.ts`, diff-checked in CI |
+| Supply chain | `npm audit` gate (prod deps, critical) + Dependabot (weekly, targets `develop`) |
 | ORM | Prisma + `@prisma/client`, MySQL, migrations + seed |
 | Outbound HTTP | `@nestjs/axios` (face-auth client, DVR snapshot fetch) |
 | Scheduling | `@nestjs/schedule` (per-camera DVR polling) |
 | WebSockets | `@nestjs/websockets` + socket.io, namespace `/events` |
 | Tests | Jest — unit / integration / e2e (see [Testing](#testing)) |
 | Git hooks | husky + lint-staged + commitlint (Conventional Commits) |
-| Prod | PM2 (`ecosystem.config.js`), fork mode |
+| Prod | PM2 (`ecosystem.config.js`), fork mode, graceful shutdown |
 
 ## Quickstart
 
@@ -65,6 +69,7 @@ Then: `curl http://localhost:3000/docs` for the Swagger UI, or `POST /api/v1/aut
 | `test:cov` | Unit coverage; enforces an 80%-lines floor. |
 | `test:debug` | Attach a debugger to the currently-running Jest process. |
 | `prisma:generate` / `:migrate` / `:deploy` / `:seed` / `:studio` | Prisma CLI shortcuts. |
+| `openapi:export` | Regenerate the committed `openapi.json` from the live API surface (no DB/network). Run after any DTO/route change — CI fails if the committed file is stale. |
 | `pm2:start` / `:stop` / `:logs` | `pm2 start ecosystem.config.js --env production` / stop / tail logs. |
 
 ## API surface
@@ -83,7 +88,8 @@ Everything is prefixed `/api/v1` (global prefix `api` + URI versioning) except `
 | `POST /api/v1/zones/:id/validate` | Dry-run polygon validation → `{valid, violations[]}`, **always** 200. |
 | `GET /api/v1/events` | Filters: `cameraId`, `zoneId`, `eventType`, `from`, `to`, `limit` (default 100, silently clamped to 1000). |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings the database via Terminus. |
-| WS namespace `/events` | JWT in handshake `auth.token`; server emits `zone-event` on every persisted event. |
+| `GET /health/dependencies` | Public. Separate from `ready`: a short-timeout reachability check against the face-auth upstream. A degraded upstream reports here **without** making the whole app not-ready (camera/zone CRUD still works). |
+| WS namespace `/events` | JWT in handshake `auth.token`; server emits `zone-event` on every persisted event. Clients are disconnected cleanly on graceful shutdown. |
 
 Full interactive docs: `GET /docs` (Swagger UI), machine-readable spec at `/docs-json`.
 
@@ -110,6 +116,8 @@ JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`
 
 `anchor` is already the normalized foot point (bbox bottom-center) — used directly for point-in-polygon zone evaluation. Upstream failures map to `UPSTREAM_TIMEOUT` or `UPSTREAM_ERROR` (with the upstream HTTP status in the message, never the `Fa-Token` value). The endpoint is IP-throttled upstream — never poll faster than `pollingIntervalSeconds` per camera.
 
+The call is wrapped in an [`opossum`](https://github.com/nodeshift/opossum) **circuit breaker** (in-memory, one shared breaker per process — the upstream is a single tenant). After the failure threshold (50% over the rolling window, `resetTimeout` 30s) the breaker opens and short-circuits to `UPSTREAM_ERROR 'face-auth circuit open'` **without** attempting the call — so a down/throttled upstream stops eating full `DETECT_TIMEOUT_MS` waits and stops being hammered. A single probe is allowed after the reset (half-open). Open/half-open/close transitions are logged; the current state is readable via `FaceAuthClientService.circuitState`.
+
 ## Detection pipeline
 
 `PipelineService.processImage` (`src/modules/pipeline/`) is the single place the full loop runs, whether triggered automatically or manually:
@@ -122,6 +130,23 @@ JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`
 6. `CameraStatusRegistry` records the outcome (`lastPolledAt`, `lastSuccessAt`, `lastErrorCode`, `lastLatencyMs`, `lastPersonsDetected`, per-zone occupancy) — surfaced at `GET /cameras/:id/status`.
 
 `PollingScheduler` drives step 1–6 automatically on a per-camera interval when `POLLING_ENABLED=true` (off by default in dev). It skips a tick if the previous one for that camera is still in flight (counted, not silently dropped) and re-syncs its registered intervals every 30s to pick up camera CRUD changes. `POST /cameras/:id/analyze` runs the exact same `processImage` synchronously against an uploaded image — the manual path for when the DVR itself isn't reachable, or for testing without waiting on the poll cadence.
+
+## Observability, resilience & supply chain
+
+Infra concerns are handled by the frameworks below. **Every external integration is opt-in and no-ops cleanly when its env var is unset** — the same posture as `OTEL_ENABLED`. Local dev never depends on a running external service; production turns each on via env.
+
+| Concern | Framework / tool | Where | How it's wired |
+|---|---|---|---|
+| Structured logging | `nestjs-pino` + `pino-http` | `src/cross/config/logger.options.ts` | JSON logs, per-request id, `snapshotUrl`/`Authorization`/`Fa-Token` redaction. Always on. |
+| Tracing | OpenTelemetry SDK | `src/observability/tracing.ts`, `tracing.helpers.ts` | Opt-in via `OTEL_ENABLED`. Loaded **before** `ConfigModule` (reads `dotenv` itself). `withSpan(name, attrs, fn)` wraps spans; a no-op when disabled. |
+| Error tracking | `@sentry/node` | `src/observability/sentry.ts`, `main.ts`, `either.interceptor.ts` | Opt-in via `SENTRY_DSN`. `initSentry()` runs before `NestFactory.create`. `Sentry.captureException` fires **only** on the interceptor's unexpected-500 branch — never for `Either` failures or mapped `HttpException` (no routine 4xx noise). `beforeSend`/`beforeBreadcrumb` scrub `snapshotUrl` + auth headers. Unset DSN = zero network activity. |
+| Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
+| Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so a degraded upstream never marks the app not-ready). All `@Public()`, version-neutral. |
+| Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): the scheduler stops issuing new poll ticks and the WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before the shared `DataModule`) guarantees it. In-flight polls are left to finish, not killed. |
+| API contract | `@nestjs/swagger` + a committed artifact | `scripts/export-openapi.ts`, `openapi.json` | `openapi.json` is a diffable, version-controlled artifact. CI regenerates it and fails on drift — run `npm run openapi:export` and commit after any DTO/route change. Live UI still at `/docs`, raw at `/docs-json`. |
+| Supply chain | `npm audit` + Dependabot | `.github/workflows/pr-tests.yml`, `.github/dependabot.yml` | CI gate `npm audit --omit=dev --audit-level=critical` blocks only production-dependency **critical** vulnerabilities (dev tooling doesn't ship; high transitive advisories churn constantly). Dependabot opens weekly grouped update PRs against `develop` for the rest. |
+
+> **In flight** (open PRs, tracked in [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), not yet on `develop`): Prometheus `/metrics` (T04), the SSH/PM2 deploy pipeline (T02), and `snapshotUrl` field encryption at rest + `sops`/`age` secrets (T06). Check [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) for live status before assuming any of these is present.
 
 ## Testing
 
@@ -148,7 +173,7 @@ npm run pm2:logs
 npm run pm2:stop
 ```
 
-`ecosystem.config.js` runs in **fork** mode, never cluster — socket.io connections and the in-memory occupancy/status state don't survive being split across worker processes. Autorestart is on, capped at 10 restarts, with a 512M memory ceiling and a 3s restart delay. A graceful `SIGINT`/`SIGTERM` logs `Shutting down gracefully, disconnecting Prisma` before PM2 restarts the process.
+`ecosystem.config.js` runs in **fork** mode, never cluster — socket.io connections and the in-memory occupancy/status state don't survive being split across worker processes. Autorestart is on, capped at 10 restarts, with a 512M memory ceiling and a 3s restart delay. On `SIGINT`/`SIGTERM` the shutdown is ordered (see [Graceful shutdown](#observability-resilience--supply-chain)): the polling scheduler stops (`polling scheduler stopped, no new ticks will start`) and WS clients get a clean `disconnect`, **then** Prisma disconnects (`Shutting down gracefully, disconnecting Prisma`), before PM2 restarts the process. Note: `pm2 reload` in fork mode with `instances: 1` is a fast restart, not a zero-downtime swap — acceptable at current scale.
 
 ## Environment variables
 
@@ -183,6 +208,8 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 |---|---|
 | [`plans/01.setup.md`](plans/01.setup.md) | The full 25-task setup plan: domain model, API surface, env vars, per-task DoD. |
 | [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) | Live status per task, with how each one was actually verified. |
+| [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md) | Infra plan: CD, resilience, observability, security. Per-task DoD. |
+| [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) | Live status + deviations for the infra tasks (what's merged vs open). |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Layering rules, Either pattern, accessor conventions, deviations from the plan. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branch model, PR flow, commit rules, git/gh setup gotchas. |
 | [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) | Tooling/ops gotchas learned building this repo. |
@@ -190,9 +217,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 
 ## Roadmap
 
-Out of scope for this setup plan, left for future plans (see `plans/01.setup.md` §10):
-
-- **02** — DVR snapshot reliability (retries, backoff, reconnection metrics), per-camera FPS tuning, camera status persistence.
+- **02 — infra hardening** ([`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), in progress): CD pipeline, circuit breaker, Prometheus metrics, Sentry, dependency scanning, secrets + `snapshotUrl` encryption, deeper health checks + graceful shutdown, OpenAPI contract. Explicitly **deferred** in that plan: Docker, and anything Redis-dependent (distributed throttler storage, cache, socket.io adapter, BullMQ) — cost-prohibitive at current scale.
 - **03** — Per-track events (`track_id`) once face-auth exposes tracking; `PERSON_UPDATED_IN_ZONE`; movement-vs-presence rules.
 - **04** — Business layer: alert rules, schedules, notifications, clip/snapshot storage, authorization of known persons.
-- Deploy pipeline, nginx reverse proxy, throttler Redis storage (if ever multi-instance), snapshotUrl encryption at rest.
+- DVR snapshot reliability (retries, backoff, reconnection metrics), per-camera FPS tuning.
