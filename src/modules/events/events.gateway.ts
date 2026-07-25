@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -12,7 +12,7 @@ import { ZoneEventDto } from './dto/zone-event.dto';
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
-export class EventsGateway implements OnGatewayConnection {
+export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
   private readonly logger = new Logger(EventsGateway.name);
 
   @WebSocketServer()
@@ -38,6 +38,15 @@ export class EventsGateway implements OnGatewayConnection {
     } catch {
       this.logger.warn(`Client ${client.id} rejected: invalid token`);
       client.disconnect(true);
+    }
+  }
+
+  // On shutdown (SIGINT/SIGTERM via enableShutdownHooks), disconnect every
+  // client cleanly so they get a `disconnect` event instead of a dropped socket.
+  // Runs before PrismaService's teardown thanks to Nest's reverse destroy order.
+  onModuleDestroy(): void {
+    if (this.server) {
+      this.server.disconnectSockets(true);
     }
   }
 
