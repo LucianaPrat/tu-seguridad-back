@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
+import { Counter, Histogram } from 'prom-client';
 import { EnvNames } from '../../cross/common/constants';
+import { MetricNames } from '../../cross/metrics/metric-names';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
 import { PipelineService } from './pipeline.service';
@@ -31,6 +34,10 @@ export class PollingScheduler
     private readonly pipelineService: PipelineService,
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly schedulerRegistry: SchedulerRegistry,
+    @InjectMetric(MetricNames.PIPELINE_POLL_TOTAL)
+    private readonly pollTotal: Counter<string>,
+    @InjectMetric(MetricNames.PIPELINE_POLL_DURATION_SECONDS)
+    private readonly pollDuration: Histogram<string>,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -96,6 +103,8 @@ export class PollingScheduler
     }
 
     this.inFlight.add(cameraId);
+    const startedAt = Date.now();
+    let status: 'success' | 'error' | undefined;
     try {
       const camera = await this.cameraAccessor.findById(cameraId);
       if (!camera || !camera.enabled) {
@@ -104,6 +113,7 @@ export class PollingScheduler
 
       const snapshot = await this.snapshotService.fetch(camera);
       if (!snapshot.ok) {
+        status = 'error';
         this.statusRegistry.record(cameraId, {
           lastErrorAt: new Date(),
           lastErrorCode: snapshot.code,
@@ -112,8 +122,13 @@ export class PollingScheduler
       }
 
       await this.pipelineService.processImage(camera, snapshot.data);
+      status = 'success';
     } finally {
       this.inFlight.delete(cameraId);
+      if (status) {
+        this.pollDuration.observe((Date.now() - startedAt) / 1000);
+        this.pollTotal.inc({ status });
+      }
     }
   }
 

@@ -55,4 +55,12 @@ export const envValidationSchema = Joi.object({
   [EnvNames.OTEL_SERVICE_NAME]: Joi.string().default('tu-seguridad-back'),
 
   [EnvNames.SENTRY_DSN]: Joi.string().optional(),
+
+  // Shared secret gating GET /metrics. Required in production (no reverse proxy
+  // to restrict it); unset in dev leaves the endpoint open for convenience.
+  [EnvNames.METRICS_TOKEN]: Joi.string().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional(),
+  }),
 });

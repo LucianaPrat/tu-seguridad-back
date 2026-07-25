@@ -15,6 +15,20 @@
         ]
       }
     },
+    "/metrics": {
+      "get": {
+        "operationId": "MetricsController_index",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "AuthController_login_v1",

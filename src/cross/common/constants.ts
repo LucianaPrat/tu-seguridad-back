@@ -33,6 +33,8 @@ export const EnvNames = {
   OTEL_SERVICE_NAME: 'OTEL_SERVICE_NAME',
 
   SENTRY_DSN: 'SENTRY_DSN',
+
+  METRICS_TOKEN: 'METRICS_TOKEN',
 } as const;
 
 export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
