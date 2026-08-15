@@ -10,6 +10,7 @@ import {
   RefreshJwtPayload,
 } from '../../cross/common/jwt-payload.type';
 import { UserAccessorService } from '../../data/accessors/user.accessor';
+import { MeDto } from './dto/me.dto';
 import { TokenPairDto } from './dto/token-pair.dto';
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
@@ -67,6 +68,29 @@ export class AuthService {
       role: user.role,
     };
     return buildData(this.issueTokenPair(freshPayload));
+  }
+
+  async me(email: string): Promise<Either<MeDto>> {
+    const user = await this.userAccessor.findByEmail(email);
+    if (!user) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
+
+    return buildData({ id: user.id, email: user.email, role: user.role });
+  }
+
+  /**
+   * Cookie lifetime read back off the token itself, so it can never drift from
+   * JWT_REFRESH_EXPIRES_IN.
+   */
+  refreshCookieMaxAgeMs(refreshToken: string): number {
+    const decoded = this.jwtService.decode<{ exp?: number } | null>(
+      refreshToken,
+    );
+    if (!decoded?.exp) {
+      return 0;
+    }
+    return Math.max(0, decoded.exp * 1000 - Date.now());
   }
 
   private issueTokenPair(payload: JwtPayload): TokenPairDto {

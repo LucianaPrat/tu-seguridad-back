@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
+import cookieParser from 'cookie-parser';
 import { Server } from 'http';
 import { AddressInfo } from 'net';
 import { AppModule } from '../../src/app.module';
@@ -59,6 +60,9 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
 
   const app = moduleRef.createNestApplication();
 
+  // The refresh route reads its token off req.cookies, so the parser is not
+  // optional here the way the other main.ts middleware is.
+  app.use(cookieParser());
   app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)'] });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(
