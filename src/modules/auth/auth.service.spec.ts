@@ -15,13 +15,13 @@ describe('AuthService', () => {
   };
 
   let userAccessor: { findByEmail: jest.Mock };
-  let jwtService: { sign: jest.Mock; verify: jest.Mock };
+  let jwtService: { sign: jest.Mock; verify: jest.Mock; decode: jest.Mock };
   let configService: { get: jest.Mock };
   let service: AuthService;
 
   beforeEach(() => {
     userAccessor = { findByEmail: jest.fn() };
-    jwtService = { sign: jest.fn(), verify: jest.fn() };
+    jwtService = { sign: jest.fn(), verify: jest.fn(), decode: jest.fn() };
     configService = {
       get: jest.fn((key: string) => {
         const values: Record<string, string> = {
@@ -149,6 +149,53 @@ describe('AuthService', () => {
         expect(result.data.accessToken).toBe('signed-with-access-secret');
         expect(result.data.refreshToken).toBe('signed-with-refresh-secret');
       }
+    });
+  });
+
+  describe('me', () => {
+    it('returns the public profile fields for a known email', async () => {
+      userAccessor.findByEmail.mockResolvedValue(user);
+
+      const result = await service.me(user.email);
+
+      expect(result).toEqual({
+        ok: true,
+        data: { id: user.id, email: user.email, role: user.role },
+      });
+    });
+
+    it('returns UNAUTHORIZED when the user is gone', async () => {
+      userAccessor.findByEmail.mockResolvedValue(null);
+
+      const result = await service.me('ghost@example.com');
+
+      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+  });
+
+  describe('refreshCookieMaxAgeMs', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('derives the lifetime from the token exp claim', () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      jwtService.decode.mockReturnValue({ exp: 1_600 });
+
+      expect(service.refreshCookieMaxAgeMs('token')).toBe(600_000);
+    });
+
+    it('returns 0 for a token with no exp claim', () => {
+      jwtService.decode.mockReturnValue({});
+
+      expect(service.refreshCookieMaxAgeMs('token')).toBe(0);
+    });
+
+    it('never goes negative for an already-expired token', () => {
+      jest.spyOn(Date, 'now').mockReturnValue(2_000_000);
+      jwtService.decode.mockReturnValue({ exp: 1_000 });
+
+      expect(service.refreshCookieMaxAgeMs('token')).toBe(0);
     });
   });
 });

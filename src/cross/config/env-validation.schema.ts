@@ -13,7 +13,9 @@ export const envValidationSchema = Joi.object({
     .valid('development', 'test', 'production')
     .default('development'),
   [EnvNames.PORT]: Joi.number().port().default(3000),
-  [EnvNames.CORS_ORIGINS]: Joi.string().default('http://localhost:5173'),
+  [EnvNames.CORS_ORIGINS]: Joi.string().default(
+    'http://localhost:5173,http://localhost:8443',
+  ),
   [EnvNames.LOG_LEVEL]: Joi.string().default('info'),
 
   [EnvNames.JWT_SECRET]: stringRequiredInProduction('change-me'),

@@ -3,7 +3,6 @@ import request from 'supertest';
 
 interface LoginResponseBody {
   accessToken: string;
-  refreshToken: string;
 }
 
 /** Logs in as the seeded admin over the real HTTP login route. */
