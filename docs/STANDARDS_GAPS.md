@@ -31,6 +31,7 @@ written reason. It does not leave by being forgotten.
 | `no-floating-promises` and `no-unsafe-argument` are `warn` | NESTJS.md — both MUST be errors |
 | `tsconfig.json` lacks `noUncheckedIndexedAccess` and `noImplicitOverride` | NESTJS.md — both MUST be enabled |
 | `package.json` has no `engines.node` and no `packageManager` | NODE.md — the version MUST be pinned in every place that selects it, and all of them MUST agree with `.nvmrc` |
+| No `paths` aliases in `tsconfig.json`, none mirrored in the Jest `moduleNameMapper`, and 53 imports in `src/` climb two or more directories | NESTJS.md — aliases MUST be declared and mirrored, and a relative import climbing more than one directory MUST NOT be used |
 
 ## Application
 

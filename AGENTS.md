@@ -17,6 +17,8 @@ local copy and link to the owner.
 - Test runner: Jest, three levels (see [Testing](#testing))
 - Deployment target: single host, PM2 fork mode (`ecosystem.config.js`)
 - Upstream: face-auth detection API, single tenant — see [`README.md`](README.md)
+- Cross-cutting directory: `src/cross/` — guards, interceptors, decorators, config, errors. The
+  central standard leaves the name to the repo and requires it be declared here.
 - Prose language: English for code, comments, commit messages, and documentation. PR titles and
   bodies: English, caveman-full style (terse, no filler, technical substance intact). User-facing
   API copy: English.
@@ -69,7 +71,6 @@ how it was verified) immediately after finishing a task, before moving to the ne
 Everything below is a repo decision the central standards explicitly leave to the repo, or a
 project fact no standard can know.
 
-- **Cross-cutting directory is `src/cross/`**, not `src/common/`. See [Overrides](#overrides).
 - **Error strategy: typed results.** Services return `Either<T>` (`src/cross/errors/either.ts`),
   controllers return the `Either` as-is, the global `EitherInterceptor` unwraps it into a response or
   throws a mapped `HttpException`. No `try/catch` in controllers. This is the "pick one strategy and
@@ -122,12 +123,6 @@ never what gets committed:
 - Drop the style for security warnings and irreversible-action confirmations.
 
 ## Overrides
-
-- Replaces stacks/NESTJS.md "src/common/ cross-cutting: guards, interceptors, decorators, config, errors".
-  This repo names that directory `src/cross/`.
-  Reason: the layout predates the standard, the name is used by every import path in `src/`, and
-  renaming it would touch every file for no behavioral gain. The rule itself — one cross-cutting
-  directory, importable from anywhere, never imported back into by `data/` — is followed unchanged.
 
 - Replaces standards/GIT.md "Hooks MUST be committed under .githooks/ and installed with git config core.hooksPath .githooks".
   Hooks live under `.husky/`, installed by husky's `prepare` script.
