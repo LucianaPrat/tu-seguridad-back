@@ -1,47 +1,38 @@
 # Contributing
 
-## Commit and PR authorship
+The contributor workflow, branch model, commit format, authorship rules, PR shape, and review rules
+are central. They are not repeated here:
 
-Every commit and PR authored as a human contributor — regardless of what tools (AI assistants, code generators, IDE agents, etc.) helped produce the change:
+- Workflow, task to merged change: [`.standards/standards/CONTRIBUTING.md`](.standards/standards/CONTRIBUTING.md)
+- Branches, commits, authorship, no-agent-traces: [`.standards/standards/GIT.md`](.standards/standards/GIT.md)
+- PR size, description fields, approvals: [`.standards/standards/PR.md`](.standards/standards/PR.md)
+- Check names and when each runs: [`.standards/standards/CHECKS.md`](.standards/standards/CHECKS.md)
 
-- No commit message, commit trailer, PR title, or PR description may reference Claude, Codex, Copilot, or any other AI agent/assistant.
-- No `Co-Authored-By: <agent>` trailers, no session links, no "Generated with ..." footers.
-- Commits authored using repository's configured git identity (`git config user.name` / `user.email`), never an agent's identity.
+Read order and precedence: [`.standards/README.md`](.standards/README.md). Project facts, git
+identity, declared overrides, and this repo's check commands: [`AGENTS.md`](AGENTS.md).
 
-If a tool you're using appends this kind of trailer or footer automatically, strip it before committing/pushing. If already committed but not yet pushed or opened as a PR, rewrite commit (e.g. `git commit --amend`, or `git reset --soft` + recommit) to remove it before it goes any further.
+The standards are consumed as a git submodule. A fresh clone or a new worktree has an empty
+`.standards/` until you run:
 
-## Commit style
+```bash
+git submodule update --init
+```
 
-- Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`, `docs:`, `ci:`).
-- One logical change per commit.
-- All commit messages, code, and comments in English.
+## What is specific to this repo
 
-## Branch model
+- **PR titles and bodies are written caveman-full** — English, terse, no filler, technical substance
+  intact. Repo convention, not a tool default. Declared in [`AGENTS.md`](AGENTS.md).
+- **CI**, `.github/workflows/pr-tests.yml`, runs against a throwaway MySQL 8 service container:
+  `npm ci` → `npm audit --omit=dev --audit-level=critical` → `npm run lint` → `npm run build` →
+  OpenAPI drift check → `npx prisma migrate deploy` + seed → `npm run test:all`.
+  The audit gate's scope and the OpenAPI drift check are stack-specific additions on top of
+  [`.standards/standards/DELIVERY.md`](.standards/standards/DELIVERY.md); where this pipeline still
+  falls short of the canonical order and check set is recorded in
+  [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md).
+- **OpenAPI drift**: if that step fails, run `npm run openapi:export` and commit `openapi.json`.
+- **Dependabot** opens weekly grouped dependency PRs targeting `develop`. Review and merge them like
+  any other PR; intake rules are in
+  [`.standards/standards/DEPENDENCIES.md`](.standards/standards/DEPENDENCIES.md).
 
-- `main` — production. Never receives a feature branch directly, ever.
-- `develop` — integration branch. All feature work merges here first.
-- `feature/*`, `fix/*`, `chore/*` — cut from `main`, descriptive name (e.g. `feature/prisma-schema-and-data-accessors`), PR target always `develop`.
-
-PR titles and descriptions on this repo always written in English, caveman-full style (short, no filler, technical substance intact) — session-level convention for this project, not a general tool default. Applies regardless of language the assistant session itself is conducted in.
-
-## CI checks (what runs on every PR)
-
-`.github/workflows/pr-tests.yml` runs, in order, against a throwaway MySQL service:
-
-1. `npm ci`
-2. `npm audit --omit=dev --audit-level=critical` — production-dependency **critical** vulnerabilities block merge (dev tooling and high transitive advisories don't; those are Dependabot's job). Fix by bumping/replacing dep, not by silencing gate.
-3. `npm run lint`
-4. `npm run build`
-5. **OpenAPI drift check** — regenerates `openapi.json` and fails if it differs from committed file. If it fails: `npm run openapi:export`, commit result.
-6. `npx prisma migrate deploy` + seed, then `npm run test:all` (unit + integration + e2e).
-
-Dependabot opens **weekly, grouped** dependency-update PRs targeting `develop` — review and merge those like any other PR.
-
-## Setup gotchas
-
-- Verify git identity before your first commit in a new clone/worktree: `git config user.name` / `user.email` must resolve to repo-level identity (`danielfrascarelli` / `dsanfra@gmail.com`), not whatever your global git config says.
-- `gh` may have more than one account logged in. Confirm push access before pushing: `gh repo view LucianaPrat/tu-seguridad-back --json viewerPermission`. `READ` means switch account: `gh auth switch --user danielfrascarelli`.
-- GitHub repo's canonical casing is `LucianaPrat/tu-seguridad-back`. `gh api`-backed commands need that exact case or 404 — `git push`/`clone` redirect fine regardless of case.
-- `git worktree add` only checks out committed history. `.env` and any other untracked/uncommitted work do NOT come along automatically — copy them in by hand before running anything that needs them in a new worktree.
-
-More tooling gotchas (Prisma, Jest, general dev loop): [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+Setup gotchas — git identity in a new clone or worktree, `gh` account switching, the repo's canonical
+GitHub casing, Prisma and Jest traps: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
