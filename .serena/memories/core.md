@@ -1,11 +1,14 @@
 # Core
 
-NestJS backend, TypeScript, Prisma/MySQL. Single tool-agnostic agent-conventions doc:
-`AGENT.md` (repo root) — read it directly for hard rules (layering, `Either` pattern, env
-access, test suffixes, commit rules, module checklist, Prisma migration workflow).
-`ARCHITECTURE.md` has the reasoning behind those rules. `CONTRIBUTING.md` has commit/PR
-authorship and branch model. Do not duplicate their content here — these memories add
-structure/commands `AGENT.md` doesn't spell out.
+NestJS backend, TypeScript, Prisma/MySQL. Rules are two-layered:
+`.standards/` (git submodule, central engineering standards — layering, error strategy,
+config, test shape, commits, CI, security) and `AGENTS.md` (repo root — project facts, git
+identity, `Applicable standards` map, check commands, repo-specific rules, declared
+overrides). Read `AGENTS.md` first, then the central docs it maps to.
+`ARCHITECTURE.md` has the reasoning behind the repo's own decisions;
+`docs/STANDARDS_GAPS.md` lists where the repo does not meet the standards yet.
+Do not duplicate their content here — these memories add structure/commands those docs
+don't spell out.
 
 ## Source map
 

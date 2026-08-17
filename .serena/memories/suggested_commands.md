@@ -7,7 +7,7 @@
 - `npm run lint` — eslint over `src,apps,libs,test`, auto-fix.
 - `npm run format` — prettier write on `src/**/*.ts` and `test/**/*.ts`.
 
-## Tests (three tiers, see `AGENT.md` for suffix meaning)
+## Tests (three tiers, see `.standards/stacks/NESTJS.md` §Testing for suffix meaning)
 - `npm test` — unit only (`*.spec.ts`), excludes `.int-spec`/`.e2e-spec`.
 - `npm run test:int` — integration (`*.int-spec.ts`), real test DB, runs via
   `test/jest-int.json` (`rootDir` resolves to repo root, not `test/`).
@@ -22,10 +22,10 @@
 - `npm run prisma:generate` / `prisma:studio` / `prisma:seed`.
 - Never edit an already-applied migration file — add a new one.
 
-## Git / gh (Linux-specific gotchas, not generic)
-- Repo git identity is set at repo level, separate from global config — verify
-  `git config user.name`/`user.email` resolve to `danielfrascarelli`/`dsanfra@gmail.com`
-  before first commit in a new clone/worktree.
+## Git / gh (repo-specific gotchas, not generic)
+- Identity to verify before the first commit in a new clone/worktree is declared in
+  `AGENTS.md`; the rule itself is `.standards/standards/GIT.md` §Authorship.
+- `git submodule update --init` — `.standards/` is empty in a fresh clone or worktree.
 - `gh repo view LucianaPrat/tu-seguridad-back --json viewerPermission` to confirm push
   access before pushing; `READ` means `gh auth switch --user danielfrascarelli`.
   `gh api`-backed commands need exact repo casing `LucianaPrat/tu-seguridad-back`;

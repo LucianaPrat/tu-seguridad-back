@@ -2,7 +2,7 @@
 
 Backend for "person detection in restricted zones" system. 8 home cameras behind DVR/NVR. Owns camera/zone config (MySQL), detection-pipeline orchestration, zone evaluation (point-in-polygon + hysteresis), technical events, live event push to frontend over WebSocket. Person detection delegated to external upstream API ([face-auth](#face-auth-upstream-contract)) — backend sends snapshots, gets back bounding boxes + precomputed foot-point anchor.
 
-Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md). Live status of every task: [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md). Conventions + layering rules: [`ARCHITECTURE.md`](ARCHITECTURE.md). Branch model, PR flow, git/gh setup: [`CONTRIBUTING.md`](CONTRIBUTING.md). Tooling/ops gotchas: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+Engineering rules are central, consumed as a submodule at [`.standards/`](.standards/README.md) (`git submodule update --init` in a fresh clone or worktree). This repo's own facts, standards map, and declared overrides: [`AGENTS.md`](AGENTS.md). Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md). Live status of every task: [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md). Design decisions: [`ARCHITECTURE.md`](ARCHITECTURE.md). Tooling/ops gotchas: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
 
 ## Status
 
@@ -55,6 +55,8 @@ Then: `curl http://localhost:3000/docs` for Swagger UI, or `POST /api/v1/auth/lo
 
 ## npm scripts
 
+Which of these map to the canonical check names (`format`, `lint`, `typecheck`, `test`, `build`, `security`), and which are still missing: [`AGENTS.md`](AGENTS.md) → *Checks*.
+
 | Script | What it does |
 |---|---|
 | `start` / `start:dev` / `start:debug` | Run app: plain, watch mode, watch mode + inspector on `0.0.0.0:9229`. |
@@ -74,12 +76,14 @@ Then: `curl http://localhost:3000/docs` for Swagger UI, or `POST /api/v1/auth/lo
 
 ## API surface
 
-Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/docs*` and `/health/*` — version-neutral, unprefixed. Everything needs bearer JWT except login, refresh, health, docs.
+Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/docs*` and `/health/*` — version-neutral, unprefixed. Everything needs bearer JWT except login, refresh, logout, health, docs.
 
 | Method & path | Notes |
 |---|---|
-| `POST /api/v1/auth/login` | Public. Email+password → `{accessToken, refreshToken}`. |
-| `POST /api/v1/auth/refresh` | Public. Rotates token pair. |
+| `POST /api/v1/auth/login` | Public. Email+password → `{accessToken}` in the body; refresh token set as an `httpOnly`, path-scoped cookie, never returned in the body. |
+| `POST /api/v1/auth/refresh` | Public. Reads the refresh cookie — no body fallback — rotates the pair and re-sets the cookie. |
+| `POST /api/v1/auth/logout` | Public. Clears the refresh cookie, 204. |
+| `GET /api/v1/auth/me` | Bearer. Current user from the access-token payload. |
 | `GET/POST /api/v1/cameras`, `GET/PUT/DELETE /api/v1/cameras/:id` | CRUD. List masks `snapshotUrl` as `"***"`; detail returns full. |
 | `GET /api/v1/cameras/:id/status` | Pipeline status: last poll/success/error, latency, occupancy per zone. |
 | `POST /api/v1/cameras/:id/analyze` | Multipart `file` upload (max 10MB): runs full detection pipeline synchronously on image — manual-test path when DVR unreachable. |
@@ -95,7 +99,7 @@ Full interactive docs: `GET /docs` (Swagger UI), machine-readable spec at `/docs
 
 ## Auth model
 
-JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`/`JWT_REFRESH_EXPIRES_IN`). Global `JwtAuthGuard` protects every route by default; `@Public()` opts route out (login, refresh, health, docs, scaffold root route). `@CurrentUser()` reads JWT payload attached to request. Cross-token misuse rejected both directions — refresh token used as bearer access token fails signature verification (different secret) plus explicit `type` check; access token presented to `/auth/refresh` fails same `type` check other way.
+JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`/`JWT_REFRESH_EXPIRES_IN`). The refresh token travels **only** as an `httpOnly`, path-scoped cookie (`secure` in production), with `maxAge` derived from the token's own `exp` — never in a response body, and `/auth/refresh` accepts no body fallback. Global `JwtAuthGuard` protects every route by default; `@Public()` opts route out (login, refresh, logout, health, docs, scaffold root route). `@CurrentUser()` reads JWT payload attached to request. Cross-token misuse rejected both directions — refresh token used as bearer access token fails signature verification (different secret) plus explicit `type` check; access token presented to `/auth/refresh` fails same `type` check other way.
 
 ## face-auth upstream contract
 
@@ -210,10 +214,13 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) | Live status per task, how each verified. |
 | [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md) | Infra plan: CD, resilience, observability, security. Per-task DoD. |
 | [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) | Live status + deviations for infra tasks (merged vs open). |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Layering rules, Either pattern, accessor conventions, deviations from plan. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branch model, PR flow, commit rules, git/gh setup gotchas. |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Decisions behind the layering: accessor conventions, resilience/observability choices, deviations from plan. |
+| [`AGENTS.md`](AGENTS.md) | Project facts, git identity, `Applicable standards` map, check commands, repo-specific rules, declared overrides. Read this before the central standards. |
+| [`.standards/`](.standards/README.md) | Central engineering standards, consumed as a submodule. Read order, precedence, per-stack rules. Never edited from here. |
+| [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md) | Where this repo does not meet the central standards yet, and the fix for each. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Pointers into the central workflow + what this repo's CI actually runs. |
 | [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) | Tooling/ops gotchas learned building this repo. |
-| [`CLAUDE.md`](CLAUDE.md) / [`AGENT.md`](AGENT.md) | Conventions for AI coding agents in this repo. |
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code specific notes on top of `AGENTS.md`. |
 
 ## Roadmap
 
