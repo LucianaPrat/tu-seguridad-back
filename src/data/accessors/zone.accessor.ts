@@ -1,31 +1,71 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, Zone } from '@prisma/client';
+import { MonitorZone, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class ZoneAccessorService {
+export class MonitorZoneAccessorService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findByCamera(cameraId: string): Promise<Zone[]> {
-    return this.prisma.zone.findMany({
-      where: { cameraId },
+  findByCamera(spaceId: string, cameraId: string): Promise<MonitorZone[]> {
+    return this.prisma.monitorZone.findMany({
+      where: {
+        cameraId,
+        deletedAt: null,
+        camera: { dvr: { spaceId }, deletedAt: null },
+      },
       orderBy: { id: 'asc' },
     });
   }
 
-  findById(id: string): Promise<Zone | null> {
-    return this.prisma.zone.findUnique({ where: { id } });
+  findById(spaceId: string, id: string): Promise<MonitorZone | null> {
+    return this.prisma.monitorZone.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        camera: { dvr: { spaceId }, deletedAt: null },
+      },
+    });
   }
 
-  create(data: Prisma.ZoneUncheckedCreateInput): Promise<Zone> {
-    return this.prisma.zone.create({ data });
+  async create(
+    spaceId: string,
+    data: Prisma.MonitorZoneUncheckedCreateInput,
+  ): Promise<MonitorZone | null> {
+    const camera = await this.prisma.camera.findFirst({
+      where: { id: data.cameraId, deletedAt: null, dvr: { spaceId } },
+      select: { id: true },
+    });
+    if (!camera) {
+      return null;
+    }
+    return this.prisma.monitorZone.create({ data });
   }
 
-  update(id: string, data: Prisma.ZoneUncheckedUpdateInput): Promise<Zone> {
-    return this.prisma.zone.update({ where: { id }, data });
+  async update(
+    spaceId: string,
+    id: string,
+    data: Prisma.MonitorZoneUpdateManyMutationInput,
+  ): Promise<MonitorZone | null> {
+    const result = await this.prisma.monitorZone.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        camera: { dvr: { spaceId }, deletedAt: null },
+      },
+      data,
+    });
+    return result.count === 1 ? this.findById(spaceId, id) : null;
   }
 
-  delete(id: string): Promise<Zone> {
-    return this.prisma.zone.delete({ where: { id } });
+  async softDelete(spaceId: string, id: string): Promise<boolean> {
+    const result = await this.prisma.monitorZone.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        camera: { dvr: { spaceId }, deletedAt: null },
+      },
+      data: { deletedAt: new Date() },
+    });
+    return result.count === 1;
   }
 }

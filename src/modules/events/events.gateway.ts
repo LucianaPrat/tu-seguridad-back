@@ -43,7 +43,7 @@ export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
 
   // On shutdown (SIGINT/SIGTERM via enableShutdownHooks), disconnect every
   // client cleanly so they get a `disconnect` event instead of a dropped socket.
-  // Runs before PrismaService's teardown thanks to Nest's reverse destroy order.
+  // Runs before database teardown thanks to Nest's reverse destroy order.
   onModuleDestroy(): void {
     if (this.server) {
       this.server.disconnectSockets(true);

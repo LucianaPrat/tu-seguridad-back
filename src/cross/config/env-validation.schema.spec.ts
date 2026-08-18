@@ -20,6 +20,9 @@ const productionEnv = {
   [EnvNames.FACE_AUTH_API_URL]: 'https://api.face-auth.me',
   [EnvNames.FACE_AUTH_DOMAIN]: 'tenant-domain',
   [EnvNames.FACE_AUTH_TOKEN]: 'tenant-token',
+  // 32 bytes, and deliberately not the all-zero placeholder the dev default carries.
+  [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]:
+    'dGVuYW50LWFsZXJ0LXRlc3Qta2V5LTMyLWJ5dGVzISE=',
 };
 
 describe('envValidationSchema', () => {

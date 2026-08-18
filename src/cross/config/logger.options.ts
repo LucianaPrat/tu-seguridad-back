@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { Options } from 'pino-http';
 import { EnvNames } from '../common/constants';
 
-const SENSITIVE_KEYS = new Set(['snapshotUrl']);
+const SENSITIVE_KEYS = new Set([
+  'snapshotUrl',
+  'passwordEncrypted',
+  'tokenHash',
+  'correlationId',
+]);
 const MAX_REDACT_DEPTH = 8;
 // req/res/err are live http objects consumed by pino-http's own serializers
 // (e.g. res.headersSent is a prototype getter) — cloning them here would break those.

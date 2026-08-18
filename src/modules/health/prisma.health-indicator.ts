@@ -3,12 +3,12 @@ import {
   HealthIndicatorResult,
   HealthIndicatorService,
 } from '@nestjs/terminus';
-import { PrismaService } from '../../data/prisma/prisma.service';
+import { DatabaseHealthAccessor } from '../../data/accessors/database-health.accessor';
 
 @Injectable()
 export class PrismaHealthIndicator {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly databaseHealthAccessor: DatabaseHealthAccessor,
     private readonly healthIndicatorService: HealthIndicatorService,
   ) {}
 
@@ -17,7 +17,7 @@ export class PrismaHealthIndicator {
   ): Promise<HealthIndicatorResult<Key>> {
     const check = this.healthIndicatorService.check(key);
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      await this.databaseHealthAccessor.ping();
       return check.up();
     } catch (error) {
       return check.down({
