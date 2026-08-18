@@ -1,7 +1,22 @@
+import type { SpaceMemberRole } from '@prisma/client';
+
+/**
+ * Access-token claims. `spaceId` and `role` come from the caller's single
+ * `space_members` row, resolved once at sign time, so a request never has to
+ * derive its tenant from a resource id.
+ *
+ * `profileCompleted` is a claim rather than a per-request database read: it
+ * gates every route except profile completion itself, and completing the
+ * profile issues a fresh pair. The cost is that the flag is only as fresh as
+ * `JWT_EXPIRES_IN`, which is also true of `isActive` — deactivation takes
+ * effect at the next login or refresh.
+ */
 export interface JwtPayload {
   sub: number;
   email: string;
-  role: string;
+  spaceId: string;
+  role: SpaceMemberRole;
+  profileCompleted: boolean;
 }
 
 export interface RefreshJwtPayload extends JwtPayload {

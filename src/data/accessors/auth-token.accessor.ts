@@ -91,6 +91,74 @@ export class AuthTokenAccessorService {
     return result.count === 1;
   }
 
+  /**
+   * Used on password reset and on refresh-token replay: one stolen or leaked
+   * credential must not outlive the response that discovered it.
+   */
+  async revokeAllByUserAndPurpose(
+    userId: number,
+    purpose: AuthTokenPurpose,
+    now = new Date(),
+  ): Promise<number> {
+    const result = await this.prisma.authToken.updateMany({
+      where: { userId, purpose, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    return result.count;
+  }
+
+  /**
+   * Password reset in one transaction: burn the reset token, write the new hash,
+   * and revoke every refresh token the account holds. Split across three calls,
+   * a failure between them either loses the new password or leaves the sessions
+   * the reset was meant to end still valid.
+   *
+   * Returns the user id the token belonged to, or `null` when the token was
+   * already used, expired or revoked.
+   */
+  async consumePasswordReset(
+    token: string,
+    passwordHash: string,
+    now = new Date(),
+  ): Promise<number | null> {
+    const tokenHash = this.credentialHash.hashAuthToken(
+      'password_reset',
+      token,
+    );
+    return this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.authToken.findFirst({
+        where: {
+          purpose: 'password_reset',
+          tokenHash,
+          expiresAt: { gt: now },
+          usedAt: null,
+          revokedAt: null,
+        },
+      });
+      if (!current) {
+        return null;
+      }
+
+      const consumed = await transaction.authToken.updateMany({
+        where: { id: current.id, usedAt: null, revokedAt: null },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) {
+        return null;
+      }
+
+      await transaction.user.update({
+        where: { id: current.userId },
+        data: { passwordHash },
+      });
+      await transaction.authToken.updateMany({
+        where: { userId: current.userId, purpose: 'refresh', revokedAt: null },
+        data: { revokedAt: now },
+      });
+      return current.userId;
+    });
+  }
+
   async rotateRefresh(
     token: string,
     successor: Omit<CreateAuthTokenInput, 'purpose' | 'token'> & {

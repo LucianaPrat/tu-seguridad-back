@@ -40,7 +40,13 @@ describe('HitInterceptor', () => {
     const request: Partial<RequestWithUser> = {
       method: 'GET',
       path: '/api/v1/cameras',
-      user: { sub: 42, email: 'a@a.com', role: 'admin' },
+      user: {
+        sub: 42,
+        email: 'a@a.com',
+        spaceId: 'space-1',
+        role: 'admin',
+        profileCompleted: true,
+      },
     };
     const response = fakeResponse(200);
     const handler = { handle: () => of('ok') };

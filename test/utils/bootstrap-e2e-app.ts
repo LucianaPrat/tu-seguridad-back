@@ -10,6 +10,7 @@ import cookieParser from 'cookie-parser';
 import { Server } from 'http';
 import { AddressInfo } from 'net';
 import { AppModule } from '../../src/app.module';
+import { ALERT_ROUTING_DEFAULTS } from '../../src/cross/common/constants';
 import { setupSwagger } from '../../src/cross/config/swagger.config';
 import { buildData, Either } from '../../src/cross/errors/either';
 import { validationExceptionFactory } from '../../src/cross/errors/validation-exception.factory';
@@ -30,6 +31,13 @@ export class FakeFaceAuthClientService {
   detectPersons(): Promise<Either<DetectPersonsResponse>> {
     return Promise.resolve(buildData(this.response));
   }
+}
+
+export interface SeededAdmin {
+  userId: number;
+  email: string;
+  spaceId: string;
+  spaceName: string;
 }
 
 export interface E2eContext {
@@ -98,15 +106,54 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
  * Upserts the seeded admin directly (mirrors prisma/seed.ts) so the e2e
  * suite doesn't depend on `npm run prisma:seed` having been run against
  * DATABASE_URL_TEST beforehand.
+ *
+ * It builds the whole tenant graph — account, space, owner membership, routing
+ * defaults — because a user without an accepted membership is exactly what the
+ * login gate rejects, and a fixture that inserted a bare user would fail at
+ * login rather than at the assertion under test.
  */
-export async function ensureAdminSeeded(prisma: PrismaService): Promise<void> {
-  const email = process.env.ADMIN_EMAIL ?? 'admin@example.com';
+export async function ensureAdminSeeded(
+  prisma: PrismaService,
+): Promise<SeededAdmin> {
+  const email = (process.env.ADMIN_EMAIL ?? 'admin@example.com').toLowerCase();
   const password = process.env.ADMIN_PASSWORD ?? 'change-me';
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  const profile = {
+    passwordHash,
+    firstName: 'Admin',
+    lastName: 'User',
+    phone: '+10000000000',
+    isActive: true,
+    profileCompleted: true,
+  };
 
-  await prisma.user.upsert({
+  const user = await prisma.user.upsert({
     where: { email },
-    update: { passwordHash },
-    create: { email, passwordHash, role: 'admin' },
+    update: profile,
+    create: { email, ...profile },
   });
+  const space = await prisma.space.upsert({
+    where: { ownerUserId: user.id },
+    update: {},
+    create: { name: 'My Secure Space', ownerUserId: user.id },
+  });
+  await prisma.spaceMember.upsert({
+    where: { userId: user.id },
+    update: { role: 'admin', receiveAlerts: true },
+    create: {
+      spaceId: space.id,
+      userId: user.id,
+      role: 'admin',
+      receiveAlerts: true,
+    },
+  });
+  await prisma.alertRouting.createMany({
+    data: ALERT_ROUTING_DEFAULTS.map((routing) => ({
+      spaceId: space.id,
+      ...routing,
+    })),
+    skipDuplicates: true,
+  });
+
+  return { userId: user.id, email, spaceId: space.id, spaceName: space.name };
 }

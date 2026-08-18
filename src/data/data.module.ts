@@ -1,6 +1,8 @@
 import { Global, Module } from '@nestjs/common';
 import { CredentialHashService } from '../cross/crypto/credential-hash.service';
 import { FieldEncryptionService } from '../cross/crypto/field-encryption.service';
+import { PasswordHashService } from '../cross/crypto/password-hash.service';
+import { SecretTokenService } from '../cross/crypto/secret-token.service';
 import { AlertEventAccessorService } from './accessors/alert-event.accessor';
 import { AlertRoutingAccessorService } from './accessors/alert-routing.accessor';
 import { AuthTokenAccessorService } from './accessors/auth-token.accessor';
@@ -24,6 +26,8 @@ import { PrismaService } from './prisma/prisma.service';
     PrismaService,
     CredentialHashService,
     FieldEncryptionService,
+    PasswordHashService,
+    SecretTokenService,
     UserAccessorService,
     CameraAccessorService,
     DatabaseHealthAccessor,
@@ -41,6 +45,10 @@ import { PrismaService } from './prisma/prisma.service';
     EventDeliveryAccessorService,
   ],
   exports: [
+    CredentialHashService,
+    FieldEncryptionService,
+    PasswordHashService,
+    SecretTokenService,
     UserAccessorService,
     CameraAccessorService,
     DatabaseHealthAccessor,

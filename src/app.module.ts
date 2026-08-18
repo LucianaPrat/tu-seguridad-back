@@ -17,6 +17,7 @@ import { CamerasModule } from './modules/cameras/cameras.module';
 import { EventsModule } from './modules/events/events.module';
 import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-client.module';
 import { HealthModule } from './modules/health/health.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 import { ZonesModule } from './modules/zones/zones.module';
 
 @Module({
@@ -37,6 +38,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     }),
     DataModule,
     AuthModule,
+    InvitationsModule,
     HealthModule,
     CameraStatusModule,
     CamerasModule,

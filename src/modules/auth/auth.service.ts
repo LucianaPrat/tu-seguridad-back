@@ -1,114 +1,158 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { Prisma } from '@prisma/client';
+import { ErrorCode } from '../../cross/common/constants';
+import { normalizeEmail } from '../../cross/common/normalize-email';
+import { SessionContext } from '../../cross/common/session-context.type';
 import { buildData, buildError, Either } from '../../cross/errors/either';
-import {
-  asExpiresIn,
-  JwtPayload,
-  RefreshJwtPayload,
-} from '../../cross/common/jwt-payload.type';
+import { PasswordHashService } from '../../cross/crypto/password-hash.service';
+import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
+import { SpaceAccessorService } from '../../data/accessors/space.accessor';
 import { UserAccessorService } from '../../data/accessors/user.accessor';
+import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { MeDto } from './dto/me.dto';
+import { RegisterDto } from './dto/register.dto';
 import { TokenPairDto } from './dto/token-pair.dto';
+import { SessionService } from './session.service';
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
-const INVALID_REFRESH_TOKEN_MESSAGE = 'Invalid or expired refresh token';
+const UNIQUE_CONSTRAINT_ERROR = 'P2002';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userAccessor: UserAccessorService,
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    private readonly spaceAccessor: SpaceAccessorService,
+    private readonly spaceMemberAccessor: SpaceMemberAccessorService,
+    private readonly passwordHash: PasswordHashService,
+    private readonly sessionService: SessionService,
   ) {}
 
-  async login(email: string, password: string): Promise<Either<TokenPairDto>> {
-    const user = await this.userAccessor.findByEmail(email);
+  /**
+   * Every rejection answers with the same message: a wrong password, a
+   * deactivated account and an account with no membership are indistinguishable
+   * from outside, so login cannot be used to probe account state.
+   */
+  async login(
+    email: string,
+    password: string,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
+    const user = await this.userAccessor.findByEmail(normalizeEmail(email));
     if (!user) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordMatches) {
+    const passwordMatches = await this.passwordHash.verify(
+      password,
+      user.passwordHash,
+    );
+    if (!passwordMatches || !user.isActive) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const payload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    };
-    return buildData(this.issueTokenPair(payload));
+    const member = await this.spaceMemberAccessor.findByUserId(user.id);
+    if (!member) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
+
+    await this.userAccessor.recordLogin(user.id);
+    return buildData(await this.sessionService.issue(user, member, context));
   }
 
-  async refresh(refreshToken: string): Promise<Either<TokenPairDto>> {
-    let payload: RefreshJwtPayload;
+  async register(
+    dto: RegisterDto,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
+    const email = normalizeEmail(dto.email);
+    if (await this.userAccessor.findByEmail(email)) {
+      return buildError(ErrorCode.CONFLICT, 'Email is already registered');
+    }
+
+    const passwordHash = await this.passwordHash.hash(dto.password);
     try {
-      payload = this.jwtService.verify<RefreshJwtPayload>(refreshToken, {
-        secret: this.configService.get<string>(EnvNames.JWT_REFRESH_SECRET),
+      const owned = await this.spaceAccessor.createWithOwner({
+        user: {
+          email,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          profileCompleted: true,
+          lastLoginAt: new Date(),
+        },
+        spaceName: dto.spaceName,
       });
-    } catch {
-      return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
+      return buildData(
+        await this.sessionService.issue(owned.user, owned.member, context),
+      );
+    } catch (error) {
+      // Two registrations racing on one address: the unique index is the
+      // arbiter, and the loser gets the domain error rather than a driver code.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === UNIQUE_CONSTRAINT_ERROR
+      ) {
+        return buildError(ErrorCode.CONFLICT, 'Email is already registered');
+      }
+      throw error;
     }
-
-    if (payload.type !== 'refresh') {
-      return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
-    }
-
-    const user = await this.userAccessor.findByEmail(payload.email);
-    if (!user) {
-      return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
-    }
-
-    const freshPayload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    };
-    return buildData(this.issueTokenPair(freshPayload));
-  }
-
-  async me(email: string): Promise<Either<MeDto>> {
-    const user = await this.userAccessor.findByEmail(email);
-    if (!user) {
-      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
-    }
-
-    return buildData({ id: user.id, email: user.email, role: user.role });
   }
 
   /**
-   * Cookie lifetime read back off the token itself, so it can never drift from
-   * JWT_REFRESH_EXPIRES_IN.
+   * Closes the gate an invited account is behind. Issues a fresh pair because
+   * `profileCompleted` is a token claim — the caller's current access token still
+   * says the profile is incomplete.
    */
-  refreshCookieMaxAgeMs(refreshToken: string): number {
-    const decoded = this.jwtService.decode<{ exp?: number } | null>(
-      refreshToken,
-    );
-    if (!decoded?.exp) {
-      return 0;
+  async completeProfile(
+    userId: number,
+    dto: CompleteProfileDto,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
+    const session = await this.sessionService.loadActiveMembership(userId);
+    if (!session) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
-    return Math.max(0, decoded.exp * 1000 - Date.now());
+    if (session.user.profileCompleted) {
+      return buildError(ErrorCode.CONFLICT, 'Profile is already completed');
+    }
+
+    const user = await this.userAccessor.completeProfile(userId, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      phone: dto.phone,
+      avatarUrl: dto.avatarUrl,
+      passwordHash: await this.passwordHash.hash(dto.password),
+    });
+    return buildData(
+      await this.sessionService.issue(user, session.member, context),
+    );
   }
 
-  private issueTokenPair(payload: JwtPayload): TokenPairDto {
-    const accessToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>(EnvNames.JWT_SECRET),
-      expiresIn: asExpiresIn(
-        this.configService.get<string>(EnvNames.JWT_EXPIRES_IN)!,
-      ),
-    });
+  async me(userId: number): Promise<Either<MeDto>> {
+    const session = await this.sessionService.loadActiveMembership(userId);
+    if (!session) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
 
-    const refreshPayload: RefreshJwtPayload = { ...payload, type: 'refresh' };
-    const refreshToken = this.jwtService.sign(refreshPayload, {
-      secret: this.configService.get<string>(EnvNames.JWT_REFRESH_SECRET),
-      expiresIn: asExpiresIn(
-        this.configService.get<string>(EnvNames.JWT_REFRESH_EXPIRES_IN)!,
-      ),
-    });
+    const space = await this.spaceAccessor.findById(session.member.spaceId);
+    if (!space) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
 
-    return { accessToken, refreshToken };
+    const { user, member } = session;
+    return buildData({
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      avatarUrl: user.avatarUrl,
+      isActive: user.isActive,
+      profileCompleted: user.profileCompleted,
+      spaceId: space.id,
+      spaceName: space.name,
+      role: member.role,
+      receiveAlerts: member.receiveAlerts,
+    });
   }
 }

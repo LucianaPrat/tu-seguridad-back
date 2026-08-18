@@ -2,13 +2,8 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { Options } from 'pino-http';
 import { EnvNames } from '../common/constants';
+import { SENSITIVE_FIELD_NAMES_LOWERCASE } from '../common/sensitive-fields';
 
-const SENSITIVE_KEYS = new Set([
-  'snapshotUrl',
-  'passwordEncrypted',
-  'tokenHash',
-  'correlationId',
-]);
 const MAX_REDACT_DEPTH = 8;
 // req/res/err are live http objects consumed by pino-http's own serializers
 // (e.g. res.headersSent is a prototype getter) — cloning them here would break those.
@@ -24,7 +19,7 @@ function deepRedact(value: unknown, depth = 0): unknown {
   const source = value as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(source)) {
-    result[key] = SENSITIVE_KEYS.has(key)
+    result[key] = SENSITIVE_FIELD_NAMES_LOWERCASE.has(key.toLowerCase())
       ? '***'
       : deepRedact(source[key], depth + 1);
   }

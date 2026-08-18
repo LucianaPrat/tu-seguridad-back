@@ -7,6 +7,7 @@ export function buildSwaggerConfig() {
     .setVersion('1.0')
     .addBearerAuth()
     .addTag('auth')
+    .addTag('invitations')
     .addTag('cameras')
     .addTag('zones')
     .addTag('events')

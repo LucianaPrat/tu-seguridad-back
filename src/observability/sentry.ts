@@ -1,19 +1,13 @@
 import * as Sentry from '@sentry/node';
+import { SENSITIVE_FIELD_NAMES_LOWERCASE } from '../cross/common/sensitive-fields';
 
 // Opt-in error tracking, same posture as OTEL: a no-op unless SENTRY_DSN is set.
 // Reads process.env directly because init must run before ConfigModule exists
 // (mirrors observability/tracing.ts).
 
-// Redacted anywhere they appear in an outgoing event/breadcrumb, matching the
-// Pino redaction (snapshotUrl) plus the upstream/auth headers.
-const SENSITIVE_KEYS = new Set([
-  'snapshoturl',
-  'authorization',
-  'fa-token',
-  'passwordencrypted',
-  'tokenhash',
-  'correlationid',
-]);
+// Redacted anywhere they appear in an outgoing event/breadcrumb, off the same
+// canonical list the Pino formatter applies.
+
 const REDACTED = '[redacted]';
 
 /** Recursively redact sensitive keys in place so secrets never leave the process. */
@@ -29,7 +23,7 @@ export function scrubSensitive<T>(value: T, seen = new WeakSet<object>()): T {
     seen.add(value);
     const record = value as Record<string, unknown>;
     for (const key of Object.keys(record)) {
-      if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+      if (SENSITIVE_FIELD_NAMES_LOWERCASE.has(key.toLowerCase())) {
         record[key] = REDACTED;
       } else {
         record[key] = scrubSensitive(record[key], seen);
