@@ -1,38 +1,72 @@
+import { Camera } from '@prisma/client';
+import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
-import { ErrorCode } from '../../cross/common/constants';
 import { PollingScheduler } from './polling.scheduler';
 
-describe('PollingScheduler', () => {
-  const camera = {
-    id: 'camera_01',
-    enabled: true,
-    snapshotUrl: 'http://dvr/snap.jpg',
-    pollingIntervalSeconds: 5,
+function buildCamera(id: string): Camera {
+  return {
+    id,
+    dvrId: 'dvr-uuid',
+    externalId: `channel-${id}`,
+    name: id,
+    location: null,
+    status: 'online',
+    isConfigured: true,
+    isEnabled: true,
+    monitorMode: 'full',
+    alertType: 'intruder',
+    lastSnapshotAt: null,
+    deletedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
   };
+}
 
-  let configService: { get: jest.Mock };
-  let cameraAccessor: { findAll: jest.Mock; findById: jest.Mock };
-  let snapshotService: { fetch: jest.Mock };
+const capturedImage = {
+  data: Buffer.from('image'),
+  mimeType: 'image/jpeg',
+  byteSize: 5,
+  sha256: 'a'.repeat(64),
+  capturedAt: new Date('2026-01-01T00:00:00Z'),
+};
+
+describe('PollingScheduler', () => {
+  let config: Record<string, unknown>;
+  let configService: { get: jest.Mock; getOrThrow: jest.Mock };
+  let dvrAccessor: { findSpaceIdsWithDvr: jest.Mock };
+  let cameraAccessor: { findPollableBySpace: jest.Mock };
+  let snapshotService: { capture: jest.Mock };
   let pipelineService: { processImage: jest.Mock };
   let statusRegistry: { record: jest.Mock; incrementSkipped: jest.Mock };
-  let schedulerRegistry: {
-    addInterval: jest.Mock;
-    deleteInterval: jest.Mock;
-  };
+  let schedulerRegistry: { addInterval: jest.Mock; deleteInterval: jest.Mock };
   let scheduler: PollingScheduler;
 
   beforeEach(() => {
-    configService = { get: jest.fn().mockReturnValue(false) };
-    cameraAccessor = {
-      findAll: jest.fn().mockResolvedValue([camera]),
-      findById: jest.fn().mockResolvedValue(camera),
+    config = {
+      [EnvNames.POLLING_ENABLED]: true,
+      [EnvNames.POLLING_INTERVAL_SECONDS]: 5,
     };
-    snapshotService = { fetch: jest.fn() };
-    pipelineService = { processImage: jest.fn() };
+    configService = {
+      get: jest.fn((key: string) => config[key]),
+      getOrThrow: jest.fn((key: string) => config[key]),
+    };
+    dvrAccessor = { findSpaceIdsWithDvr: jest.fn().mockResolvedValue([]) };
+    cameraAccessor = { findPollableBySpace: jest.fn().mockResolvedValue([]) };
+    snapshotService = {
+      capture: jest.fn().mockResolvedValue(buildData(capturedImage)),
+    };
+    pipelineService = {
+      processImage: jest
+        .fn()
+        .mockResolvedValue(
+          buildData({ persons: [], zoneResults: [], alerts: [] }),
+        ),
+    };
     statusRegistry = { record: jest.fn(), incrementSkipped: jest.fn() };
     schedulerRegistry = { addInterval: jest.fn(), deleteInterval: jest.fn() };
     scheduler = new PollingScheduler(
       configService as never,
+      dvrAccessor as never,
       cameraAccessor as never,
       snapshotService as never,
       pipelineService as never,
@@ -41,109 +75,102 @@ describe('PollingScheduler', () => {
     );
   });
 
-  afterEach(() => {
-    scheduler.onModuleDestroy();
-    // Real per-camera setInterval handles are only known to the mocked
-    // schedulerRegistry - clear them directly so the process can exit.
-    for (const [, handle] of schedulerRegistry.addInterval.mock.calls as [
-      string,
-      NodeJS.Timeout,
-    ][]) {
-      clearInterval(handle);
-    }
-  });
+  describe('lifecycle', () => {
+    it('registers nothing while polling is disabled', () => {
+      config[EnvNames.POLLING_ENABLED] = false;
 
-  describe('onApplicationBootstrap', () => {
-    it('registers no intervals when POLLING_ENABLED is false', async () => {
-      await scheduler.onApplicationBootstrap();
-
-      expect(schedulerRegistry.addInterval).not.toHaveBeenCalled();
-    });
-
-    it('registers one interval per enabled camera when POLLING_ENABLED is true', async () => {
-      configService.get.mockReturnValue(true);
-
-      await scheduler.onApplicationBootstrap();
-
-      expect(schedulerRegistry.addInterval).toHaveBeenCalledTimes(1);
-      expect(schedulerRegistry.addInterval).toHaveBeenCalledWith(
-        'camera-poll:camera_01',
-        expect.anything(),
-      );
-    });
-
-    it('clears the sync timer on module destroy so no new ticks fire', async () => {
-      configService.get.mockReturnValue(true);
-      await scheduler.onApplicationBootstrap();
-
-      const clearSpy = jest.spyOn(global, 'clearInterval');
+      scheduler.onApplicationBootstrap();
       scheduler.onModuleDestroy();
 
-      expect(clearSpy).toHaveBeenCalled();
-      clearSpy.mockRestore();
+      expect(schedulerRegistry.addInterval).not.toHaveBeenCalled();
+      expect(schedulerRegistry.deleteInterval).not.toHaveBeenCalled();
+    });
+
+    it('registers one interval for the whole process and clears it on destroy', () => {
+      jest.useFakeTimers();
+      try {
+        scheduler.onApplicationBootstrap();
+        expect(schedulerRegistry.addInterval).toHaveBeenCalledWith(
+          'camera-poll',
+          expect.anything(),
+        );
+
+        scheduler.onModuleDestroy();
+        expect(schedulerRegistry.deleteInterval).toHaveBeenCalledWith(
+          'camera-poll',
+        );
+      } finally {
+        jest.clearAllTimers();
+        jest.useRealTimers();
+      }
+    });
+  });
+
+  describe('tick', () => {
+    it('polls every pollable camera of every space that owns a recorder', async () => {
+      dvrAccessor.findSpaceIdsWithDvr.mockResolvedValue(['space-a', 'space-b']);
+      cameraAccessor.findPollableBySpace.mockImplementation((spaceId: string) =>
+        Promise.resolve(
+          spaceId === 'space-a'
+            ? [buildCamera('camera-a1'), buildCamera('camera-a2')]
+            : [buildCamera('camera-b1')],
+        ),
+      );
+
+      await scheduler.tick();
+
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(3);
+      expect(snapshotService.capture).toHaveBeenCalledWith(
+        'space-a',
+        expect.objectContaining({ id: 'camera-a1' }),
+      );
     });
   });
 
   describe('pollOnce', () => {
-    it('skips a tick already in flight for the same camera and records the skip', async () => {
-      let resolveFetch!: (value: unknown) => void;
-      const pending = new Promise((resolve) => {
-        resolveFetch = resolve;
-      });
-      snapshotService.fetch.mockReturnValue(pending);
-
-      const firstPoll = scheduler.pollOnce('camera_01');
-      await scheduler.pollOnce('camera_01');
-
-      expect(statusRegistry.incrementSkipped).toHaveBeenCalledWith('camera_01');
-      expect(snapshotService.fetch).toHaveBeenCalledTimes(1);
-
-      resolveFetch(buildError(ErrorCode.UPSTREAM_ERROR, 'boom'));
-      await firstPoll;
-    });
-
-    it('records an error status and skips processImage when the snapshot fetch fails', async () => {
-      snapshotService.fetch.mockResolvedValue(
-        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'snapshot fetch timed out'),
+    it('counts a skipped poll instead of queueing behind the previous one', async () => {
+      let release: (() => void) | undefined;
+      snapshotService.capture.mockReturnValue(
+        new Promise((resolve) => {
+          release = () => resolve(buildData(capturedImage));
+        }),
       );
 
-      await scheduler.pollOnce('camera_01');
+      const inFlight = scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
 
-      expect(pipelineService.processImage).not.toHaveBeenCalled();
+      expect(statusRegistry.incrementSkipped).toHaveBeenCalledWith('camera-a1');
+      expect(snapshotService.capture).toHaveBeenCalledTimes(1);
+
+      release?.();
+      await inFlight;
+    });
+
+    it('records the capture failure and does not run detection', async () => {
+      snapshotService.capture.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
       expect(statusRegistry.record).toHaveBeenCalledWith(
-        'camera_01',
+        'camera-a1',
         expect.objectContaining({ lastErrorCode: ErrorCode.UPSTREAM_TIMEOUT }),
       );
+      expect(pipelineService.processImage).not.toHaveBeenCalled();
     });
 
-    it('calls processImage with the fetched snapshot on success', async () => {
-      const buffer = Buffer.from('jpeg');
-      snapshotService.fetch.mockResolvedValue(buildData(buffer));
-      pipelineService.processImage.mockResolvedValue(buildData({}));
+    it('releases the in-flight slot even when the poll throws', async () => {
+      snapshotService.capture.mockRejectedValueOnce(new Error('socket closed'));
 
-      await scheduler.pollOnce('camera_01');
+      await expect(
+        scheduler.pollOnce('space-a', buildCamera('camera-a1')),
+      ).rejects.toThrow('socket closed');
 
-      expect(pipelineService.processImage).toHaveBeenCalledWith(camera, buffer);
-    });
+      snapshotService.capture.mockResolvedValue(buildData(capturedImage));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
 
-    it('does nothing for an unknown or disabled camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
-
-      await scheduler.pollOnce('camera_missing');
-
-      expect(snapshotService.fetch).not.toHaveBeenCalled();
-    });
-
-    it('allows a subsequent tick once the in-flight one completes', async () => {
-      snapshotService.fetch.mockResolvedValue(
-        buildError(ErrorCode.UPSTREAM_ERROR, 'x'),
-      );
-
-      await scheduler.pollOnce('camera_01');
-      await scheduler.pollOnce('camera_01');
-
-      expect(snapshotService.fetch).toHaveBeenCalledTimes(2);
-      expect(statusRegistry.incrementSkipped).not.toHaveBeenCalled();
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(1);
     });
   });
 });

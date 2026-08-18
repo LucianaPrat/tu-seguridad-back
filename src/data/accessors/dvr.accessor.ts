@@ -62,6 +62,31 @@ export class DvrAccessorService {
     };
   }
 
+  /**
+   * Records the outcome of the last connectivity probe. Separate from
+   * `upsertConfiguration` on purpose: a probe against a stored configuration
+   * must be able to mark it failing without rewriting the credentials.
+   */
+  async recordTestResult(
+    spaceId: string,
+    ok: boolean,
+  ): Promise<DvrDetails | null> {
+    const result = await this.prisma.dvr.updateMany({
+      where: { spaceId },
+      data: { lastTestAt: new Date(), lastTestOk: ok },
+    });
+    return result.count === 1 ? this.findBySpaceId(spaceId) : null;
+  }
+
+  /** Every space that owns a recorder — the poll scheduler's work list. */
+  async findSpaceIdsWithDvr(): Promise<string[]> {
+    const rows = await this.prisma.dvr.findMany({
+      select: { spaceId: true },
+      orderBy: { spaceId: 'asc' },
+    });
+    return rows.map((row) => row.spaceId);
+  }
+
   async reconcileDiscovery(
     spaceId: string,
     discovered: DiscoveredCamera[],
@@ -87,11 +112,11 @@ export class DvrAccessorService {
             location: camera.location,
             status: camera.status ?? 'offline',
           },
-          update: {
-            name: camera.name,
-            location: camera.location,
-            status: camera.status ?? 'offline',
-          },
+          // Only the status is refreshed. `name` and `location` default to
+          // what the recorder reports the first time a channel appears and
+          // belong to the operator afterwards — re-running discovery must not
+          // undo a rename.
+          update: { status: camera.status ?? 'offline' },
         });
       }
 

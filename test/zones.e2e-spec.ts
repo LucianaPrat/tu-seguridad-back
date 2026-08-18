@@ -1,25 +1,45 @@
 import request from 'supertest';
-import { bootstrapE2eApp, E2eContext } from './utils/bootstrap-e2e-app';
-import { authAs } from './utils/auth-as';
+import { authAs, loginAs } from './utils/auth-as';
+import {
+  bootstrapE2eApp,
+  E2eContext,
+  ensureAdminSeeded,
+  SeededAdmin,
+} from './utils/bootstrap-e2e-app';
+import { seedMember, seedTenant } from './utils/seed-tenant';
 import { truncateAll } from './utils/truncate-all';
 import { typedBody } from './utils/typed-body';
 
+interface CameraBody {
+  id: string;
+  externalId: string;
+  isConfigured: boolean;
+  monitorMode: string;
+}
+
 interface ZoneBody {
-  geometryVersion: number;
+  id: string;
+  cameraId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  alertType: string;
 }
 
-interface ValidateResultBody {
-  valid: boolean;
-  violations: unknown[];
+interface ErrorBody {
+  code: string;
+  message: string;
 }
 
-describe('Zones (e2e)', () => {
+describe('Monitor zones (e2e)', () => {
   let ctx: E2eContext;
+  let admin: SeededAdmin;
   let token: string;
+  let camera: CameraBody;
 
   beforeAll(async () => {
     ctx = await bootstrapE2eApp();
-    token = await authAs(ctx.httpServer);
   });
 
   afterAll(async () => {
@@ -28,77 +48,155 @@ describe('Zones (e2e)', () => {
 
   beforeEach(async () => {
     await truncateAll(ctx.prisma);
-    await request(ctx.httpServer).post('/api/v1/cameras').set(auth()).send({
-      id: 'camera_zone_e2e',
-      name: 'Zone E2e Cam',
-      snapshotUrl: 'http://dvr.local/snap.jpg',
+    admin = await ensureAdminSeeded(ctx.prisma);
+    token = await authAs(ctx.httpServer);
+    ctx.fakeDvrClient.reachable = true;
+    ctx.fakeDvrClient.channels = [
+      { externalId: 'ch1', name: 'Channel 1', status: 'online' },
+    ];
+
+    await request(ctx.httpServer).put('/api/v1/dvr').set(auth()).send({
+      url: 'http://192.168.1.10:8000',
+      username: 'dvr-admin',
+      password: 'dvr-password',
+      timezone: 'UTC',
+    });
+    const cameras = await request(ctx.httpServer)
+      .get('/api/v1/cameras')
+      .set(auth());
+    camera = typedBody<CameraBody[]>(cameras)[0];
+    await request(ctx.httpServer)
+      .put(`/api/v1/cameras/${camera.id}`)
+      .set(auth())
+      .send({ monitorMode: 'partial' });
+  });
+
+  function auth(bearer = token) {
+    return { Authorization: `Bearer ${bearer}` };
+  }
+
+  function createZone(body: Record<string, unknown>, bearer = token) {
+    return request(ctx.httpServer)
+      .post(`/api/v1/cameras/${camera.id}/zones`)
+      .set(auth(bearer))
+      .send(body);
+  }
+
+  const validZone = {
+    x: 10.5,
+    y: 20,
+    width: 30,
+    height: 40,
+    alertType: 'intruder',
+  };
+
+  it('creates a percentage rectangle and returns it as numbers', async () => {
+    const res = await createZone(validZone);
+
+    expect(res.status).toBe(201);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      cameraId: camera.id,
+      x: 10.5,
+      y: 20,
+      width: 30,
+      height: 40,
+      alertType: 'intruder',
     });
   });
 
-  function auth() {
-    return { Authorization: `Bearer ${token}` };
-  }
+  it('rejects a rectangle that leaves the frame', async () => {
+    const res = await createZone({ ...validZone, x: 80, width: 30 });
 
-  const square = [
-    { x: 0, y: 0 },
-    { x: 1, y: 0 },
-    { x: 1, y: 1 },
-    { x: 0, y: 1 },
-  ];
-
-  it('creates a zone, updates its polygon (bumps geometryVersion), then deletes it', async () => {
-    const create = await request(ctx.httpServer)
-      .post('/api/v1/cameras/camera_zone_e2e/zones')
-      .set(auth())
-      .send({ id: 'zone_e2e_lobby', name: 'Lobby', polygon: square });
-    expect(create.status).toBe(201);
-    expect(typedBody<ZoneBody>(create).geometryVersion).toBe(1);
-
-    const update = await request(ctx.httpServer)
-      .put('/api/v1/zones/zone_e2e_lobby')
-      .set(auth())
-      .send({
-        polygon: [
-          { x: 0, y: 0 },
-          { x: 1, y: 0 },
-          { x: 1, y: 1 },
-          { x: 0.5, y: 1 },
-        ],
-      });
-    expect(update.status).toBe(200);
-    expect(typedBody<ZoneBody>(update).geometryVersion).toBe(2);
-
-    const remove = await request(ctx.httpServer)
-      .delete('/api/v1/zones/zone_e2e_lobby')
-      .set(auth());
-    expect(remove.status).toBe(200);
-
-    const afterDelete = await request(ctx.httpServer)
-      .get('/api/v1/zones/zone_e2e_lobby')
-      .set(auth());
-    expect(afterDelete.status).toBe(404);
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('INVALID_ZONE');
   });
 
-  it('validate dry-run returns 200 with violations for a bad polygon, never an error', async () => {
-    const res = await request(ctx.httpServer)
-      .post('/api/v1/cameras/camera_zone_e2e/zones')
-      .set(auth())
-      .send({ id: 'zone_e2e_dryrun', name: 'Dry run zone', polygon: square })
-      .then(() =>
-        request(ctx.httpServer)
-          .post('/api/v1/zones/zone_e2e_dryrun/validate')
-          .set(auth())
-          .send({
-            polygon: [
-              { x: 0, y: 0 },
-              { x: 1, y: 1 },
-            ],
-          }),
-      );
+  it('rejects coordinates outside 0..100 and finer than two decimals', async () => {
+    const outOfRange = await createZone({ ...validZone, y: 120 });
+    expect(outOfRange.status).toBe(400);
+    expect(typedBody<ErrorBody>(outOfRange).code).toBe('VALIDATION_ERROR');
 
-    const body = typedBody<ValidateResultBody>(res);
-    expect(res.status).toBe(200);
-    expect(body.valid).toBe(false);
-    expect(body.violations.length).toBeGreaterThan(0);
+    const tooPrecise = await createZone({ ...validZone, x: 10.555 });
+    expect(tooPrecise.status).toBe(400);
+    expect(typedBody<ErrorBody>(tooPrecise).code).toBe('VALIDATION_ERROR');
+  });
+
+  it('arms the camera with its first zone and disarms it with the last', async () => {
+    const created = await createZone(validZone);
+    const zone = typedBody<ZoneBody>(created);
+
+    const armed = await request(ctx.httpServer)
+      .get(`/api/v1/cameras/${camera.id}`)
+      .set(auth());
+    expect(typedBody<CameraBody>(armed).isConfigured).toBe(true);
+
+    const deleted = await request(ctx.httpServer)
+      .delete(`/api/v1/zones/${zone.id}`)
+      .set(auth());
+    expect(deleted.status).toBe(200);
+
+    const list = await request(ctx.httpServer)
+      .get(`/api/v1/cameras/${camera.id}/zones`)
+      .set(auth());
+    expect(typedBody<ZoneBody[]>(list)).toHaveLength(0);
+
+    const disarmed = await request(ctx.httpServer)
+      .get(`/api/v1/cameras/${camera.id}`)
+      .set(auth());
+    expect(typedBody<CameraBody>(disarmed).isConfigured).toBe(false);
+  });
+
+  it('validates the merged rectangle on a partial update', async () => {
+    const zone = typedBody<ZoneBody>(await createZone(validZone));
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/zones/${zone.id}`)
+      .set(auth())
+      .send({ x: 90 });
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('INVALID_ZONE');
+  });
+
+  it("hides another space's zone behind NOT_FOUND", async () => {
+    const zone = typedBody<ZoneBody>(await createZone(validZone));
+    const other = await seedTenant(
+      ctx.prisma,
+      'zones-other@example.com',
+      'Other space',
+    );
+    const otherToken = await loginAs(
+      ctx.httpServer,
+      other.email,
+      other.password,
+    );
+
+    const read = await request(ctx.httpServer)
+      .get(`/api/v1/zones/${zone.id}`)
+      .set(auth(otherToken));
+    expect(read.status).toBe(404);
+
+    const deleted = await request(ctx.httpServer)
+      .delete(`/api/v1/zones/${zone.id}`)
+      .set(auth(otherToken));
+    expect(deleted.status).toBe(404);
+  });
+
+  it('lets a member read zones but not draw them', async () => {
+    await createZone(validZone);
+    await seedMember(ctx.prisma, admin.spaceId, 'zones-member@example.com');
+    const memberToken = await loginAs(
+      ctx.httpServer,
+      'zones-member@example.com',
+      'e2e-password-1234',
+    );
+
+    const list = await request(ctx.httpServer)
+      .get(`/api/v1/cameras/${camera.id}/zones`)
+      .set(auth(memberToken));
+    expect(list.status).toBe(200);
+
+    const created = await createZone(validZone, memberToken);
+    expect(created.status).toBe(403);
   });
 });

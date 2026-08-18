@@ -1,32 +1,33 @@
-import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EnvNames } from '../../cross/common/constants';
-import { EventsModule } from '../events/events.module';
 import { FaceAuthClientModule } from '../face-auth-client/face-auth-client.module';
+import { SnapshotsModule } from '../snapshots/snapshots.module';
+import { AlertEmitterPort } from './alert-emitter.port';
+import { LoggedAlertEmitterService } from './logged-alert-emitter.service';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
 import { PollingScheduler } from './polling.scheduler';
-import { SnapshotService } from './snapshot.service';
 
 @Module({
-  imports: [
-    ScheduleModule.forRoot(),
-    FaceAuthClientModule,
-    EventsModule,
-    HttpModule.registerAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        timeout: config.get<number>(EnvNames.SNAPSHOT_TIMEOUT_MS),
-      }),
-    }),
-  ],
+  imports: [ScheduleModule.forRoot(), FaceAuthClientModule, SnapshotsModule],
   providers: [
-    SnapshotService,
     PipelineService,
     PollingScheduler,
-    OccupancyEngine,
+    // Built from configuration rather than constructed by Nest: the hysteresis
+    // thresholds are env-tunable, and a plain `providers: [OccupancyEngine]`
+    // entry would silently keep the constructor defaults instead.
+    {
+      provide: OccupancyEngine,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new OccupancyEngine(
+          config.getOrThrow<number>(EnvNames.ENTER_CONSECUTIVE_POLLS),
+          config.getOrThrow<number>(EnvNames.EXIT_CONSECUTIVE_POLLS),
+        ),
+    },
+    { provide: AlertEmitterPort, useClass: LoggedAlertEmitterService },
   ],
   exports: [PipelineService],
 })

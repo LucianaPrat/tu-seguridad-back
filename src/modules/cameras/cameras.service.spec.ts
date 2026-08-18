@@ -1,228 +1,292 @@
+import { Camera } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
+import { buildData, buildError } from '../../cross/errors/either';
 import { CamerasService } from './cameras.service';
 
-describe('CamerasService', () => {
-  const camera = {
-    id: 'camera_01',
+const MAX_SNAPSHOT_BYTES = 1000;
+
+function buildCamera(overrides: Partial<Camera> = {}): Camera {
+  return {
+    id: 'camera-uuid',
+    dvrId: 'dvr-uuid',
+    externalId: 'channel-1',
     name: 'Front door',
-    enabled: true,
-    snapshotUrl: 'http://user:pass@192.168.1.50/snapshot.jpg',
-    pollingIntervalSeconds: 5,
-    confidenceThreshold: 0.45,
+    location: 'Street side',
+    status: 'online',
+    isConfigured: true,
+    isEnabled: true,
+    monitorMode: 'full',
+    alertType: 'intruder',
+    lastSnapshotAt: new Date('2026-01-01T00:00:00Z'),
+    deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
   };
+}
+
+describe('CamerasService', () => {
+  const spaceId = 'space-uuid';
 
   let cameraAccessor: {
     findAll: jest.Mock;
     findById: jest.Mock;
-    create: jest.Mock;
     update: jest.Mock;
-    delete: jest.Mock;
-    countZones: jest.Mock;
+    softDelete: jest.Mock;
+    countMonitorZones: jest.Mock;
+  };
+  let snapshotService: {
+    findLatestIds: jest.Mock;
+    captureAndStore: jest.Mock;
   };
   let statusRegistry: { get: jest.Mock };
   let pipelineService: { processImage: jest.Mock };
+  let configService: { getOrThrow: jest.Mock };
   let service: CamerasService;
 
   beforeEach(() => {
     cameraAccessor = {
       findAll: jest.fn(),
       findById: jest.fn(),
-      create: jest.fn(),
       update: jest.fn(),
-      delete: jest.fn(),
-      countZones: jest.fn(),
+      softDelete: jest.fn(),
+      countMonitorZones: jest.fn(),
+    };
+    snapshotService = {
+      findLatestIds: jest.fn().mockResolvedValue(new Map()),
+      captureAndStore: jest.fn(),
     };
     statusRegistry = { get: jest.fn() };
     pipelineService = { processImage: jest.fn() };
+    configService = {
+      getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
+    };
     service = new CamerasService(
       cameraAccessor as never,
+      snapshotService as never,
       statusRegistry as never,
       pipelineService as never,
+      configService as never,
     );
   });
 
-  describe('create', () => {
-    it('creates a camera when the id is free', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
-      cameraAccessor.create.mockResolvedValue(camera);
-
-      const result = await service.create({
-        id: 'camera_01',
-        name: 'Front door',
-        snapshotUrl: camera.snapshotUrl,
-      });
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.id).toBe('camera_01');
-      }
-      expect(cameraAccessor.create).toHaveBeenCalled();
-    });
-
-    it('returns CONFLICT when the id is already taken', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-
-      const result = await service.create({
-        id: 'camera_01',
-        name: 'Front door',
-        snapshotUrl: camera.snapshotUrl,
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result).toMatchObject({ code: ErrorCode.CONFLICT });
-      expect(cameraAccessor.create).not.toHaveBeenCalled();
-    });
-  });
-
   describe('findAll', () => {
-    it('masks snapshotUrl on every list item', async () => {
-      cameraAccessor.findAll.mockResolvedValue([camera]);
+    it('derives latestSnapshotUrl from the latest stored snapshot', async () => {
+      cameraAccessor.findAll.mockResolvedValue([buildCamera()]);
+      snapshotService.findLatestIds.mockResolvedValue(
+        new Map([['camera-uuid', 'snapshot-uuid']]),
+      );
 
-      const result = await service.findAll();
+      const result = await service.findAll(spaceId);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.data[0].snapshotUrl).toBe('***');
-        expect(result.data[0].id).toBe('camera_01');
+        expect(result.data[0].latestSnapshotUrl).toBe(
+          '/api/v1/snapshots/snapshot-uuid',
+        );
+      }
+    });
+
+    it('reports no snapshot url for a camera that has never stored one', async () => {
+      cameraAccessor.findAll.mockResolvedValue([buildCamera()]);
+
+      const result = await service.findAll(spaceId);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data[0].latestSnapshotUrl).toBeNull();
+      }
+    });
+
+    it('never exposes a DVR-derived url on a list item', async () => {
+      cameraAccessor.findAll.mockResolvedValue([buildCamera()]);
+
+      const result = await service.findAll(spaceId);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(Object.keys(result.data[0])).not.toContain('snapshotUrl');
       }
     });
   });
 
   describe('findById', () => {
-    it('returns the full snapshotUrl on detail', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-
-      const result = await service.findById('camera_01');
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.snapshotUrl).toBe(camera.snapshotUrl);
-      }
-    });
-
-    it('returns NOT_FOUND for a missing camera', async () => {
+    it('returns NOT_FOUND for a camera outside the space', async () => {
       cameraAccessor.findById.mockResolvedValue(null);
 
-      const result = await service.findById('camera_missing');
+      const result = await service.findById(spaceId, 'camera-uuid');
 
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.NOT_FOUND });
     });
   });
 
   describe('update', () => {
-    it('returns NOT_FOUND when updating a missing camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
+    it('rejects full-frame monitoring without an alert level', async () => {
+      cameraAccessor.findById.mockResolvedValue(
+        buildCamera({ alertType: null, monitorMode: 'partial' }),
+      );
 
-      const result = await service.update('camera_missing', {});
+      const result = await service.update(spaceId, 'camera-uuid', {
+        monitorMode: 'full',
+      });
 
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
       expect(cameraAccessor.update).not.toHaveBeenCalled();
     });
 
-    it('updates an existing camera', async () => {
+    it('marks a full-frame camera configured once it carries an alert level', async () => {
+      const camera = buildCamera({ alertType: null, isConfigured: false });
       cameraAccessor.findById.mockResolvedValue(camera);
-      cameraAccessor.update.mockResolvedValue({ ...camera, name: 'Updated' });
+      cameraAccessor.update.mockResolvedValue(
+        buildCamera({ alertType: 'suspicious' }),
+      );
 
-      const result = await service.update('camera_01', {
-        name: 'Updated',
+      await service.update(spaceId, 'camera-uuid', {
+        alertType: 'suspicious',
       });
 
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.name).toBe('Updated');
-      }
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        expect.objectContaining({
+          alertType: 'suspicious',
+          isConfigured: true,
+        }),
+      );
+    });
+
+    it('leaves a partial camera unconfigured while it has no zones', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      cameraAccessor.countMonitorZones.mockResolvedValue(0);
+      cameraAccessor.update.mockResolvedValue(
+        buildCamera({ monitorMode: 'partial', isConfigured: false }),
+      );
+
+      await service.update(spaceId, 'camera-uuid', {
+        monitorMode: 'partial',
+      });
+
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        expect.objectContaining({ isConfigured: false }),
+      );
+    });
+
+    it('configures a partial camera that already has a zone', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      cameraAccessor.countMonitorZones.mockResolvedValue(2);
+      cameraAccessor.update.mockResolvedValue(
+        buildCamera({ monitorMode: 'partial' }),
+      );
+
+      await service.update(spaceId, 'camera-uuid', {
+        monitorMode: 'partial',
+      });
+
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        expect.objectContaining({ isConfigured: true }),
+      );
     });
   });
 
   describe('delete', () => {
-    it('returns NOT_FOUND for a missing camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
+    it('reports NOT_FOUND when nothing was soft-deleted', async () => {
+      cameraAccessor.softDelete.mockResolvedValue(false);
 
-      const result = await service.delete('camera_missing');
+      const result = await service.delete(spaceId, 'camera-uuid');
 
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.NOT_FOUND });
     });
 
-    it('returns CONFLICT when the camera still has zones', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      cameraAccessor.countZones.mockResolvedValue(2);
+    it('succeeds on a logical delete', async () => {
+      cameraAccessor.softDelete.mockResolvedValue(true);
 
-      const result = await service.delete('camera_01');
-
-      expect(result).toMatchObject({ code: ErrorCode.CONFLICT });
-      expect(cameraAccessor.delete).not.toHaveBeenCalled();
-    });
-
-    it('deletes a camera with no zones', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      cameraAccessor.countZones.mockResolvedValue(0);
-
-      const result = await service.delete('camera_01');
-
-      expect(result).toEqual({ ok: true, data: null });
-      expect(cameraAccessor.delete).toHaveBeenCalledWith('camera_01');
+      await expect(service.delete(spaceId, 'camera-uuid')).resolves.toEqual({
+        ok: true,
+        data: null,
+      });
     });
   });
 
-  describe('getStatus', () => {
-    it('returns NOT_FOUND for a missing camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
+  describe('capture', () => {
+    it('returns the stored snapshot as an authorized url, never as bytes', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      snapshotService.captureAndStore.mockResolvedValue(
+        buildData({
+          id: 'snapshot-uuid',
+          cameraId: 'camera-uuid',
+          mimeType: 'image/jpeg',
+          byteSize: 12,
+          capturedAt: new Date('2026-01-01T00:00:00Z'),
+          data: Buffer.from('bytes'),
+        }),
+      );
 
-      const result = await service.getStatus('camera_missing');
-
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
-    });
-
-    it('returns the registry snapshot for an existing camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      statusRegistry.get.mockReturnValue({
-        cameraId: 'camera_01',
-        lastPolledAt: null,
-        lastSuccessAt: null,
-        lastErrorAt: null,
-        lastErrorCode: null,
-        lastLatencyMs: null,
-        lastPersonsDetected: null,
-      });
-
-      const result = await service.getStatus('camera_01');
+      const result = await service.capture(spaceId, 'camera-uuid');
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.data.cameraId).toBe('camera_01');
+        expect(result.data.url).toBe('/api/v1/snapshots/snapshot-uuid');
+        expect(Object.keys(result.data)).not.toContain('data');
       }
+    });
+
+    it('passes a capture failure through', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      snapshotService.captureAndStore.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
+      );
+
+      const result = await service.capture(spaceId, 'camera-uuid');
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_TIMEOUT,
+      });
     });
   });
 
   describe('analyze', () => {
-    it('returns NOT_FOUND for a missing camera', async () => {
-      cameraAccessor.findById.mockResolvedValue(null);
+    it('rejects an upload larger than the snapshot limit before any lookup', async () => {
+      const result = await service.analyze(
+        spaceId,
+        'camera-uuid',
+        Buffer.alloc(MAX_SNAPSHOT_BYTES + 1),
+        'image/jpeg',
+      );
 
-      const result = await service.analyze('camera_missing', Buffer.from(''));
-
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
-      expect(pipelineService.processImage).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
     });
 
-    it('delegates to PipelineService.processImage for an existing camera', async () => {
+    it('hands the described image to the pipeline', async () => {
+      const camera = buildCamera();
       cameraAccessor.findById.mockResolvedValue(camera);
-      const analysisResult = {
-        persons: [],
-        zoneResults: [],
-        eventsEmitted: [],
-      };
-      pipelineService.processImage.mockResolvedValue({
-        ok: true,
-        data: analysisResult,
-      });
-      const image = Buffer.from('jpeg-bytes');
+      pipelineService.processImage.mockResolvedValue(
+        buildData({ persons: [], zoneResults: [], alerts: [] }),
+      );
 
-      const result = await service.analyze('camera_01', image);
+      await service.analyze(
+        spaceId,
+        'camera-uuid',
+        Buffer.from('image'),
+        'image/jpeg',
+      );
 
-      expect(pipelineService.processImage).toHaveBeenCalledWith(camera, image);
-      expect(result).toEqual({ ok: true, data: analysisResult });
+      expect(pipelineService.processImage).toHaveBeenCalledWith(
+        spaceId,
+        camera,
+        expect.objectContaining({ mimeType: 'image/jpeg', byteSize: 5 }),
+      );
     });
   });
 });

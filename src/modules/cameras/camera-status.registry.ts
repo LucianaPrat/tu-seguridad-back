@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { AlertType } from '@prisma/client';
 
 export interface ZoneOccupancySnapshot {
-  zoneId: string;
+  /** `null` on a full-frame camera: the whole image is the monitored area. */
+  zoneId: string | null;
+  alertType: AlertType;
   occupied: boolean;
 }
 
-export interface CameraStatus {
+export interface CameraPipelineStatus {
   cameraId: string;
   lastPolledAt: Date | null;
   lastSuccessAt: Date | null;
@@ -17,7 +20,7 @@ export interface CameraStatus {
   zones: ZoneOccupancySnapshot[];
 }
 
-const EMPTY_STATUS = (cameraId: string): CameraStatus => ({
+const EMPTY_STATUS = (cameraId: string): CameraPipelineStatus => ({
   cameraId,
   lastPolledAt: null,
   lastSuccessAt: null,
@@ -30,20 +33,21 @@ const EMPTY_STATUS = (cameraId: string): CameraStatus => ({
 });
 
 /**
- * In-memory pipeline status per camera. All nulls until the polling
- * scheduler / manual analyze (T16) starts recording poll outcomes.
+ * In-memory pipeline status per camera. Deliberately not persisted: it is what
+ * this process has seen since boot, and `cameras.status` / `last_snapshot_at`
+ * are the durable version of the same question.
  */
 @Injectable()
 export class CameraStatusRegistry {
-  private readonly statuses = new Map<string, CameraStatus>();
+  private readonly statuses = new Map<string, CameraPipelineStatus>();
 
-  get(cameraId: string): CameraStatus {
+  get(cameraId: string): CameraPipelineStatus {
     return this.statuses.get(cameraId) ?? EMPTY_STATUS(cameraId);
   }
 
   record(
     cameraId: string,
-    patch: Partial<Omit<CameraStatus, 'cameraId'>>,
+    patch: Partial<Omit<CameraPipelineStatus, 'cameraId'>>,
   ): void {
     this.statuses.set(cameraId, { ...this.get(cameraId), ...patch });
   }

@@ -23,8 +23,12 @@ export const EnvNames = {
   FACE_AUTH_TOKEN: 'FACE_AUTH_TOKEN',
   DETECT_TIMEOUT_MS: 'DETECT_TIMEOUT_MS',
 
+  DVR_TIMEOUT_MS: 'DVR_TIMEOUT_MS',
+
   POLLING_ENABLED: 'POLLING_ENABLED',
+  POLLING_INTERVAL_SECONDS: 'POLLING_INTERVAL_SECONDS',
   SNAPSHOT_TIMEOUT_MS: 'SNAPSHOT_TIMEOUT_MS',
+  SNAPSHOT_MAX_BYTES: 'SNAPSHOT_MAX_BYTES',
   ENTER_CONSECUTIVE_POLLS: 'ENTER_CONSECUTIVE_POLLS',
   EXIT_CONSECUTIVE_POLLS: 'EXIT_CONSECUTIVE_POLLS',
 
@@ -42,7 +46,7 @@ export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
 
 export enum ErrorCode {
   VALIDATION_ERROR = 'VALIDATION_ERROR',
-  INVALID_POLYGON = 'INVALID_POLYGON',
+  INVALID_ZONE = 'INVALID_ZONE',
   UNAUTHORIZED = 'UNAUTHORIZED',
   FORBIDDEN = 'FORBIDDEN',
   NOT_FOUND = 'NOT_FOUND',
@@ -54,7 +58,7 @@ export enum ErrorCode {
 
 export const ERROR_CODE_HTTP_STATUS: Record<ErrorCode, number> = {
   [ErrorCode.VALIDATION_ERROR]: 400,
-  [ErrorCode.INVALID_POLYGON]: 400,
+  [ErrorCode.INVALID_ZONE]: 400,
   [ErrorCode.UNAUTHORIZED]: 401,
   [ErrorCode.FORBIDDEN]: 403,
   [ErrorCode.NOT_FOUND]: 404,
@@ -115,9 +119,20 @@ export const ALERT_ROUTING_DEFAULTS: readonly {
 ];
 
 export const PipelineDefaults = {
-  POLLING_INTERVAL_SECONDS: 5,
   CONFIDENCE_THRESHOLD: 0.45,
   ENTER_CONSECUTIVE_POLLS: 2,
   EXIT_CONSECUTIVE_POLLS: 3,
-  MIN_ZONE_AREA: 0.0001,
+} as const;
+
+/**
+ * Monitor zones are a percentage rectangle over the snapshot, not pixels: the
+ * DVR resolution or the snapshot size can change without invalidating a zone.
+ * The same bounds are enforced three times — DTO decorators, the service, and
+ * the `monitor_zones_rectangle_bounds_check` constraint in MySQL — because
+ * only the last one survives a write that never went through this API.
+ */
+export const ZoneGeometry = {
+  MIN_PERCENT: 0,
+  MAX_PERCENT: 100,
+  DECIMAL_PLACES: 2,
 } as const;

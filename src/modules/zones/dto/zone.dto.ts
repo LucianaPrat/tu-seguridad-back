@@ -1,25 +1,32 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Point } from '../geometry';
-import { PointDto } from './point.dto';
+import { AlertType } from '@prisma/client';
 
-export class ZoneDto {
+/**
+ * A monitored rectangle, in percent of the frame. Percent and not pixels: the
+ * recorder's resolution or the snapshot size can change without invalidating
+ * what the operator drew.
+ */
+export class MonitorZoneDto {
   @ApiProperty()
   id!: string;
 
   @ApiProperty()
   cameraId!: string;
 
-  @ApiProperty()
-  name!: string;
+  @ApiProperty({ example: 12.5, description: 'Percent of frame width' })
+  x!: number;
 
-  @ApiProperty()
-  enabled!: boolean;
+  @ApiProperty({ example: 20, description: 'Percent of frame height' })
+  y!: number;
 
-  @ApiProperty({ type: [PointDto] })
-  polygon!: Point[];
+  @ApiProperty({ example: 30 })
+  width!: number;
 
-  @ApiProperty()
-  geometryVersion!: number;
+  @ApiProperty({ example: 40 })
+  height!: number;
+
+  @ApiProperty({ enum: AlertType })
+  alertType!: AlertType;
 
   @ApiProperty()
   createdAt!: Date;

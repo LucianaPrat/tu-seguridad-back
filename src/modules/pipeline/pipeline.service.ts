@@ -1,13 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { Camera, Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { Camera, MonitorMode } from '@prisma/client';
+import { ErrorCode, PipelineDefaults } from '../../cross/common/constants';
+import { buildData, buildError, Either } from '../../cross/errors/either';
+import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
-import { ZoneAccessorService } from '../../data/accessors/zone.accessor';
-import { Either, buildData } from '../../cross/errors/either';
-import { EventsService } from '../events/events.service';
-import { ZoneEventDto } from '../events/dto/zone-event.dto';
+import { toCameraLabel } from '../cameras/camera.mapper';
+import { CapturedImage } from '../dvr/dvr-client.port';
 import { FaceAuthClientService } from '../face-auth-client/face-auth-client.service';
-import { Point, pointInPolygon } from '../zones/geometry';
+import { SnapshotService } from '../snapshots/snapshot.service';
+import { toRectangle } from '../zones/zone.mapper';
+import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
+import { AlertCandidate } from './alert-candidate';
+import { AlertEmitterPort } from './alert-emitter.port';
 import { AnalysisResult, ZoneResult } from './analysis-result';
 import {
   AnchorWithScore,
@@ -19,21 +23,32 @@ import {
 export class PipelineService {
   constructor(
     private readonly faceAuthClient: FaceAuthClientService,
-    private readonly zoneAccessor: ZoneAccessorService,
-    private readonly eventsService: EventsService,
+    private readonly zoneAccessor: MonitorZoneAccessorService,
+    private readonly snapshotService: SnapshotService,
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly occupancyEngine: OccupancyEngine,
+    private readonly alertEmitter: AlertEmitterPort,
   ) {}
 
+  /**
+   * One detection pass over one frame. Callers hand in an already-captured
+   * image so the same code serves the poll transport and the manual upload.
+   */
   async processImage(
+    spaceId: string,
     camera: Camera,
-    image: Buffer,
+    image: CapturedImage,
   ): Promise<Either<AnalysisResult>> {
+    const unusable = this.rejectUnusableCamera<AnalysisResult>(camera);
+    if (unusable) {
+      return unusable;
+    }
+
     const startedAt = Date.now();
     this.statusRegistry.record(camera.id, { lastPolledAt: new Date() });
 
     const detection = await this.faceAuthClient.detectPersons(
-      image,
+      image.data,
       `${camera.id}.jpg`,
     );
     if (!detection.ok) {
@@ -45,47 +60,52 @@ export class PipelineService {
     }
 
     const persons = detection.data.persons.filter(
-      (p) => p.detScore >= camera.confidenceThreshold,
+      (person) => person.detScore >= PipelineDefaults.CONFIDENCE_THRESHOLD,
     );
-
-    const zones = await this.zoneAccessor.findByCamera(camera.id);
-    const zoneInputs: ZoneInput[] = zones.map((zone) => ({
-      zoneId: zone.id,
-      enabled: zone.enabled,
-      polygon: zone.polygon as unknown as Point[],
-    }));
-    const enabledZoneInputs = zoneInputs.filter((zone) => zone.enabled);
-
-    const anchors: AnchorWithScore[] = persons.map((p) => ({
-      anchor: p.anchor,
-      detScore: p.detScore,
+    const anchors: AnchorWithScore[] = persons.map((person) => ({
+      anchor: toPercentPoint(person.anchor),
+      detScore: person.detScore,
     }));
 
+    const zones = await this.resolveZones(spaceId, camera);
     const transitions = this.occupancyEngine.evaluate(
       camera.id,
-      enabledZoneInputs,
+      zones,
       anchors,
     );
+    const entries = transitions.filter(
+      (transition) => transition.kind === 'entered',
+    );
 
-    const eventsEmitted: ZoneEventDto[] = [];
-    for (const transition of transitions) {
-      const eventDto = await this.eventsService.emit({
-        eventId: randomUUID(),
-        eventType: transition.eventType,
-        cameraId: camera.id,
-        zoneId: transition.zoneId,
-        occurredAt: new Date(),
-        confidence: transition.confidence,
-        personsInZone: transition.personsInZone,
-        anchor:
-          (transition.anchor as unknown as Prisma.InputJsonValue) ?? undefined,
-      });
-      eventsEmitted.push(eventDto);
+    // The frame is written to MySQL only when it is evidence: a poll that saw
+    // nothing would otherwise store a BLOB every tick, and snapshot retention
+    // is explicitly not solved yet.
+    const snapshotId =
+      entries.length > 0
+        ? await this.storeEvidence(spaceId, camera, image)
+        : null;
+
+    const detectedAt = new Date();
+    const alerts: AlertCandidate[] = entries.map((transition) => ({
+      cameraId: camera.id,
+      cameraLabel: toCameraLabel(camera),
+      zoneId: transition.zoneId,
+      alertType: transition.alertType,
+      detectedAt,
+      snapshotId,
+      personsDetected: transition.personsInZone,
+      confidence: transition.confidence,
+    }));
+    for (const alert of alerts) {
+      await this.alertEmitter.emit(spaceId, alert);
     }
 
-    const zoneResults: ZoneResult[] = enabledZoneInputs.map((zone) => ({
+    const zoneResults: ZoneResult[] = zones.map((zone) => ({
       zoneId: zone.zoneId,
-      occupied: anchors.some((a) => pointInPolygon(a.anchor, zone.polygon)),
+      alertType: zone.alertType,
+      occupied: anchors.some((candidate) =>
+        containsPoint(zone.rectangle, candidate.anchor),
+      ),
     }));
 
     this.statusRegistry.record(camera.id, {
@@ -95,6 +115,65 @@ export class PipelineService {
       zones: zoneResults,
     });
 
-    return buildData({ persons, zoneResults, eventsEmitted });
+    return buildData({ persons, zoneResults, alerts });
+  }
+
+  /**
+   * Full-frame cameras raise their own alert level over the whole image;
+   * partial ones raise the level of the rectangle the person walked into. Both
+   * go through the same evaluation, so hysteresis behaves identically.
+   */
+  private async resolveZones(
+    spaceId: string,
+    camera: Camera,
+  ): Promise<ZoneInput[]> {
+    if (camera.monitorMode === MonitorMode.full) {
+      return camera.alertType
+        ? [
+            {
+              zoneId: null,
+              alertType: camera.alertType,
+              rectangle: FULL_FRAME,
+            },
+          ]
+        : [];
+    }
+
+    const zones = await this.zoneAccessor.findByCamera(spaceId, camera.id);
+    return zones.map((zone) => ({
+      zoneId: zone.id,
+      alertType: zone.alertType,
+      rectangle: toRectangle(zone),
+    }));
+  }
+
+  private async storeEvidence(
+    spaceId: string,
+    camera: Camera,
+    image: CapturedImage,
+  ): Promise<string | null> {
+    const stored = await this.snapshotService.store(spaceId, camera.id, image);
+    return stored.ok ? stored.data.id : null;
+  }
+
+  /**
+   * A camera that is soft-deleted, switched off or not configured yet has
+   * nothing to evaluate. Checked here rather than only in the poll query so the
+   * manual analyze route cannot bypass it.
+   */
+  private rejectUnusableCamera<T>(camera: Camera): Either<T> | undefined {
+    if (camera.deletedAt) {
+      return buildError(ErrorCode.NOT_FOUND, `Camera ${camera.id} not found`);
+    }
+    if (!camera.isEnabled) {
+      return buildError(ErrorCode.CONFLICT, `Camera ${camera.id} is disabled`);
+    }
+    if (!camera.isConfigured) {
+      return buildError(
+        ErrorCode.CONFLICT,
+        `Camera ${camera.id} has no monitor configuration`,
+      );
+    }
+    return undefined;
   }
 }

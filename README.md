@@ -1,6 +1,6 @@
 # tu-seguridad-back
 
-Backend for "person detection in restricted zones" system. 8 home cameras behind DVR/NVR. Owns camera/zone config (MySQL), detection-pipeline orchestration, zone evaluation (point-in-polygon + hysteresis), technical events, live event push to frontend over WebSocket. Person detection delegated to external upstream API ([face-auth](#face-auth-upstream-contract)) — backend sends snapshots, gets back bounding boxes + precomputed foot-point anchor.
+Backend for "person detection in restricted zones" system. 8 home cameras behind DVR/NVR. Owns tenant/camera/zone config (MySQL), detection-pipeline orchestration, zone evaluation (percentage rectangles + hysteresis), alert history, live event push to frontend over WebSocket. Person detection delegated to external upstream API ([face-auth](#face-auth-upstream-contract)) — backend sends snapshots, gets back bounding boxes + precomputed foot-point anchor.
 
 Engineering rules are central, consumed as a submodule at [`.standards/`](.standards/README.md) (`git submodule update --init` in a fresh clone or worktree). This repo's own facts, standards map, and declared overrides: [`AGENTS.md`](AGENTS.md). Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md). Live status of every task: [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md). Design decisions: [`ARCHITECTURE.md`](ARCHITECTURE.md). Tooling/ops gotchas: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
 
@@ -84,16 +84,21 @@ Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/do
 | `POST /api/v1/auth/refresh` | Public. Reads the refresh cookie — no body fallback — rotates the pair and re-sets the cookie. |
 | `POST /api/v1/auth/logout` | Public. Clears the refresh cookie, 204. |
 | `GET /api/v1/auth/me` | Bearer. Current user from the access-token payload. |
-| `GET/POST /api/v1/cameras`, `GET/PUT/DELETE /api/v1/cameras/:id` | CRUD. List masks `snapshotUrl` as `"***"`; detail returns full. |
-| `GET /api/v1/cameras/:id/status` | Pipeline status: last poll/success/error, latency, occupancy per zone. |
-| `POST /api/v1/cameras/:id/analyze` | Multipart `file` upload (max 10MB): runs full detection pipeline synchronously on image — manual-test path when DVR unreachable. |
-| `GET/POST /api/v1/cameras/:id/zones` | List / create zones for camera. |
-| `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` bumps `geometryVersion` only when polygon changes. |
-| `POST /api/v1/zones/:id/validate` | Dry-run polygon validation → `{valid, violations[]}`, **always** 200. |
-| `GET /api/v1/events` | Filters: `cameraId`, `zoneId`, `eventType`, `from`, `to`, `limit` (default 100, silently clamped to 1000). |
+| `GET /api/v1/dvr` | Bearer. The space's recorder without its password. |
+| `PUT /api/v1/dvr` | Space admin. Initialize or re-point the recorder: connectivity is tested first, and a configuration that cannot be reached is not stored. Discovers and reconciles the camera channels. |
+| `POST /api/v1/dvr/discovery` | Space admin. Re-runs discovery against the stored credentials. Matching channels keep their configuration; channels that stopped answering become `isConfigured: false`. |
+| `GET /api/v1/cameras`, `GET /api/v1/cameras/:id` | Cameras of the caller's space, soft-deleted ones excluded. Carries the discovery fields, the monitor configuration and a derived `latestSnapshotUrl`. |
+| `PUT /api/v1/cameras/:id` | Space admin. Operator-editable fields only — `externalId` and `status` are rejected. Full-frame monitoring requires an `alertType`. |
+| `DELETE /api/v1/cameras/:id` | Space admin. Logical delete: the camera leaves every read and the poll list, its alert history stays. |
+| `GET /api/v1/cameras/:id/status` | Pipeline status: last poll/success/error, latency, occupancy per monitored area. |
+| `POST /api/v1/cameras/:id/snapshots` | Pulls a frame from the recorder now, stores it, answers with its authenticated URL. |
+| `POST /api/v1/cameras/:id/analyze` | Multipart `file` upload (image, max `SNAPSHOT_MAX_BYTES`): runs the detection pipeline synchronously — manual path when the DVR is unreachable. |
+| `GET /api/v1/snapshots/:id` | The stored image bytes, space-scoped. The only route that serves them. |
+| `GET/POST /api/v1/cameras/:id/zones` | List / create percentage-rectangle monitor zones. Creating is admin-only. |
+| `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` validates the merged rectangle; `DELETE` is logical. Both admin-only. |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
 | `GET /health/dependencies` | Public. Separate from `ready`: short-timeout reachability check against face-auth upstream. Degraded upstream reports here **without** marking whole app not-ready (camera/zone CRUD still works). |
-| WS namespace `/events` | JWT in handshake `auth.token`; server emits `zone-event` on every persisted event. Clients disconnected cleanly on graceful shutdown. |
+| WS namespace `/events` | JWT in handshake `auth.token`. Transport only until the alert-event domain lands; clients are disconnected cleanly on graceful shutdown. |
 
 Full interactive docs: `GET /docs` (Swagger UI), machine-readable spec at `/docs-json`.
 
@@ -118,7 +123,7 @@ JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`
 }
 ```
 
-`anchor` already normalized foot point (bbox bottom-center) — used directly for point-in-polygon zone evaluation. Upstream failures map to `UPSTREAM_TIMEOUT` or `UPSTREAM_ERROR` (upstream HTTP status in message, never `Fa-Token` value). Endpoint IP-throttled upstream — never poll faster than `pollingIntervalSeconds` per camera.
+`anchor` already normalized foot point (bbox bottom-center), scaled to percent before it is tested against a monitor rectangle. Upstream failures map to `UPSTREAM_TIMEOUT` or `UPSTREAM_ERROR` (upstream HTTP status in message, never `Fa-Token` value). Endpoint IP-throttled upstream — never poll faster than `POLLING_INTERVAL_SECONDS`.
 
 Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit breaker** (in-memory, one shared breaker per process — upstream is single tenant). Past failure threshold (50% over rolling window, `resetTimeout` 30s) breaker opens → short-circuits to `UPSTREAM_ERROR 'face-auth circuit open'` **without** attempting call — down/throttled upstream stops eating full `DETECT_TIMEOUT_MS` waits, stops being hammered. Single probe allowed after reset (half-open). Open/half-open/close transitions logged; current state readable via `FaceAuthClientService.circuitState`.
 
@@ -126,14 +131,15 @@ Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit brea
 
 `PipelineService.processImage` (`src/modules/pipeline/`) — single place full loop runs, whether triggered automatically or manually:
 
-1. `SnapshotService` fetches DVR image (or uploaded file, for `/analyze`).
+0. A camera that is soft-deleted, disabled or unconfigured is refused before anything else runs.
+1. `SnapshotService.capture` pulls the frame through `DvrClientPort` and records the camera's reachability and freshness (`status`, `lastSnapshotAt`). `/analyze` supplies an uploaded image instead.
 2. `FaceAuthClientService.detectPersons` gets bounding boxes + anchors back.
-3. Persons below camera's `confidenceThreshold` filtered out.
-4. `OccupancyEngine.evaluate` (`src/modules/pipeline/occupancy.engine.ts`) runs point-in-polygon per enabled zone, applies **hysteresis**: zone fires `PERSON_ENTERED_ZONE` only after `ENTER_CONSECUTIVE_POLLS` consecutive polls with ≥1 anchor inside, `PERSON_EXITED_ZONE` after `EXIT_CONSECUTIVE_POLLS` consecutive misses. Single missed/extra poll (flicker) fires no event — miss/hit during pending transition resets streak to zero, not decrements it.
-5. Each transition persisted (idempotent on `eventId`), broadcast over `/events` WebSocket namespace via `EventsService.emit`.
-6. `CameraStatusRegistry` records outcome (`lastPolledAt`, `lastSuccessAt`, `lastErrorCode`, `lastLatencyMs`, `lastPersonsDetected`, per-zone occupancy) — surfaced at `GET /cameras/:id/status`.
+3. Persons below `PipelineDefaults.CONFIDENCE_THRESHOLD` filtered out.
+4. `OccupancyEngine.evaluate` (`src/modules/pipeline/occupancy.engine.ts`) tests each anchor against the monitored rectangles — one implicit full-frame area in `monitorMode = full`, the camera's `monitor_zones` in `partial` — and applies **hysteresis**: an area is entered only after `ENTER_CONSECUTIVE_POLLS` consecutive polls with ≥1 anchor inside, and exited after `EXIT_CONSECUTIVE_POLLS` consecutive misses. Single missed/extra poll (flicker) raises nothing — a miss/hit during a pending transition resets the streak to zero, it does not decrement it.
+5. Each entry becomes an alert candidate carrying the camera label as it read at detection time and the alert level of its area — `Camera.alertType` in full mode, the zone's own in partial. The frame is stored as a `snapshots` BLOB only when an alert is raised, and the candidate goes to `AlertEmitterPort`. Its only implementation today logs; persistence, WebSocket broadcast and channel delivery arrive with the alert-event domain.
+6. `CameraStatusRegistry` records outcome (`lastPolledAt`, `lastSuccessAt`, `lastErrorCode`, `lastLatencyMs`, `lastPersonsDetected`, per-area occupancy) — surfaced at `GET /cameras/:id/status`.
 
-`PollingScheduler` drives step 1–6 automatically on per-camera interval when `POLLING_ENABLED=true` (off by default in dev). Skips a tick if previous one for that camera still in flight (counted, not silently dropped), re-syncs registered intervals every 30s to pick up camera CRUD changes. `POST /cameras/:id/analyze` runs same `processImage` synchronously against uploaded image — manual path when DVR itself unreachable, or for testing without waiting on poll cadence.
+`PollingScheduler` drives steps 1–6 automatically every `POLLING_INTERVAL_SECONDS` when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable. A camera whose previous poll is still in flight is counted as skipped, not queued behind it. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
 
 ## Observability, resilience & supply chain
 

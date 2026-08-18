@@ -8,7 +8,6 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { EnvNames } from '../../cross/common/constants';
-import { ZoneEventDto } from './dto/zone-event.dto';
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
@@ -50,7 +49,12 @@ export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
     }
   }
 
-  broadcastZoneEvent(event: ZoneEventDto): void {
-    this.server.emit('zone-event', event);
+  /**
+   * Transport only: the gateway authenticates the socket and fans a payload
+   * out. What an alert looks like on the wire belongs to the alert-event
+   * domain, which calls this with its own DTO.
+   */
+  broadcast(event: string, payload: unknown): void {
+    this.server.emit(event, payload);
   }
 }

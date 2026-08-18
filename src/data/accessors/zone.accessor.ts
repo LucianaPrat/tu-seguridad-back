@@ -13,7 +13,7 @@ export class MonitorZoneAccessorService {
         deletedAt: null,
         camera: { dvr: { spaceId }, deletedAt: null },
       },
-      orderBy: { id: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
   }
 

@@ -1,68 +1,99 @@
+import { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CamerasController } from './cameras.controller';
 
 describe('CamerasController', () => {
+  const user: JwtPayload = {
+    sub: 1,
+    email: 'admin@example.com',
+    spaceId: 'space-uuid',
+    role: 'admin',
+    profileCompleted: true,
+  };
+
   let camerasService: {
-    create: jest.Mock;
     findAll: jest.Mock;
     findById: jest.Mock;
     update: jest.Mock;
     delete: jest.Mock;
     getStatus: jest.Mock;
+    capture: jest.Mock;
     analyze: jest.Mock;
   };
   let controller: CamerasController;
 
   beforeEach(() => {
     camerasService = {
-      create: jest.fn(),
       findAll: jest.fn(),
       findById: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
       getStatus: jest.fn(),
+      capture: jest.fn(),
       analyze: jest.fn(),
     };
     controller = new CamerasController(camerasService as never);
   });
 
-  it('delegates create', async () => {
-    const dto = { id: 'camera_01', name: 'Cam', snapshotUrl: 'http://x' };
-    await controller.create(dto);
-    expect(camerasService.create).toHaveBeenCalledWith(dto);
+  it('delegates findAll with the caller space', async () => {
+    await controller.findAll(user);
+    expect(camerasService.findAll).toHaveBeenCalledWith('space-uuid');
   });
 
-  it('delegates findAll', async () => {
-    await controller.findAll();
-    expect(camerasService.findAll).toHaveBeenCalled();
-  });
-
-  it('delegates findOne', async () => {
-    await controller.findOne('camera_01');
-    expect(camerasService.findById).toHaveBeenCalledWith('camera_01');
+  it('delegates findOne with the caller space', async () => {
+    await controller.findOne(user, 'camera-uuid');
+    expect(camerasService.findById).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+    );
   });
 
   it('delegates update', async () => {
     const dto = { name: 'Renamed' };
-    await controller.update('camera_01', dto);
-    expect(camerasService.update).toHaveBeenCalledWith('camera_01', dto);
+    await controller.update(user, 'camera-uuid', dto);
+    expect(camerasService.update).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+      dto,
+    );
   });
 
   it('delegates remove', async () => {
-    await controller.remove('camera_01');
-    expect(camerasService.delete).toHaveBeenCalledWith('camera_01');
+    await controller.remove(user, 'camera-uuid');
+    expect(camerasService.delete).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+    );
   });
 
   it('delegates status', async () => {
-    await controller.status('camera_01');
-    expect(camerasService.getStatus).toHaveBeenCalledWith('camera_01');
+    await controller.status(user, 'camera-uuid');
+    expect(camerasService.getStatus).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+    );
   });
 
-  it('delegates analyze with the uploaded file buffer', async () => {
-    const file = { buffer: Buffer.from('img') } as Express.Multer.File;
-    await controller.analyze('camera_01', file);
+  it('delegates capture', async () => {
+    await controller.capture(user, 'camera-uuid');
+    expect(camerasService.capture).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+    );
+  });
+
+  it('delegates analyze with the uploaded bytes and their mime type', async () => {
+    const file = {
+      buffer: Buffer.from('image'),
+      mimetype: 'image/jpeg',
+    } as Express.Multer.File;
+
+    await controller.analyze(user, 'camera-uuid', file);
+
     expect(camerasService.analyze).toHaveBeenCalledWith(
-      'camera_01',
+      'space-uuid',
+      'camera-uuid',
       file.buffer,
+      'image/jpeg',
     );
   });
 });

@@ -164,6 +164,68 @@ describe('tenant-scoped accessors (int)', () => {
     });
   });
 
+  it('resolves the latest snapshot per camera and records capture outcomes', async () => {
+    const tenantA = await createTenant('freshness');
+    const tenantB = await createTenant('freshness-other');
+    const older = await snapshotAccessor.create(tenantA.space.id, {
+      cameraId: tenantA.camera.id,
+      data: Buffer.from('older'),
+      mimeType: 'image/jpeg',
+      byteSize: 5,
+      sha256: 'c'.repeat(64),
+      capturedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    const newer = await snapshotAccessor.create(tenantA.space.id, {
+      cameraId: tenantA.camera.id,
+      data: Buffer.from('newer'),
+      mimeType: 'image/jpeg',
+      byteSize: 5,
+      sha256: 'd'.repeat(64),
+      capturedAt: new Date('2026-01-02T00:00:00Z'),
+    });
+    if (!older || !newer) {
+      throw new Error('snapshot fixture creation unexpectedly failed');
+    }
+
+    const latest = await snapshotAccessor.findLatestIdsByCameraIds(
+      tenantA.space.id,
+      [tenantA.camera.id, tenantB.camera.id],
+    );
+    expect(latest.get(tenantA.camera.id)).toBe(newer.id);
+    // Space A asking about a Space B camera gets nothing, not the other
+    // tenant's newest frame.
+    expect(latest.has(tenantB.camera.id)).toBe(false);
+
+    const capturedAt = new Date('2026-01-03T00:00:00Z');
+    await cameraAccessor.recordCaptureOutcome(
+      tenantA.space.id,
+      tenantA.camera.id,
+      { status: 'online', lastSnapshotAt: capturedAt },
+    );
+    expect(
+      await cameraAccessor.findById(tenantA.space.id, tenantA.camera.id),
+    ).toMatchObject({ status: 'online', lastSnapshotAt: capturedAt });
+
+    // A late poll result must not write to a camera another request deleted.
+    await cameraAccessor.softDelete(tenantA.space.id, tenantA.camera.id);
+    await cameraAccessor.recordCaptureOutcome(
+      tenantA.space.id,
+      tenantA.camera.id,
+      { status: 'offline' },
+    );
+    const deleted = await prisma.camera.findUnique({
+      where: { id: tenantA.camera.id },
+    });
+    expect(deleted).toMatchObject({ status: 'online' });
+
+    expect(
+      await dvrAccessor.recordTestResult(tenantA.space.id, false),
+    ).toMatchObject({ lastTestOk: false });
+    expect(await dvrAccessor.findSpaceIdsWithDvr()).toEqual(
+      expect.arrayContaining([tenantA.space.id, tenantB.space.id]),
+    );
+  });
+
   it('retains discovered configuration, marks missing channels unconfigured, and never revives a deleted camera', async () => {
     const tenant = await createTenant('discovery');
     const configured = await cameraAccessor.update(
@@ -190,8 +252,10 @@ describe('tenant-scoped accessors (int)', () => {
     const retained = reconciled.find(
       (camera) => camera.id === tenant.camera.id,
     );
+    // The operator's name survives: discovery only supplies it when the
+    // channel first appears, and refreshes the status from then on.
     expect(retained).toMatchObject({
-      name: 'Renamed discovered camera',
+      name: tenant.camera.name,
       monitorMode: 'partial',
       alertType: 'suspicious',
       isConfigured: true,

@@ -19,8 +19,15 @@ export interface JwtPayload {
   profileCompleted: boolean;
 }
 
+/**
+ * `jti` is what makes two refresh tokens for the same session distinct. Without
+ * it, a refresh inside the same second as the previous issuance re-signs an
+ * identical payload — same string, same hash — and the rotation write dies on
+ * the `auth_tokens.token_hash` unique constraint.
+ */
 export interface RefreshJwtPayload extends JwtPayload {
   type: 'refresh';
+  jti: string;
 }
 
 type ExpiresIn = NonNullable<import('@nestjs/jwt').JwtSignOptions['expiresIn']>;

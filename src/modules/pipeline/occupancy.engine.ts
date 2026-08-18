@@ -1,6 +1,6 @@
-import { ZoneEventType } from '@prisma/client';
+import { AlertType } from '@prisma/client';
 import { PipelineDefaults } from '../../cross/common/constants';
-import { Point, pointInPolygon } from '../zones/geometry';
+import { containsPoint, Point, Rectangle } from '../zones/rectangle';
 
 type OccupancyStateName =
   'Outside' | 'CandidateInside' | 'Inside' | 'CandidateOutside';
@@ -11,30 +11,35 @@ interface ZoneOccupancyState {
 }
 
 export interface ZoneInput {
-  zoneId: string;
-  enabled: boolean;
-  polygon: Point[];
+  /** `null` for the implicit full-frame area of a `monitorMode = full` camera. */
+  zoneId: string | null;
+  alertType: AlertType;
+  rectangle: Rectangle;
 }
 
 export interface AnchorWithScore {
+  /** Percent of the frame, already converted from the detector's [0,1]. */
   anchor: Point;
   detScore: number;
 }
 
 export interface OccupancyTransition {
-  zoneId: string;
-  eventType: ZoneEventType;
+  zoneId: string | null;
+  alertType: AlertType;
+  kind: 'entered' | 'exited';
   confidence: number | null;
   personsInZone: number;
-  anchor: Point | null;
 }
 
 const OUTSIDE: ZoneOccupancyState = { state: 'Outside', consecutiveCount: 0 };
 const INSIDE: ZoneOccupancyState = { state: 'Inside', consecutiveCount: 0 };
+const FULL_FRAME_KEY = 'full-frame';
 
 /**
- * Per (cameraId, zoneId) occupancy state machine with hysteresis
- * (architecture README §10.1/§10.2). Pure domain logic: no I/O.
+ * Per (camera, zone) occupancy state machine with hysteresis: a person has to
+ * be seen inside for N consecutive polls before an entry counts, and missing
+ * for M before an exit does. Pure domain logic, no I/O — which is what lets the
+ * poll transport stay undecided.
  */
 export class OccupancyEngine {
   private readonly states = new Map<string, ZoneOccupancyState>();
@@ -52,14 +57,10 @@ export class OccupancyEngine {
     const transitions: OccupancyTransition[] = [];
 
     for (const zone of zones) {
-      if (!zone.enabled) {
-        continue;
-      }
-
       const key = this.key(cameraId, zone.zoneId);
       const current = this.states.get(key) ?? OUTSIDE;
-      const anchorsInside = anchors.filter((a) =>
-        pointInPolygon(a.anchor, zone.polygon),
+      const anchorsInside = anchors.filter((candidate) =>
+        containsPoint(zone.rectangle, candidate.anchor),
       );
 
       const { state: next, transition } = this.nextState(
@@ -71,18 +72,20 @@ export class OccupancyEngine {
       if (transition === 'ENTER') {
         transitions.push({
           zoneId: zone.zoneId,
-          eventType: ZoneEventType.PERSON_ENTERED_ZONE,
-          confidence: Math.max(...anchorsInside.map((a) => a.detScore)),
+          alertType: zone.alertType,
+          kind: 'entered',
+          confidence: Math.max(
+            ...anchorsInside.map((candidate) => candidate.detScore),
+          ),
           personsInZone: anchorsInside.length,
-          anchor: anchorsInside[0].anchor,
         });
       } else if (transition === 'EXIT') {
         transitions.push({
           zoneId: zone.zoneId,
-          eventType: ZoneEventType.PERSON_EXITED_ZONE,
+          alertType: zone.alertType,
+          kind: 'exited',
           confidence: null,
           personsInZone: 0,
-          anchor: null,
         });
       }
     }
@@ -90,7 +93,7 @@ export class OccupancyEngine {
     return transitions;
   }
 
-  /** Clears all zone state for a camera (zone edit or camera disable). */
+  /** Clears all zone state for a camera (zone edit, disable or delete). */
   reset(cameraId: string): void {
     const prefix = `${cameraId}:`;
     for (const key of this.states.keys()) {
@@ -100,8 +103,8 @@ export class OccupancyEngine {
     }
   }
 
-  private key(cameraId: string, zoneId: string): string {
-    return `${cameraId}:${zoneId}`;
+  private key(cameraId: string, zoneId: string | null): string {
+    return `${cameraId}:${zoneId ?? FULL_FRAME_KEY}`;
   }
 
   private nextState(

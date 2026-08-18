@@ -1,21 +1,34 @@
 import { Camera } from '@prisma/client';
+import { snapshotUrl } from '../snapshots/snapshot.mapper';
 import { CameraDto } from './dto/camera.dto';
 
-const MASKED_SNAPSHOT_URL = '***';
-
-export function toCameraDetailDto(camera: Camera): CameraDto {
+/**
+ * One mapper for list and detail. The setup-era schema needed two because the
+ * list had to mask `snapshotUrl`; the column is gone, and with it the class of
+ * bug where a new response path forgets to mask.
+ */
+export function toCameraDto(
+  camera: Camera,
+  latestSnapshotId?: string | null,
+): CameraDto {
   return {
     id: camera.id,
+    externalId: camera.externalId,
     name: camera.name,
-    enabled: camera.enabled,
-    snapshotUrl: camera.snapshotUrl,
-    pollingIntervalSeconds: camera.pollingIntervalSeconds,
-    confidenceThreshold: camera.confidenceThreshold,
+    location: camera.location,
+    status: camera.status,
+    isConfigured: camera.isConfigured,
+    isEnabled: camera.isEnabled,
+    monitorMode: camera.monitorMode,
+    alertType: camera.alertType,
+    lastSnapshotAt: camera.lastSnapshotAt,
+    latestSnapshotUrl: latestSnapshotId ? snapshotUrl(latestSnapshotId) : null,
     createdAt: camera.createdAt,
     updatedAt: camera.updatedAt,
   };
 }
 
-export function toCameraListItemDto(camera: Camera): CameraDto {
-  return { ...toCameraDetailDto(camera), snapshotUrl: MASKED_SNAPSHOT_URL };
+/** What history stores instead of a foreign key, so renames cannot rewrite it. */
+export function toCameraLabel(camera: Camera): string {
+  return camera.location ? `${camera.name} – ${camera.location}` : camera.name;
 }

@@ -41,6 +41,47 @@
             }
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "tags": [
           "auth"
         ]
@@ -62,6 +103,11 @@
             }
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "tags": [
           "auth"
         ]
@@ -76,6 +122,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "tags": [
           "auth"
         ]
@@ -97,8 +148,317 @@
             }
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/complete-profile": {
+      "post": {
+        "operationId": "AuthController_completeProfile_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password-reset/request": {
+      "post": {
+        "operationId": "CredentialRecoveryController_requestPasswordReset_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "CredentialRecoveryController_confirmPasswordReset_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/magic-link/request": {
+      "post": {
+        "operationId": "CredentialRecoveryController_requestMagicLink_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/magic-link/consume": {
+      "post": {
+        "operationId": "CredentialRecoveryController_consumeMagicLink_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/face/identities": {
+      "post": {
+        "operationId": "FaceIdentityController_register_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceIdentityDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/face/login": {
+      "post": {
+        "operationId": "FaceIdentityController_login_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/invitations": {
+      "post": {
+        "operationId": "InvitationsController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvitationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/accept": {
+      "post": {
+        "operationId": "InvitationsController_accept_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
         ]
       }
     },
@@ -606,23 +966,20 @@
         ]
       }
     },
-    "/api/v1/cameras": {
-      "post": {
-        "operationId": "CamerasController_create_v1",
+    "/api/v1/dvr": {
+      "get": {
+        "operationId": "DvrController_findOne_v1",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCameraDto"
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrDto"
+                }
               }
             }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
           }
         },
         "security": [
@@ -631,15 +988,123 @@
           }
         ],
         "tags": [
-          "cameras"
+          "dvr"
         ]
       },
+      "put": {
+        "operationId": "DvrController_configure_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureDvrDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "dvr"
+        ]
+      }
+    },
+    "/api/v1/dvr/discovery": {
+      "post": {
+        "operationId": "DvrController_rediscover_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "dvr"
+        ]
+      }
+    },
+    "/api/v1/snapshots/{id}": {
+      "get": {
+        "operationId": "SnapshotsController_read_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot bytes",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "snapshots"
+        ]
+      }
+    },
+    "/api/v1/cameras": {
       "get": {
         "operationId": "CamerasController_findAll_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CameraDto"
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -667,7 +1132,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CameraDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -703,7 +1175,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CameraDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -770,6 +1249,41 @@
         ]
       }
     },
+    "/api/v1/cameras/{id}/snapshots": {
+      "post": {
+        "operationId": "CamerasController_capture_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
     "/api/v1/cameras/{id}/analyze": {
       "post": {
         "operationId": "CamerasController_analyze_v1",
@@ -814,82 +1328,6 @@
         ]
       }
     },
-    "/api/v1/events": {
-      "get": {
-        "operationId": "EventsController_query_v1",
-        "parameters": [
-          {
-            "name": "cameraId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "zoneId",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "eventType",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "PERSON_ENTERED_ZONE",
-                "PERSON_EXITED_ZONE"
-              ]
-            }
-          },
-          {
-            "name": "from",
-            "required": false,
-            "in": "query",
-            "description": "ISO 8601 date-time, occurredAt >= from",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "required": false,
-            "in": "query",
-            "description": "ISO 8601 date-time, occurredAt <= to",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "description": "Silently clamped to [1, 1000]",
-            "schema": {
-              "default": 100,
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "events"
-        ]
-      }
-    },
     "/api/v1/cameras/{cameraId}/zones": {
       "get": {
         "operationId": "ZonesController_findByCamera_v1",
@@ -905,7 +1343,17 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MonitorZoneDto"
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -940,8 +1388,15 @@
           }
         },
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -969,7 +1424,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1005,7 +1467,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1043,44 +1512,6 @@
           "zones"
         ]
       }
-    },
-    "/api/v1/zones/{id}/validate": {
-      "post": {
-        "operationId": "ZonesController_validate_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ValidateZoneDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "zones"
-        ]
-      }
     }
   },
   "info": {
@@ -1092,6 +1523,10 @@
   "tags": [
     {
       "name": "auth",
+      "description": ""
+    },
+    {
+      "name": "invitations",
       "description": ""
     },
     {
@@ -1149,6 +1584,44 @@
           "accessToken"
         ]
       },
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "owner@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164"
+          },
+          "spaceName": {
+            "type": "string",
+            "example": "My Secure Space"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "firstName",
+          "lastName",
+          "phone",
+          "spaceName"
+        ]
+      },
       "MeDto": {
         "type": "object",
         "properties": {
@@ -1157,56 +1630,368 @@
           },
           "email": {
             "type": "string",
-            "example": "admin@example.com"
+            "example": "owner@example.com"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455"
+          },
+          "avatarUrl": {
+            "type": "object",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "profileCompleted": {
+            "type": "boolean",
+            "description": "False until an invited member completes name, phone and password"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceName": {
+            "type": "string",
+            "example": "My Secure Space"
           },
           "role": {
             "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ],
             "example": "admin"
+          },
+          "receiveAlerts": {
+            "type": "boolean",
+            "description": "Whether this member receives alert deliveries"
           }
         },
         "required": [
           "id",
           "email",
-          "role"
+          "firstName",
+          "lastName",
+          "phone",
+          "isActive",
+          "profileCompleted",
+          "spaceId",
+          "spaceName",
+          "role",
+          "receiveAlerts"
         ]
       },
-      "CreateCameraDto": {
+      "CompleteProfileDto": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12
+          },
+          "avatarUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName",
+          "phone",
+          "password"
+        ]
+      },
+      "EmailRequestDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "owner@example.com"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "AcknowledgementDto": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": [
+          "accepted"
+        ]
+      },
+      "ResetPasswordDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Opaque token from the delivered link"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ]
+      },
+      "CredentialTokenDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Opaque token from the delivered link"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "FaceTokenDto": {
+        "type": "object",
+        "properties": {
+          "faceToken": {
+            "type": "string",
+            "description": "Opaque Face Auth identifier"
+          }
+        },
+        "required": [
+          "faceToken"
+        ]
+      },
+      "FaceIdentityDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
-            "example": "camera_01",
-            "pattern": "^camera_[a-z0-9_]+$"
+            "format": "uuid"
           },
-          "name": {
-            "type": "string",
-            "example": "Front door"
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "snapshotUrl": {
-            "type": "string",
-            "example": "http://user:pass@192.168.1.50/snapshot.jpg"
-          },
-          "pollingIntervalSeconds": {
-            "type": "number",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 3600
-          },
-          "confidenceThreshold": {
-            "type": "number",
-            "default": 0.45,
-            "minimum": 0,
-            "maximum": 1
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
           }
         },
         "required": [
           "id",
+          "createdAt"
+        ]
+      },
+      "CreateInvitationDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "member@example.com"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "InvitationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "example": "member@example.com"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "expiresAt",
+          "createdAt"
+        ]
+      },
+      "DvrDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "America/Argentina/Buenos_Aires"
+          },
+          "lastTestAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "lastTestOk": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "cameraCount": {
+            "type": "number",
+            "description": "Cameras currently discovered on this recorder"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "username",
+          "timezone",
+          "cameraCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ConfigureDvrDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "example": "http://192.168.1.10:8000"
+          },
+          "username": {
+            "type": "string",
+            "example": "admin"
+          },
+          "password": {
+            "type": "string",
+            "example": "dvr-password"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "America/Argentina/Buenos_Aires"
+          }
+        },
+        "required": [
+          "url",
+          "username",
+          "password",
+          "timezone"
+        ]
+      },
+      "CameraDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "DVR channel identifier; stable across renames"
+          },
+          "name": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline"
+            ]
+          },
+          "isConfigured": {
+            "type": "boolean",
+            "description": "Monitor behavior saved and usable"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          },
+          "monitorMode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "partial"
+            ]
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ],
+            "nullable": true,
+            "description": "Alert level for full-frame monitoring; zones carry their own"
+          },
+          "lastSnapshotAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the recorder last handed over a frame"
+          },
+          "latestSnapshotUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Authenticated URL of the latest stored frame, if any"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "externalId",
           "name",
-          "snapshotUrl"
+          "status",
+          "isConfigured",
+          "isEnabled",
+          "monitorMode",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "UpdateCameraDto": {
@@ -1216,99 +2001,182 @@
             "type": "string",
             "example": "Front door"
           },
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "snapshotUrl": {
+          "location": {
             "type": "string",
-            "example": "http://user:pass@192.168.1.50/snapshot.jpg"
+            "example": "Street side"
           },
-          "pollingIntervalSeconds": {
-            "type": "number",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 3600
+          "isEnabled": {
+            "type": "boolean"
           },
-          "confidenceThreshold": {
-            "type": "number",
-            "default": 0.45,
-            "minimum": 0,
-            "maximum": 1
+          "monitorMode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "partial"
+            ]
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ],
+            "description": "Required when monitorMode is full"
           }
         }
       },
-      "PointDto": {
+      "SnapshotDto": {
         "type": "object",
         "properties": {
-          "x": {
+          "id": {
+            "type": "string"
+          },
+          "cameraId": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "image/jpeg"
+          },
+          "byteSize": {
             "type": "number"
           },
-          "y": {
-            "type": "number"
+          "capturedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Authenticated, space-scoped URL the bytes are read from",
+            "example": "/api/v1/snapshots/1f0c7d1e-0000-4000-8000-000000000000"
           }
         },
         "required": [
+          "id",
+          "cameraId",
+          "mimeType",
+          "byteSize",
+          "capturedAt",
+          "url"
+        ]
+      },
+      "MonitorZoneDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cameraId": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number",
+            "example": 12.5,
+            "description": "Percent of frame width"
+          },
+          "y": {
+            "type": "number",
+            "example": 20,
+            "description": "Percent of frame height"
+          },
+          "width": {
+            "type": "number",
+            "example": 30
+          },
+          "height": {
+            "type": "number",
+            "example": 40
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "cameraId",
           "x",
-          "y"
+          "y",
+          "width",
+          "height",
+          "alertType",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "CreateZoneDto": {
         "type": "object",
         "properties": {
-          "id": {
+          "x": {
+            "type": "number",
+            "example": 12.5
+          },
+          "y": {
+            "type": "number",
+            "example": 20
+          },
+          "width": {
+            "type": "number",
+            "example": 30
+          },
+          "height": {
+            "type": "number",
+            "example": 40
+          },
+          "alertType": {
             "type": "string",
-            "example": "zone_lobby",
-            "pattern": "^zone_[a-z0-9_]+$"
-          },
-          "name": {
-            "type": "string",
-            "example": "Lobby"
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "polygon": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PointDto"
-            }
+            "enum": [
+              "intruder",
+              "suspicious"
+            ],
+            "description": "Alert level this zone raises"
           }
         },
         "required": [
-          "id",
-          "name",
-          "polygon"
+          "x",
+          "y",
+          "width",
+          "height",
+          "alertType"
         ]
       },
       "UpdateZoneDto": {
         "type": "object",
         "properties": {
-          "name": {
+          "x": {
+            "type": "number",
+            "example": 12.5
+          },
+          "y": {
+            "type": "number",
+            "example": 20
+          },
+          "width": {
+            "type": "number",
+            "example": 30
+          },
+          "height": {
+            "type": "number",
+            "example": 40
+          },
+          "alertType": {
             "type": "string",
-            "example": "Lobby"
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "polygon": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PointDto"
-            }
-          }
-        }
-      },
-      "ValidateZoneDto": {
-        "type": "object",
-        "properties": {
-          "polygon": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PointDto"
-            }
+            "enum": [
+              "intruder",
+              "suspicious"
+            ],
+            "description": "Alert level this zone raises"
           }
         }
       }

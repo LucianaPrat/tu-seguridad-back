@@ -1,125 +1,152 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { MonitorMode } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
-import { ZoneAccessorService } from '../../data/accessors/zone.accessor';
+import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
 import { CreateZoneDto } from './dto/create-zone.dto';
-import { PointDto } from './dto/point.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
-import { ValidatePolygonResultDto } from './dto/validate-polygon-result.dto';
-import { ZoneDto } from './dto/zone.dto';
-import { validatePolygon } from './geometry';
-import { toZoneDto } from './zone.mapper';
+import { MonitorZoneDto } from './dto/zone.dto';
+import { Rectangle, validateRectangle } from './rectangle';
+import { toMonitorZoneDto, toRectangle } from './zone.mapper';
 
 @Injectable()
 export class ZonesService {
   constructor(
-    private readonly zoneAccessor: ZoneAccessorService,
+    private readonly zoneAccessor: MonitorZoneAccessorService,
     private readonly cameraAccessor: CameraAccessorService,
   ) {}
 
-  async create(cameraId: string, dto: CreateZoneDto): Promise<Either<ZoneDto>> {
-    const camera = await this.cameraAccessor.findById(cameraId);
+  async findByCamera(
+    spaceId: string,
+    cameraId: string,
+  ): Promise<Either<MonitorZoneDto[]>> {
+    const camera = await this.cameraAccessor.findById(spaceId, cameraId);
     if (!camera) {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${cameraId} not found`);
     }
+    const zones = await this.zoneAccessor.findByCamera(spaceId, cameraId);
+    return buildData(zones.map(toMonitorZoneDto));
+  }
 
-    const existing = await this.zoneAccessor.findById(dto.id);
-    if (existing) {
-      return buildError(ErrorCode.CONFLICT, `Zone ${dto.id} already exists`);
+  async create(
+    spaceId: string,
+    cameraId: string,
+    dto: CreateZoneDto,
+  ): Promise<Either<MonitorZoneDto>> {
+    const invalid = this.rejectInvalidRectangle<MonitorZoneDto>(dto);
+    if (invalid) {
+      return invalid;
     }
 
-    const violations = validatePolygon(dto.polygon);
-    if (violations.length > 0) {
-      return buildError(
-        ErrorCode.INVALID_POLYGON,
-        violations.map((v) => v.message).join('; '),
-      );
-    }
-
-    const zone = await this.zoneAccessor.create({
-      id: dto.id,
+    const zone = await this.zoneAccessor.create(spaceId, {
       cameraId,
-      name: dto.name,
-      enabled: dto.enabled,
-      polygon: dto.polygon as unknown as Prisma.InputJsonValue,
-      geometryVersion: 1,
+      x: dto.x,
+      y: dto.y,
+      width: dto.width,
+      height: dto.height,
+      alertType: dto.alertType,
     });
-    return buildData(toZoneDto(zone));
-  }
-
-  async findByCamera(cameraId: string): Promise<Either<ZoneDto[]>> {
-    const camera = await this.cameraAccessor.findById(cameraId);
-    if (!camera) {
+    if (!zone) {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${cameraId} not found`);
     }
-    const zones = await this.zoneAccessor.findByCamera(cameraId);
-    return buildData(zones.map(toZoneDto));
+
+    await this.syncCameraConfiguration(spaceId, cameraId);
+    return buildData(toMonitorZoneDto(zone));
   }
 
-  async findById(id: string): Promise<Either<ZoneDto>> {
-    const zone = await this.zoneAccessor.findById(id);
+  async findById(spaceId: string, id: string): Promise<Either<MonitorZoneDto>> {
+    const zone = await this.zoneAccessor.findById(spaceId, id);
     if (!zone) {
       return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
     }
-    return buildData(toZoneDto(zone));
+    return buildData(toMonitorZoneDto(zone));
   }
 
-  async update(id: string, dto: UpdateZoneDto): Promise<Either<ZoneDto>> {
-    const zone = await this.zoneAccessor.findById(id);
+  /**
+   * A partial update still validates the whole rectangle: moving `x` alone can
+   * push an otherwise valid zone past the right edge of the frame.
+   */
+  async update(
+    spaceId: string,
+    id: string,
+    dto: UpdateZoneDto,
+  ): Promise<Either<MonitorZoneDto>> {
+    const zone = await this.zoneAccessor.findById(spaceId, id);
     if (!zone) {
       return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
     }
 
-    let geometryVersion = zone.geometryVersion;
-    if (dto.polygon) {
-      const violations = validatePolygon(dto.polygon);
-      if (violations.length > 0) {
-        return buildError(
-          ErrorCode.INVALID_POLYGON,
-          violations.map((v) => v.message).join('; '),
-        );
-      }
-      geometryVersion += 1;
+    const current = toRectangle(zone);
+    const merged: Rectangle = {
+      x: dto.x ?? current.x,
+      y: dto.y ?? current.y,
+      width: dto.width ?? current.width,
+      height: dto.height ?? current.height,
+    };
+    const invalid = this.rejectInvalidRectangle<MonitorZoneDto>(merged);
+    if (invalid) {
+      return invalid;
     }
 
-    const updated = await this.zoneAccessor.update(id, {
-      name: dto.name,
-      enabled: dto.enabled,
-      polygon: dto.polygon
-        ? (dto.polygon as unknown as Prisma.InputJsonValue)
-        : undefined,
-      geometryVersion,
+    const updated = await this.zoneAccessor.update(spaceId, id, {
+      ...merged,
+      alertType: dto.alertType ?? zone.alertType,
     });
-    return buildData(toZoneDto(updated));
+    if (!updated) {
+      return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
+    }
+    return buildData(toMonitorZoneDto(updated));
   }
 
-  async delete(id: string): Promise<Either<null>> {
-    const zone = await this.zoneAccessor.findById(id);
+  /** Logical delete: alert history that points at this zone stays readable. */
+  async delete(spaceId: string, id: string): Promise<Either<null>> {
+    const zone = await this.zoneAccessor.findById(spaceId, id);
     if (!zone) {
       return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
     }
-    await this.zoneAccessor.delete(id);
+
+    const deleted = await this.zoneAccessor.softDelete(spaceId, id);
+    if (!deleted) {
+      return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
+    }
+
+    await this.syncCameraConfiguration(spaceId, zone.cameraId);
     return buildData(null);
   }
 
-  async validate(
-    id: string,
-    overridePolygon?: PointDto[],
-  ): Promise<Either<ValidatePolygonResultDto>> {
-    let polygon: PointDto[];
-    if (overridePolygon) {
-      polygon = overridePolygon;
-    } else {
-      const zone = await this.zoneAccessor.findById(id);
-      if (!zone) {
-        return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
-      }
-      polygon = zone.polygon as unknown as PointDto[];
+  private rejectInvalidRectangle<T>(
+    rectangle: Rectangle,
+  ): Either<T> | undefined {
+    const violations = validateRectangle(rectangle);
+    if (violations.length === 0) {
+      return undefined;
     }
+    return buildError(
+      ErrorCode.INVALID_ZONE,
+      violations.map((violation) => violation.message).join('; '),
+    );
+  }
 
-    const violations = validatePolygon(polygon);
-    return buildData({ valid: violations.length === 0, violations });
+  /**
+   * A partial-mode camera is configured exactly while it has a zone to
+   * evaluate. Deleting the last one disarms the camera rather than leaving it
+   * polled with nothing to look at.
+   */
+  private async syncCameraConfiguration(
+    spaceId: string,
+    cameraId: string,
+  ): Promise<void> {
+    const camera = await this.cameraAccessor.findById(spaceId, cameraId);
+    if (camera?.monitorMode !== MonitorMode.partial) {
+      return;
+    }
+    const zoneCount = await this.cameraAccessor.countMonitorZones(
+      spaceId,
+      cameraId,
+    );
+    await this.cameraAccessor.update(spaceId, cameraId, {
+      isConfigured: zoneCount > 0,
+    });
   }
 }

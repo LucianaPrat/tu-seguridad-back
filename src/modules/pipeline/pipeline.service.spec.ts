@@ -1,174 +1,279 @@
-import { PipelineService } from './pipeline.service';
+import { Camera, MonitorZone, Prisma } from '@prisma/client';
+import { ErrorCode } from '../../cross/common/constants';
+import { buildData, buildError } from '../../cross/errors/either';
+import { CapturedImage } from '../dvr/dvr-client.port';
 import { OccupancyEngine } from './occupancy.engine';
+import { PipelineService } from './pipeline.service';
+
+function buildCamera(overrides: Partial<Camera> = {}): Camera {
+  return {
+    id: 'camera-uuid',
+    dvrId: 'dvr-uuid',
+    externalId: 'channel-1',
+    name: 'Front door',
+    location: 'Street side',
+    status: 'online',
+    isConfigured: true,
+    isEnabled: true,
+    monitorMode: 'full',
+    alertType: 'intruder',
+    lastSnapshotAt: null,
+    deletedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+function buildZone(
+  id: string,
+  rectangle: { x: number; y: number; width: number; height: number },
+  alertType: 'intruder' | 'suspicious',
+): MonitorZone {
+  return {
+    id,
+    cameraId: 'camera-uuid',
+    x: new Prisma.Decimal(rectangle.x),
+    y: new Prisma.Decimal(rectangle.y),
+    width: new Prisma.Decimal(rectangle.width),
+    height: new Prisma.Decimal(rectangle.height),
+    alertType,
+    deletedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+}
+
+const image: CapturedImage = {
+  data: Buffer.from('image-bytes'),
+  mimeType: 'image/jpeg',
+  byteSize: 11,
+  sha256: 'a'.repeat(64),
+  capturedAt: new Date('2026-01-01T00:00:00Z'),
+};
+
+/** Anchors are normalized [0,1]; this one sits in the middle of the frame. */
+function detection(anchor = { x: 0.5, y: 0.5 }, detScore = 0.9) {
+  return buildData({
+    personsDetected: true,
+    imageWidth: 1920,
+    imageHeight: 1080,
+    persons: [
+      {
+        detScore,
+        bbox: { topLeft: anchor, bottomRight: anchor },
+        bboxNorm: { topLeft: anchor, bottomRight: anchor },
+        anchor,
+      },
+    ],
+  });
+}
 
 describe('PipelineService', () => {
-  const camera = {
-    id: 'camera_01',
-    confidenceThreshold: 0.5,
-  };
-
-  const zone = {
-    id: 'zone_lobby',
-    cameraId: 'camera_01',
-    enabled: true,
-    polygon: [
-      { x: 0, y: 0 },
-      { x: 1, y: 0 },
-      { x: 1, y: 1 },
-      { x: 0, y: 1 },
-    ],
-  };
-
-  function personDetection(detScore: number, anchor: { x: number; y: number }) {
-    return {
-      detScore,
-      bbox: { topLeft: { x: 0, y: 0 }, bottomRight: { x: 1, y: 1 } },
-      bboxNorm: { topLeft: { x: 0, y: 0 }, bottomRight: { x: 1, y: 1 } },
-      anchor,
-    };
-  }
+  const spaceId = 'space-uuid';
 
   let faceAuthClient: { detectPersons: jest.Mock };
   let zoneAccessor: { findByCamera: jest.Mock };
-  let eventsService: { emit: jest.Mock };
+  let snapshotService: { store: jest.Mock };
   let statusRegistry: { record: jest.Mock };
+  let alertEmitter: { emit: jest.Mock };
   let service: PipelineService;
 
   beforeEach(() => {
     faceAuthClient = { detectPersons: jest.fn() };
-    zoneAccessor = { findByCamera: jest.fn().mockResolvedValue([zone]) };
-    eventsService = {
-      emit: jest
-        .fn()
-        .mockImplementation((data) => Promise.resolve({ id: 1, ...data })),
+    zoneAccessor = { findByCamera: jest.fn().mockResolvedValue([]) };
+    snapshotService = {
+      store: jest.fn().mockResolvedValue(buildData({ id: 'snapshot-uuid' })),
     };
     statusRegistry = { record: jest.fn() };
+    alertEmitter = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new PipelineService(
       faceAuthClient as never,
       zoneAccessor as never,
-      eventsService as never,
+      snapshotService as never,
       statusRegistry as never,
-      new OccupancyEngine(2, 3),
+      // Real engine with a one-poll threshold: alert-level selection is the
+      // behavior under test, and mocking it away would test nothing.
+      new OccupancyEngine(1, 1),
+      alertEmitter,
     );
   });
 
-  it('returns the upstream error unchanged when detection fails', async () => {
-    faceAuthClient.detectPersons.mockResolvedValue({
-      ok: false,
-      code: 'UPSTREAM_TIMEOUT',
-      message: 'timed out',
+  describe('cameras it refuses to process', () => {
+    it('rejects a soft-deleted camera', async () => {
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({ deletedAt: new Date() }),
+        image,
+      );
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.NOT_FOUND });
+      expect(faceAuthClient.detectPersons).not.toHaveBeenCalled();
     });
 
-    const result = await service.processImage(
-      camera as never,
-      Buffer.from('x'),
-    );
+    it('rejects a disabled camera', async () => {
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({ isEnabled: false }),
+        image,
+      );
 
-    expect(result).toEqual({
-      ok: false,
-      code: 'UPSTREAM_TIMEOUT',
-      message: 'timed out',
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
+      expect(faceAuthClient.detectPersons).not.toHaveBeenCalled();
     });
-    expect(statusRegistry.record).toHaveBeenCalledWith(
-      'camera_01',
-      expect.objectContaining({ lastErrorCode: 'UPSTREAM_TIMEOUT' }),
-    );
+
+    it('rejects a camera with no monitor configuration', async () => {
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({ isConfigured: false }),
+        image,
+      );
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
+      expect(faceAuthClient.detectPersons).not.toHaveBeenCalled();
+    });
   });
 
-  it('filters out persons below the camera confidence threshold', async () => {
-    faceAuthClient.detectPersons.mockResolvedValue({
-      ok: true,
-      data: {
-        personsDetected: true,
-        imageWidth: 100,
-        imageHeight: 100,
-        persons: [
-          personDetection(0.2, { x: 0.5, y: 0.5 }),
-          personDetection(0.9, { x: 0.5, y: 0.5 }),
-        ],
-      },
-    });
+  it('raises the camera alert level over the whole frame in full mode', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
 
     const result = await service.processImage(
-      camera as never,
-      Buffer.from('x'),
+      spaceId,
+      buildCamera({ monitorMode: 'full', alertType: 'suspicious' }),
+      image,
     );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data.persons).toHaveLength(1);
-      expect(result.data.persons[0].detScore).toBe(0.9);
+      expect(result.data.alerts).toHaveLength(1);
+      expect(result.data.alerts[0]).toMatchObject({
+        zoneId: null,
+        alertType: 'suspicious',
+        cameraLabel: 'Front door – Street side',
+        snapshotId: 'snapshot-uuid',
+      });
+    }
+    expect(zoneAccessor.findByCamera).not.toHaveBeenCalled();
+  });
+
+  it('raises the level of the zone the person walked into in partial mode', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
+    zoneAccessor.findByCamera.mockResolvedValue([
+      buildZone(
+        'zone-left',
+        { x: 0, y: 0, width: 20, height: 100 },
+        'intruder',
+      ),
+      buildZone(
+        'zone-middle',
+        { x: 40, y: 40, width: 20, height: 20 },
+        'suspicious',
+      ),
+    ]);
+
+    const result = await service.processImage(
+      spaceId,
+      buildCamera({ monitorMode: 'partial', alertType: 'intruder' }),
+      image,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.alerts).toHaveLength(1);
+      expect(result.data.alerts[0]).toMatchObject({
+        zoneId: 'zone-middle',
+        alertType: 'suspicious',
+      });
       expect(result.data.zoneResults).toEqual([
-        { zoneId: 'zone_lobby', occupied: true },
+        { zoneId: 'zone-left', alertType: 'intruder', occupied: false },
+        { zoneId: 'zone-middle', alertType: 'suspicious', occupied: true },
       ]);
     }
   });
 
-  it('emits ENTERED only once hysteresis confirms after N polls, and EXITED after M misses', async () => {
-    const insideResponse = {
-      ok: true,
-      data: {
-        personsDetected: true,
-        imageWidth: 100,
-        imageHeight: 100,
-        persons: [personDetection(0.9, { x: 0.5, y: 0.5 })],
-      },
-    };
-    const outsideResponse = {
-      ok: true,
-      data: {
+  it('stores the frame only when an alert is raised', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(
+      buildData({
         personsDetected: false,
-        imageWidth: 100,
-        imageHeight: 100,
+        imageWidth: 1920,
+        imageHeight: 1080,
         persons: [],
-      },
-    };
-
-    faceAuthClient.detectPersons.mockResolvedValue(insideResponse);
-    const poll1 = await service.processImage(camera as never, Buffer.from('x'));
-    const poll2 = await service.processImage(camera as never, Buffer.from('x'));
-
-    expect(poll1.ok && poll1.data.eventsEmitted).toEqual([]);
-    expect(poll2.ok && poll2.data.eventsEmitted).toHaveLength(1);
-    expect(poll2.ok && poll2.data.eventsEmitted[0]).toMatchObject({
-      eventType: 'PERSON_ENTERED_ZONE',
-      zoneId: 'zone_lobby',
-    });
-
-    faceAuthClient.detectPersons.mockResolvedValue(outsideResponse);
-    await service.processImage(camera as never, Buffer.from('x'));
-    await service.processImage(camera as never, Buffer.from('x'));
-    const exitPoll = await service.processImage(
-      camera as never,
-      Buffer.from('x'),
+      }),
     );
 
-    expect(exitPoll.ok && exitPoll.data.eventsEmitted).toHaveLength(1);
-    expect(exitPoll.ok && exitPoll.data.eventsEmitted[0]).toMatchObject({
-      eventType: 'PERSON_EXITED_ZONE',
-      zoneId: 'zone_lobby',
-    });
+    const result = await service.processImage(spaceId, buildCamera(), image);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.alerts).toHaveLength(0);
+    }
+    expect(snapshotService.store).not.toHaveBeenCalled();
+    expect(alertEmitter.emit).not.toHaveBeenCalled();
   });
 
-  it('records lastSuccessAt/lastLatencyMs/lastPersonsDetected on success', async () => {
-    faceAuthClient.detectPersons.mockResolvedValue({
-      ok: true,
-      data: {
-        personsDetected: false,
-        imageWidth: 1,
-        imageHeight: 1,
-        persons: [],
-      },
-    });
+  it('hands every raised alert to the emitter with its space', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
 
-    await service.processImage(camera as never, Buffer.from('x'));
+    await service.processImage(spaceId, buildCamera(), image);
 
-    expect(statusRegistry.record).toHaveBeenCalledWith(
-      'camera_01',
+    expect(alertEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(alertEmitter.emit).toHaveBeenCalledWith(
+      spaceId,
       expect.objectContaining({
-        lastPersonsDetected: false,
-        zones: [{ zoneId: 'zone_lobby', occupied: false }],
+        cameraId: 'camera-uuid',
+        alertType: 'intruder',
       }),
+    );
+  });
+
+  it('still reports the alert when the frame could not be stored', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
+    snapshotService.store.mockResolvedValue(
+      buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'Snapshot is larger than the limit',
+      ),
+    );
+
+    const result = await service.processImage(spaceId, buildCamera(), image);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.alerts[0].snapshotId).toBeNull();
+    }
+  });
+
+  it('ignores detections below the confidence threshold', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(
+      detection({ x: 0.5, y: 0.5 }, 0.1),
+    );
+
+    const result = await service.processImage(spaceId, buildCamera(), image);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.persons).toHaveLength(0);
+      expect(result.data.alerts).toHaveLength(0);
+    }
+  });
+
+  it('records the upstream failure and passes it through', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(
+      buildError(
+        ErrorCode.UPSTREAM_TIMEOUT,
+        'face-auth detect request timed out',
+      ),
+    );
+
+    const result = await service.processImage(spaceId, buildCamera(), image);
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: ErrorCode.UPSTREAM_TIMEOUT,
+    });
+    expect(statusRegistry.record).toHaveBeenCalledWith(
+      'camera-uuid',
+      expect.objectContaining({ lastErrorCode: ErrorCode.UPSTREAM_TIMEOUT }),
     );
   });
 });
