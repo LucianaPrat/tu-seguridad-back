@@ -56,7 +56,9 @@ describe('JwtAuthGuard', () => {
     jwtService.verify.mockReturnValue({
       sub: 1,
       email: 'admin@example.com',
+      spaceId: 'space-1',
       role: 'admin',
+      profileCompleted: true,
       type: 'refresh',
     });
 
@@ -65,11 +67,27 @@ describe('JwtAuthGuard', () => {
     ).toThrow(HttpException);
   });
 
-  it('allows a valid access token and attaches the user to the request', () => {
+  it('rejects a token that carries no space membership', () => {
+    // A token signed before the tenant claims existed: accepting it would send
+    // `undefined` down to an accessor as the space to scope by.
     jwtService.verify.mockReturnValue({
       sub: 1,
       email: 'admin@example.com',
       role: 'admin',
+    });
+
+    expect(() =>
+      guard.canActivate(contextWithAuthHeader('Bearer pre-tenant-token')),
+    ).toThrow(HttpException);
+  });
+
+  it('allows a valid access token and attaches the space context to the request', () => {
+    jwtService.verify.mockReturnValue({
+      sub: 1,
+      email: 'admin@example.com',
+      spaceId: 'space-1',
+      role: 'admin',
+      profileCompleted: true,
     });
     const context = contextWithAuthHeader('Bearer valid-token');
 
@@ -79,7 +97,9 @@ describe('JwtAuthGuard', () => {
     expect(request.user).toEqual({
       sub: 1,
       email: 'admin@example.com',
+      spaceId: 'space-1',
       role: 'admin',
+      profileCompleted: true,
     });
   });
 });

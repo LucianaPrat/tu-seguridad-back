@@ -1,22 +1,32 @@
 import { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
+import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildData, Either } from '../../cross/errors/either';
 import { AuthController } from './auth.controller';
-import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from './refresh-cookie';
+import { REFRESH_COOKIE_NAME } from './refresh-cookie';
 
-interface AuthServiceMock {
-  login: jest.Mock;
-  refresh: jest.Mock;
-  me: jest.Mock;
-  refreshCookieMaxAgeMs: jest.Mock;
-}
+const TOKEN_PAIR = { accessToken: 'atoken', refreshToken: 'rtoken' };
+const CONTEXT = { userAgent: 'jest', ip: '127.0.0.1' };
 
 describe('AuthController', () => {
-  let authService: AuthServiceMock;
-  let configService: { get: jest.Mock };
-  let res: { cookie: jest.Mock; clearCookie: jest.Mock };
+  let authService: {
+    login: jest.Mock;
+    register: jest.Mock;
+    completeProfile: jest.Mock;
+    me: jest.Mock;
+  };
+  let sessionService: { rotate: jest.Mock; revoke: jest.Mock };
+  let refreshCookie: { issueSession: jest.Mock; clear: jest.Mock };
+  let res: Response;
   let controller: AuthController;
 
-  const TOKEN_PAIR = { accessToken: 'atoken', refreshToken: 'rtoken' };
+  const currentUser: JwtPayload = {
+    sub: 1,
+    email: 'owner@example.com',
+    spaceId: 'space-1',
+    role: 'admin',
+    profileCompleted: true,
+  };
 
   function requestWithCookies(cookies: Record<string, string>): Request {
     return { cookies } as unknown as Request;
@@ -24,100 +34,105 @@ describe('AuthController', () => {
 
   beforeEach(() => {
     authService = {
-      login: jest.fn(),
-      refresh: jest.fn(),
-      me: jest.fn(),
-      refreshCookieMaxAgeMs: jest.fn().mockReturnValue(604_800_000),
+      login: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
+      register: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
+      completeProfile: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
+      me: jest.fn().mockResolvedValue(buildData({})),
     };
-    configService = { get: jest.fn().mockReturnValue('development') };
-    res = { cookie: jest.fn(), clearCookie: jest.fn() };
+    sessionService = {
+      rotate: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
+      revoke: jest.fn().mockResolvedValue(undefined),
+    };
+    refreshCookie = {
+      // Mirrors the real service: cookie on the way out, access token in the body.
+      issueSession: jest
+        .fn()
+        .mockImplementation(
+          (_res: Response, result: Either<typeof TOKEN_PAIR>) =>
+            result.ok
+              ? buildData({ accessToken: result.data.accessToken })
+              : result,
+        ),
+      clear: jest.fn(),
+    };
+    res = {} as Response;
     controller = new AuthController(
       authService as never,
-      configService as never,
+      sessionService as never,
+      refreshCookie as never,
     );
   });
 
   describe('login', () => {
-    it('delegates to AuthService with the dto fields', async () => {
-      authService.login.mockResolvedValue({ ok: true, data: TOKEN_PAIR });
-
+    it('delegates to AuthService with the dto fields and the request context', async () => {
       await controller.login(
         { email: 'a@a.com', password: 'secret' },
-        res as unknown as Response,
+        CONTEXT,
+        res,
       );
 
-      expect(authService.login).toHaveBeenCalledWith('a@a.com', 'secret');
+      expect(authService.login).toHaveBeenCalledWith(
+        'a@a.com',
+        'secret',
+        CONTEXT,
+      );
     });
 
-    it('puts the refresh token in an HttpOnly cookie and keeps it out of the body', async () => {
-      authService.login.mockResolvedValue({ ok: true, data: TOKEN_PAIR });
-
+    it('returns only the access token', async () => {
       const result = await controller.login(
         { email: 'a@a.com', password: 'secret' },
-        res as unknown as Response,
+        CONTEXT,
+        res,
       );
 
-      expect(res.cookie).toHaveBeenCalledWith(
-        REFRESH_COOKIE_NAME,
-        'rtoken',
-        expect.objectContaining({
-          httpOnly: true,
-          sameSite: 'lax',
-          path: REFRESH_COOKIE_PATH,
-        }),
-      );
       expect(result).toEqual({ ok: true, data: { accessToken: 'atoken' } });
-    });
-
-    it('sets no cookie when the credentials are rejected', async () => {
-      const failure = { ok: false, code: ErrorCode.UNAUTHORIZED };
-      authService.login.mockResolvedValue(failure);
-
-      const result = await controller.login(
-        { email: 'a@a.com', password: 'wrong' },
-        res as unknown as Response,
+      expect(refreshCookie.issueSession).toHaveBeenCalledWith(
+        res,
+        buildData(TOKEN_PAIR),
       );
+    });
+  });
 
-      expect(res.cookie).not.toHaveBeenCalled();
-      expect(result).toBe(failure);
+  describe('register', () => {
+    it('delegates the dto and returns only the access token', async () => {
+      const dto = {
+        email: 'new@example.com',
+        password: 'a-long-enough-password',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        phone: '+5491122334455',
+        spaceName: 'My Secure Space',
+      };
+
+      const result = await controller.register(dto, CONTEXT, res);
+
+      expect(authService.register).toHaveBeenCalledWith(dto, CONTEXT);
+      expect(result).toEqual({ ok: true, data: { accessToken: 'atoken' } });
     });
   });
 
   describe('refresh', () => {
     it('reads the refresh token off the cookie', async () => {
-      authService.refresh.mockResolvedValue({ ok: true, data: TOKEN_PAIR });
-
       await controller.refresh(
         requestWithCookies({ [REFRESH_COOKIE_NAME]: 'cookie-token' }),
-        res as unknown as Response,
+        CONTEXT,
+        res,
       );
 
-      expect(authService.refresh).toHaveBeenCalledWith('cookie-token');
-    });
-
-    it('rotates the cookie and returns only the access token', async () => {
-      authService.refresh.mockResolvedValue({ ok: true, data: TOKEN_PAIR });
-
-      const result = await controller.refresh(
-        requestWithCookies({ [REFRESH_COOKIE_NAME]: 'cookie-token' }),
-        res as unknown as Response,
+      expect(sessionService.rotate).toHaveBeenCalledWith(
+        'cookie-token',
+        CONTEXT,
       );
-
-      expect(res.cookie).toHaveBeenCalledWith(
-        REFRESH_COOKIE_NAME,
-        'rtoken',
-        expect.objectContaining({ httpOnly: true }),
-      );
-      expect(result).toEqual({ ok: true, data: { accessToken: 'atoken' } });
     });
 
     it('rejects with UNAUTHORIZED when no cookie is present', async () => {
       const result = await controller.refresh(
         requestWithCookies({}),
-        res as unknown as Response,
+        CONTEXT,
+        res,
       );
 
-      expect(authService.refresh).not.toHaveBeenCalled();
+      expect(sessionService.rotate).not.toHaveBeenCalled();
       expect(result).toEqual({
         ok: false,
         code: ErrorCode.UNAUTHORIZED,
@@ -131,49 +146,59 @@ describe('AuthController', () => {
           cookies: {},
           body: { refreshToken: 'from-body' },
         } as unknown as Request,
-        res as unknown as Response,
+        CONTEXT,
+        res,
       );
 
-      expect(authService.refresh).not.toHaveBeenCalled();
+      expect(sessionService.rotate).not.toHaveBeenCalled();
       expect(result).toMatchObject({ ok: false });
     });
   });
 
   describe('logout', () => {
-    it('clears the refresh cookie on the scoped path', () => {
-      controller.logout(res as unknown as Response);
+    it('revokes the stored token and clears the cookie', async () => {
+      await controller.logout(
+        requestWithCookies({ [REFRESH_COOKIE_NAME]: 'cookie-token' }),
+        res,
+      );
 
-      expect(res.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE_NAME, {
-        path: REFRESH_COOKIE_PATH,
-      });
+      expect(sessionService.revoke).toHaveBeenCalledWith('cookie-token');
+      expect(refreshCookie.clear).toHaveBeenCalledWith(res);
+    });
+
+    it('still clears the cookie when the request carried none', async () => {
+      await controller.logout(requestWithCookies({}), res);
+
+      expect(sessionService.revoke).not.toHaveBeenCalled();
+      expect(refreshCookie.clear).toHaveBeenCalledWith(res);
     });
   });
 
   describe('me', () => {
-    it('delegates to AuthService with the email off the token payload', async () => {
-      authService.me.mockResolvedValue({ ok: true, data: {} });
+    it('delegates with the user id off the token payload', async () => {
+      await controller.me(currentUser);
 
-      await controller.me({ sub: 1, email: 'a@a.com', role: 'admin' });
-
-      expect(authService.me).toHaveBeenCalledWith('a@a.com');
+      expect(authService.me).toHaveBeenCalledWith(1);
     });
   });
 
-  describe('secure flag', () => {
-    it('marks the cookie secure in production', async () => {
-      configService.get.mockReturnValue('production');
-      authService.login.mockResolvedValue({ ok: true, data: TOKEN_PAIR });
+  describe('completeProfile', () => {
+    it('delegates the caller id, the dto and the request context', async () => {
+      const dto = {
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        phone: '+5491122334455',
+        password: 'a-long-enough-password',
+      };
 
-      await controller.login(
-        { email: 'a@a.com', password: 'secret' },
-        res as unknown as Response,
+      await controller.completeProfile(
+        { ...currentUser, profileCompleted: false },
+        dto,
+        CONTEXT,
+        res,
       );
 
-      expect(res.cookie).toHaveBeenCalledWith(
-        REFRESH_COOKIE_NAME,
-        'rtoken',
-        expect.objectContaining({ secure: true }),
-      );
+      expect(authService.completeProfile).toHaveBeenCalledWith(1, dto, CONTEXT);
     });
   });
 });

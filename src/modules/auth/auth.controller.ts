@@ -8,34 +8,39 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 // `import type` is required: these appear in decorated parameter positions and
 // TS1272 rejects value imports there under isolatedModules.
 import type { Request, Response } from 'express';
-import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type { SessionContext } from '../../cross/common/session-context.type';
+import { AllowIncompleteProfile } from '../../cross/decorators/allow-incomplete-profile.decorator';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
-import { buildData, buildError, Either } from '../../cross/errors/either';
+import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
+import { buildError, Either } from '../../cross/errors/either';
 import { AuthService } from './auth.service';
 import { AccessTokenDto } from './dto/access-token.dto';
+import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { LoginDto } from './dto/login.dto';
 import { MeDto } from './dto/me.dto';
+import { RegisterDto } from './dto/register.dto';
+import { REFRESH_COOKIE_NAME } from './refresh-cookie';
+import { RefreshCookieService } from './refresh-cookie.service';
 import {
-  buildRefreshCookieOptions,
-  REFRESH_COOKIE_NAME,
-  REFRESH_COOKIE_PATH,
-} from './refresh-cookie';
-
-const INVALID_REFRESH_TOKEN_MESSAGE = 'Invalid or expired refresh token';
+  INVALID_REFRESH_TOKEN_MESSAGE,
+  SessionService,
+} from './session.service';
 
 @ApiTags('auth')
+@ApiBearerAuth()
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
-    private readonly configService: ConfigService,
+    private readonly sessionService: SessionService,
+    private readonly refreshCookie: RefreshCookieService,
   ) {}
 
   @Public()
@@ -44,15 +49,28 @@ export class AuthController {
   @ApiOkResponse({ type: AccessTokenDto })
   async login(
     @Body() dto: LoginDto,
+    @RequestSessionContext() context: SessionContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Either<AccessTokenDto>> {
-    const result = await this.authService.login(dto.email, dto.password);
-    if (!result.ok) {
-      return result;
-    }
+    return this.refreshCookie.issueSession(
+      res,
+      await this.authService.login(dto.email, dto.password, context),
+    );
+  }
 
-    this.setRefreshCookie(res, result.data.refreshToken);
-    return buildData({ accessToken: result.data.accessToken });
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  @Post('register')
+  @ApiOkResponse({ type: AccessTokenDto })
+  async register(
+    @Body() dto: RegisterDto,
+    @RequestSessionContext() context: SessionContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Either<AccessTokenDto>> {
+    return this.refreshCookie.issueSession(
+      res,
+      await this.authService.register(dto, context),
+    );
   }
 
   /**
@@ -65,47 +83,60 @@ export class AuthController {
   @ApiOkResponse({ type: AccessTokenDto })
   async refresh(
     @Req() req: Request,
+    @RequestSessionContext() context: SessionContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Either<AccessTokenDto>> {
-    const cookies = req.cookies as Record<string, string | undefined>;
-    const refreshToken = cookies?.[REFRESH_COOKIE_NAME];
+    const refreshToken = this.readRefreshCookie(req);
     if (!refreshToken) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
     }
 
-    const result = await this.authService.refresh(refreshToken);
-    if (!result.ok) {
-      return result;
-    }
-
-    this.setRefreshCookie(res, result.data.refreshToken);
-    return buildData({ accessToken: result.data.accessToken });
+    return this.refreshCookie.issueSession(
+      res,
+      await this.sessionService.rotate(refreshToken, context),
+    );
   }
 
+  /** Revokes the stored token as well as dropping the cookie. */
   @Public()
   @HttpCode(HttpStatus.NO_CONTENT)
   @Post('logout')
-  logout(@Res({ passthrough: true }) res: Response): void {
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const refreshToken = this.readRefreshCookie(req);
+    if (refreshToken) {
+      await this.sessionService.revoke(refreshToken);
+    }
+    this.refreshCookie.clear(res);
   }
 
+  @AllowIncompleteProfile()
   @Get('me')
   @ApiOkResponse({ type: MeDto })
   me(@CurrentUser() user: JwtPayload): Promise<Either<MeDto>> {
-    return this.authService.me(user.email);
+    return this.authService.me(user.sub);
   }
 
-  private setRefreshCookie(res: Response, refreshToken: string): void {
-    const isProduction =
-      this.configService.get<string>(EnvNames.NODE_ENV) === 'production';
-
-    res.cookie(
-      REFRESH_COOKIE_NAME,
-      refreshToken,
-      buildRefreshCookieOptions(
-        isProduction,
-        this.authService.refreshCookieMaxAgeMs(refreshToken),
-      ),
+  @AllowIncompleteProfile()
+  @HttpCode(HttpStatus.OK)
+  @Post('complete-profile')
+  @ApiOkResponse({ type: AccessTokenDto })
+  async completeProfile(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CompleteProfileDto,
+    @RequestSessionContext() context: SessionContext,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Either<AccessTokenDto>> {
+    return this.refreshCookie.issueSession(
+      res,
+      await this.authService.completeProfile(user.sub, dto, context),
     );
+  }
+
+  private readRefreshCookie(req: Request): string | undefined {
+    const cookies = req.cookies as Record<string, string | undefined>;
+    return cookies?.[REFRESH_COOKIE_NAME];
   }
 }

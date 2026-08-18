@@ -1,10 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  HttpException,
-  HttpStatus,
-  Injectable,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
@@ -12,6 +6,7 @@ import { Request } from 'express';
 import { EnvNames, ErrorCode } from '../common/constants';
 import { JwtPayload, RefreshJwtPayload } from '../common/jwt-payload.type';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { buildGuardException } from '../errors/guard-exception';
 
 export interface RequestWithUser extends Request {
   user?: JwtPayload;
@@ -55,10 +50,19 @@ export class JwtAuthGuard implements CanActivate {
       );
     }
 
+    // A token signed before the tenant claims existed carries no space, and a
+    // request with no space cannot be scoped to one. Reject it instead of
+    // letting a downstream accessor receive `undefined` as a spaceId.
+    if (!payload.spaceId || !payload.role) {
+      throw this.unauthorized('Token carries no space membership');
+    }
+
     request.user = {
       sub: payload.sub,
       email: payload.email,
+      spaceId: payload.spaceId,
       role: payload.role,
+      profileCompleted: payload.profileCompleted === true,
     };
     return true;
   }
@@ -72,14 +76,7 @@ export class JwtAuthGuard implements CanActivate {
     return scheme === 'Bearer' ? token : undefined;
   }
 
-  private unauthorized(message: string): HttpException {
-    return new HttpException(
-      {
-        statusCode: HttpStatus.UNAUTHORIZED,
-        code: ErrorCode.UNAUTHORIZED,
-        message,
-      },
-      HttpStatus.UNAUTHORIZED,
-    );
+  private unauthorized(message: string) {
+    return buildGuardException(ErrorCode.UNAUTHORIZED, message);
   }
 }

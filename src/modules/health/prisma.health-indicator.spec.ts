@@ -2,19 +2,19 @@ import { HealthIndicatorService } from '@nestjs/terminus';
 import { PrismaHealthIndicator } from './prisma.health-indicator';
 
 describe('PrismaHealthIndicator', () => {
-  let prisma: { $queryRaw: jest.Mock };
+  let databaseHealthAccessor: { ping: jest.Mock };
   let indicator: PrismaHealthIndicator;
 
   beforeEach(() => {
-    prisma = { $queryRaw: jest.fn() };
+    databaseHealthAccessor = { ping: jest.fn() };
     indicator = new PrismaHealthIndicator(
-      prisma as never,
+      databaseHealthAccessor as never,
       new HealthIndicatorService(),
     );
   });
 
   it('reports up when the database responds', async () => {
-    prisma.$queryRaw.mockResolvedValue([{ 1: 1 }]);
+    databaseHealthAccessor.ping.mockResolvedValue(undefined);
 
     const result = await indicator.pingCheck('db');
 
@@ -22,7 +22,9 @@ describe('PrismaHealthIndicator', () => {
   });
 
   it('reports down with the error message when the database is unreachable', async () => {
-    prisma.$queryRaw.mockRejectedValue(new Error('connection refused'));
+    databaseHealthAccessor.ping.mockRejectedValue(
+      new Error('connection refused'),
+    );
 
     const result = await indicator.pingCheck('db');
 

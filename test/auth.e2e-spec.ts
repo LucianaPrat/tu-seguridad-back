@@ -14,7 +14,10 @@ interface AccessTokenBody {
 interface MeBody {
   id: number;
   email: string;
+  spaceId: string;
+  spaceName: string;
   role: string;
+  profileCompleted: boolean;
 }
 
 interface ErrorBody {
@@ -111,7 +114,7 @@ describe('Auth (e2e)', () => {
     expect(typedBody<ErrorBody>(res)).toMatchObject({ code: 'UNAUTHORIZED' });
   });
 
-  it('returns the current user on /auth/me with a bearer token', async () => {
+  it('returns the current user with its space context on /auth/me', async () => {
     const { accessToken } = typedBody<AccessTokenBody>(await login());
 
     const res = await request(ctx.httpServer)
@@ -119,11 +122,51 @@ describe('Auth (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(typedBody<MeBody>(res)).toEqual({
+    expect(typedBody<MeBody>(res)).toMatchObject({
       id: expect.any(Number) as number,
-      email: process.env.ADMIN_EMAIL,
-      role: expect.any(String) as string,
+      email: process.env.ADMIN_EMAIL?.toLowerCase(),
+      spaceId: expect.any(String) as string,
+      spaceName: expect.any(String) as string,
+      role: 'admin',
+      profileCompleted: true,
     });
+  });
+
+  it('never returns the password hash on /auth/me', async () => {
+    const { accessToken } = typedBody<AccessTokenBody>(await login());
+
+    const res = await request(ctx.httpServer)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(Object.keys(typedBody<MeBody>(res))).not.toContain('passwordHash');
+  });
+
+  it('rejects a replayed refresh cookie after it has been rotated', async () => {
+    const cookie = refreshCookie(await login());
+
+    const first = await request(ctx.httpServer)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
+    const replay = await request(ctx.httpServer)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(401);
+  });
+
+  it('revokes the stored refresh token on logout', async () => {
+    const cookie = refreshCookie(await login());
+
+    await request(ctx.httpServer)
+      .post('/api/v1/auth/logout')
+      .set('Cookie', cookie);
+    const afterLogout = await request(ctx.httpServer)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
+
+    expect(afterLogout.status).toBe(401);
   });
 
   it('rejects /auth/me without a token', async () => {

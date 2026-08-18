@@ -1,20 +1,11 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+// Shared with registration, which provisions a space the same way: two copies of
+// the default routing matrix would let a seeded space and a registered one differ.
+import { ALERT_ROUTING_DEFAULTS } from '../src/cross/common/constants';
 
 const BCRYPT_COST = 10;
-
-// Only email is on by default: it is the one channel that needs no provider account, and T06
-// still has to pick a call/WhatsApp provider. A space that notifies on nothing is a silent
-// alarm, so the seed leaves one working route enabled.
-const ROUTING_DEFAULTS = [
-  { alertType: 'intruder', channel: 'call', enabled: false },
-  { alertType: 'intruder', channel: 'whatsapp', enabled: false },
-  { alertType: 'intruder', channel: 'email', enabled: true },
-  { alertType: 'suspicious', channel: 'call', enabled: false },
-  { alertType: 'suspicious', channel: 'whatsapp', enabled: false },
-  { alertType: 'suspicious', channel: 'email', enabled: true },
-] as const;
 
 const prisma = new PrismaClient();
 
@@ -62,7 +53,7 @@ async function main() {
 
     // skipDuplicates, not upsert: re-seeding must never stomp a matrix the operator has toggled.
     await tx.alertRouting.createMany({
-      data: ROUTING_DEFAULTS.map((routing) => ({
+      data: ALERT_ROUTING_DEFAULTS.map((routing) => ({
         spaceId: space.id,
         ...routing,
       })),
