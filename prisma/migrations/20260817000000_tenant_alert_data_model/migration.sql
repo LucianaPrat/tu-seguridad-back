@@ -1,43 +1,41 @@
--- DropForeignKey
-ALTER TABLE `zone_events` DROP FOREIGN KEY `zone_events_camera_id_fkey`;
-
--- DropForeignKey
-ALTER TABLE `zone_events` DROP FOREIGN KEY `zone_events_zone_id_fkey`;
-
--- DropForeignKey
-ALTER TABLE `zones` DROP FOREIGN KEY `zones_camera_id_fkey`;
-
--- AlterTable
-ALTER TABLE `cameras` DROP COLUMN `confidence_threshold`,
-    DROP COLUMN `enabled`,
-    DROP COLUMN `polling_interval_seconds`,
-    DROP COLUMN `snapshot_url`,
-    ADD COLUMN `alert_type` ENUM('intruder', 'suspicious') NULL,
-    ADD COLUMN `deleted_at` DATETIME(3) NULL,
-    ADD COLUMN `dvr_id` VARCHAR(191) NOT NULL,
-    ADD COLUMN `external_id` VARCHAR(191) NOT NULL,
-    ADD COLUMN `is_configured` BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN `is_enabled` BOOLEAN NOT NULL DEFAULT true,
-    ADD COLUMN `last_snapshot_at` DATETIME(3) NULL,
-    ADD COLUMN `location` VARCHAR(191) NULL,
-    ADD COLUMN `monitor_mode` ENUM('full', 'partial') NOT NULL DEFAULT 'full',
-    ADD COLUMN `status` ENUM('online', 'offline') NOT NULL DEFAULT 'offline';
-
--- AlterTable
-ALTER TABLE `users` DROP COLUMN `role`,
-    ADD COLUMN `avatar_url` VARCHAR(191) NULL,
-    ADD COLUMN `first_name` VARCHAR(191) NOT NULL,
-    ADD COLUMN `is_active` BOOLEAN NOT NULL DEFAULT true,
-    ADD COLUMN `last_login_at` DATETIME(3) NULL,
-    ADD COLUMN `last_name` VARCHAR(191) NOT NULL,
-    ADD COLUMN `phone` VARCHAR(191) NOT NULL,
-    ADD COLUMN `profile_completed` BOOLEAN NOT NULL DEFAULT false;
+-- The setup-era product tables are replaced wholesale, not converted: polygons do not map to
+-- percentage rectangles, cameras gain a mandatory DVR owner, and users gain mandatory profile
+-- columns. Altering them in place would backfill '' into `cameras.dvr_id`/`external_id` and into
+-- the new `users` name/phone columns, and the unique index below would then abort the migration
+-- half-applied (MySQL DDL is not transactional). Production holds no data — see
+-- plans/03.tenant-alert-data-model.tasks.md, "Migration safety (T01)". `hits` is technical
+-- telemetry and is left untouched.
 
 -- DropTable
 DROP TABLE `zone_events`;
 
 -- DropTable
 DROP TABLE `zones`;
+
+-- DropTable
+DROP TABLE `cameras`;
+
+-- DropTable
+DROP TABLE `users`;
+
+-- CreateTable
+CREATE TABLE `users` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `email` VARCHAR(191) NOT NULL,
+    `password_hash` VARCHAR(191) NOT NULL,
+    `first_name` VARCHAR(191) NOT NULL,
+    `last_name` VARCHAR(191) NOT NULL,
+    `phone` VARCHAR(191) NOT NULL,
+    `avatar_url` VARCHAR(191) NULL,
+    `is_active` BOOLEAN NOT NULL DEFAULT true,
+    `last_login_at` DATETIME(3) NULL,
+    `profile_completed` BOOLEAN NOT NULL DEFAULT false,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `users_email_key`(`email`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
 CREATE TABLE `spaces` (
@@ -126,7 +124,7 @@ CREATE TABLE `dvrs` (
     `space_id` VARCHAR(191) NOT NULL,
     `url` VARCHAR(191) NOT NULL,
     `username` VARCHAR(191) NOT NULL,
-    `password_encrypted` VARCHAR(191) NOT NULL,
+    `password_encrypted` VARCHAR(512) NOT NULL,
     `timezone` VARCHAR(191) NOT NULL,
     `last_test_at` DATETIME(3) NULL,
     `last_test_ok` BOOLEAN NULL,
@@ -134,6 +132,28 @@ CREATE TABLE `dvrs` (
     `updated_at` DATETIME(3) NOT NULL,
 
     UNIQUE INDEX `dvrs_space_id_key`(`space_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `cameras` (
+    `id` VARCHAR(191) NOT NULL,
+    `dvr_id` VARCHAR(191) NOT NULL,
+    `external_id` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(191) NOT NULL,
+    `location` VARCHAR(191) NULL,
+    `status` ENUM('online', 'offline') NOT NULL DEFAULT 'offline',
+    `is_configured` BOOLEAN NOT NULL DEFAULT false,
+    `is_enabled` BOOLEAN NOT NULL DEFAULT true,
+    `monitor_mode` ENUM('full', 'partial') NOT NULL DEFAULT 'full',
+    `alert_type` ENUM('intruder', 'suspicious') NULL,
+    `last_snapshot_at` DATETIME(3) NULL,
+    `deleted_at` DATETIME(3) NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+
+    INDEX `cameras_dvr_id_deleted_at_idx`(`dvr_id`, `deleted_at`),
+    UNIQUE INDEX `cameras_dvr_id_external_id_key`(`dvr_id`, `external_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -213,7 +233,7 @@ CREATE TABLE `event_deliveries` (
     `sent_at` DATETIME(3) NULL,
     `delivered_at` DATETIME(3) NULL,
     `provider_message_id` VARCHAR(191) NULL,
-    `error` VARCHAR(191) NULL,
+    `error` TEXT NULL,
     `inbound_received_at` DATETIME(3) NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
@@ -223,15 +243,6 @@ CREATE TABLE `event_deliveries` (
     INDEX `event_deliveries_event_id_idx`(`event_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateIndex
-CREATE INDEX `cameras_dvr_id_idx` ON `cameras`(`dvr_id`);
-
--- CreateIndex
-CREATE INDEX `cameras_deleted_at_idx` ON `cameras`(`deleted_at`);
-
--- CreateIndex
-CREATE UNIQUE INDEX `cameras_dvr_id_external_id_key` ON `cameras`(`dvr_id`, `external_id`);
 
 -- AddForeignKey
 ALTER TABLE `spaces` ADD CONSTRAINT `spaces_owner_user_id_fkey` FOREIGN KEY (`owner_user_id`) REFERENCES `users`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -298,6 +309,7 @@ ALTER TABLE `event_deliveries` ADD CONSTRAINT `event_deliveries_event_id_fkey` F
 
 -- AddForeignKey
 ALTER TABLE `event_deliveries` ADD CONSTRAINT `event_deliveries_recipient_user_id_fkey` FOREIGN KEY (`recipient_user_id`) REFERENCES `users`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
 
 -- Monitor-zone rectangles are percentages. Prisma models the decimal shape but MySQL enforces
 -- the cross-column geometry invariant that a single field validator cannot represent.

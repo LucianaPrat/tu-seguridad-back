@@ -62,7 +62,7 @@ model User {
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   membership              SpaceMember?
-  ownedSpaces             Space[]            @relation("SpaceOwner")
+  ownedSpace              Space?             @relation("SpaceOwner")
   sentInvitations         Invitation[]       @relation("InvitationInvitedBy")
   acceptedInvitations     Invitation[]       @relation("InvitationCreatedUser")
   membershipInvitations   SpaceMember[]      @relation("MembershipInvitedBy")
@@ -171,7 +171,7 @@ model Dvr {
   spaceId           String    @unique @map("space_id")
   url               String
   username          String
-  passwordEncrypted String    @map("password_encrypted")
+  passwordEncrypted String    @map("password_encrypted") @db.VarChar(512)
   timezone          String
   lastTestAt        DateTime? @map("last_test_at")
   lastTestOk        Boolean?  @map("last_test_ok")
@@ -206,8 +206,7 @@ model Camera {
   alertEvents  AlertEvent[]
 
   @@unique([dvrId, externalId])
-  @@index([dvrId])
-  @@index([deletedAt])
+  @@index([dvrId, deletedAt])
   @@map("cameras")
 }
 
@@ -297,7 +296,7 @@ model EventDelivery {
   sentAt            DateTime?           @map("sent_at")
   deliveredAt       DateTime?           @map("delivered_at")
   providerMessageId String?             @unique @map("provider_message_id")
-  error             String?
+  error             String?             @db.Text
   inboundReceivedAt DateTime?           @map("inbound_received_at")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
