@@ -6,7 +6,14 @@ import * as Sentry from '@sentry/node';
 
 // Redacted anywhere they appear in an outgoing event/breadcrumb, matching the
 // Pino redaction (snapshotUrl) plus the upstream/auth headers.
-const SENSITIVE_KEYS = new Set(['snapshoturl', 'authorization', 'fa-token']);
+const SENSITIVE_KEYS = new Set([
+  'snapshoturl',
+  'authorization',
+  'fa-token',
+  'passwordencrypted',
+  'tokenhash',
+  'correlationid',
+]);
 const REDACTED = '[redacted]';
 
 /** Recursively redact sensitive keys in place so secrets never leave the process. */

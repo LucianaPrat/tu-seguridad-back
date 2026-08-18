@@ -10,6 +10,26 @@ const stringRequiredInProduction = (devDefault: string) =>
 
 const ADMIN_PASSWORD_MIN_LENGTH = 16;
 
+const encryptionKeySchema = () =>
+  Joi.string()
+    .base64()
+    .custom((value: unknown, helpers) => {
+      if (typeof value !== 'string') {
+        return helpers.error('any.invalid');
+      }
+      return Buffer.from(value, 'base64').length === 32
+        ? value
+        : helpers.error('any.invalid');
+    })
+    .messages({ 'any.invalid': 'must decode to exactly 32 bytes' });
+
+const base64KeyRequiredInProduction = (devDefault: string) =>
+  encryptionKeySchema().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: encryptionKeySchema().required(),
+    otherwise: encryptionKeySchema().default(devDefault),
+  });
+
 export const envValidationSchema = Joi.object({
   [EnvNames.NODE_ENV]: Joi.string()
     .valid('development', 'test', 'production')
@@ -43,6 +63,9 @@ export const envValidationSchema = Joi.object({
     'mysql://USER:PASSWORD@127.0.0.1:3306/tu-seguridad-test',
   ),
   [EnvNames.SHADOW_DATABASE_URL]: Joi.string().optional(),
+  [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]: base64KeyRequiredInProduction(
+    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  ),
 
   [EnvNames.FACE_AUTH_API_URL]: stringRequiredInProduction(
     'https://api.face-auth.me',
