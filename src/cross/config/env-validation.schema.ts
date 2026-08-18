@@ -8,6 +8,8 @@ const stringRequiredInProduction = (devDefault: string) =>
     otherwise: Joi.string().default(devDefault),
   });
 
+const ADMIN_PASSWORD_MIN_LENGTH = 16;
+
 export const envValidationSchema = Joi.object({
   [EnvNames.NODE_ENV]: Joi.string()
     .valid('development', 'test', 'production')
@@ -25,7 +27,14 @@ export const envValidationSchema = Joi.object({
   [EnvNames.ADMIN_EMAIL]: Joi.string()
     .email({ tlds: { allow: false } })
     .default('admin@example.com'),
-  [EnvNames.ADMIN_PASSWORD]: Joi.string().default('change-me'),
+  // The seed builds a profile-complete, active admin that owns the space and holds the admin
+  // membership. Leaving this unset in production would publish that account under the placeholder
+  // password committed in .env.example, so production must supply a real one.
+  [EnvNames.ADMIN_PASSWORD]: Joi.string().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: Joi.string().min(ADMIN_PASSWORD_MIN_LENGTH).required(),
+    otherwise: Joi.string().default('change-me'),
+  }),
 
   [EnvNames.DATABASE_URL]: stringRequiredInProduction(
     'mysql://USER:PASSWORD@127.0.0.1:3306/tu-seguridad',

@@ -191,7 +191,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `LOG_LEVEL` | `info` | pino level. |
 | `JWT_SECRET` / `JWT_EXPIRES_IN` | — / `15m` | Access token. Required in production. |
 | `JWT_REFRESH_SECRET` / `JWT_REFRESH_EXPIRES_IN` | — / `7d` | Refresh token, distinct secret. Required in production. |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | Only used by `prisma:seed` (bcrypt-hashed). |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | Only used by `prisma:seed` (bcrypt-hashed). `ADMIN_PASSWORD` is required in production and must be at least 16 characters — the seeded admin owns the space and holds the `admin` membership. |
 | `DATABASE_URL` | — | Primary MySQL connection. Required in production. |
 | `DATABASE_URL_TEST` | — | Test DB — used by `test:int`/`test:e2e`, never dev DB. |
 | `SHADOW_DATABASE_URL` | — | Optional; Prisma's shadow DB for `migrate dev`. Not in original plan spec, added when needed. |
