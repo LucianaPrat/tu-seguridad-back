@@ -6,17 +6,25 @@ import {
   Post,
   Res,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SpaceMemberRole } from '@prisma/client';
 // `import type` is required: these appear in decorated parameter positions and
 // TS1272 rejects value imports there under isolatedModules.
 import type { Response } from 'express';
+import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import type { SessionContext } from '../../cross/common/session-context.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
+import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { AccessTokenDto } from '../auth/dto/access-token.dto';
 import { CredentialTokenDto } from '../auth/dto/credential-token.dto';
@@ -38,7 +46,26 @@ export class InvitationsController {
   @Roles(SpaceMemberRole.admin)
   @HttpCode(HttpStatus.CREATED)
   @Post()
-  @ApiOkResponse({ type: InvitationDto })
+  @ApiOperation({
+    summary: 'Invite somebody to the space',
+    description:
+      'Admin only. Creates a pending invitation for an email address and hands the ' +
+      'invitee a single-use token, delivered out of band. The token is the whole ' +
+      'credential — the invitee needs no account first.',
+  })
+  @ApiCreatedResponse({
+    type: InvitationDto,
+    description: 'Invitation created and pending.',
+  })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, or an email that is not an address.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.CONFLICT]:
+      'That email already belongs to the space, or already has a pending invitation.',
+  })
   create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateInvitationDto,
@@ -50,7 +77,26 @@ export class InvitationsController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post('accept')
-  @ApiOkResponse({ type: AccessTokenDto })
+  @ApiOperation({
+    summary: 'Accept an invitation',
+    description:
+      'Public — the invitee has no session yet, so the invitation token is the ' +
+      'credential. Consumes the token, joins the space and opens a session: the access ' +
+      'token comes back in the body, the refresh token only as an `httpOnly` ' +
+      'path-scoped cookie. A token is single-use; replaying it answers 401.',
+  })
+  @ApiOkResponse({
+    type: AccessTokenDto,
+    description:
+      'Invitation consumed. Refresh token set as a cookie, never in the body.',
+  })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: 'Malformed body.',
+    [ErrorCode.UNAUTHORIZED]:
+      'Unknown, expired or already-used invitation token.',
+    [ErrorCode.CONFLICT]:
+      'The invited account is already a member of the space.',
+  })
   async accept(
     @Body() dto: CredentialTokenDto,
     @RequestSessionContext() context: SessionContext,

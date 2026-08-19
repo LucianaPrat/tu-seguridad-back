@@ -2,7 +2,8 @@ import { Controller, Get, Param, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
-  ApiProduces,
+  ApiOperation,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 // `import type` is required: these appear in decorated parameter positions and
@@ -10,6 +11,8 @@ import {
 import type { Response } from 'express';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { ErrorCode } from '../../cross/common/constants';
+import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { buildGuardException } from '../../cross/errors/guard-exception';
 import { SnapshotService } from './snapshot.service';
 
@@ -29,10 +32,31 @@ export class SnapshotsController {
    * still throw the shared `{ statusCode, code, message }` body.
    */
   @Get(':id')
-  @ApiProduces('image/jpeg')
+  @ApiOperation({
+    summary: 'Read a stored snapshot',
+    description:
+      'Answers the raw image bytes of one stored frame. This is the only route that ' +
+      'serves them: snapshots live in the database and are resolved inside the caller ' +
+      "space, so another space's id answers 404 rather than the image. Cached " +
+      '`private, max-age=60` — the bytes are per-space and must not be shared.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Snapshot id, taken from a camera read or a capture answer.',
+  })
+  // Content type is declared on the 200 only, not with an operation-level
+  // `@ApiProduces`: that one applies to every response, and it would tell a
+  // client the JSON error bodies below are `image/jpeg` too.
   @ApiOkResponse({
-    description: 'Snapshot bytes',
-    schema: { type: 'string', format: 'binary' },
+    description: 'Snapshot bytes. `Content-Type` follows the stored image.',
+    content: {
+      'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.NOT_FOUND]: 'No snapshot with that id in the caller space.',
   })
   async read(
     @CurrentUser() user: JwtPayload,

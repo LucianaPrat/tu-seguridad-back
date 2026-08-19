@@ -3,20 +3,30 @@
   "paths": {
     "/api/v1": {
       "get": {
+        "description": "Root route. Answers a fixed string, reads nothing and checks nothing — use `/health/live` and `/health/ready` for liveness and readiness.",
         "operationId": "AppController_getHello_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Static banner text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
+        "summary": "Service banner",
         "tags": [
-          "App"
+          "health"
         ]
       }
     },
     "/api/v1/auth/login": {
       "post": {
+        "description": "Public. Opens a session for an existing account. The access token comes back in the body; the refresh token is set only as an `httpOnly`, path-scoped cookie and is never returned in a body. A wrong password and an unknown address answer the same 401, so the route cannot be used to probe which addresses have accounts.",
         "operationId": "AuthController_login_v1",
         "parameters": [],
         "requestBody": {
@@ -31,11 +41,59 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Session opened. Refresh cookie set on the response.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Wrong password, unknown address, or a disabled account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -46,6 +104,7 @@
             "bearer": []
           }
         ],
+        "summary": "Log in with email and password",
         "tags": [
           "auth"
         ]
@@ -53,6 +112,7 @@
     },
     "/api/v1/auth/register": {
       "post": {
+        "description": "Public. Creates the account and opens a session in one call. The access token comes back in the body; the refresh token is set only as an `httpOnly`, path-scoped cookie. The account may still need `POST /auth/complete-profile` before the rest of the API opens up — read `GET /auth/me` to find out.",
         "operationId": "AuthController_register_v1",
         "parameters": [],
         "requestBody": {
@@ -66,12 +126,60 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "201": {
+            "description": "Account created and session opened.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or a password that fails the policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — That email is already registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -82,6 +190,7 @@
             "bearer": []
           }
         ],
+        "summary": "Register an account",
         "tags": [
           "auth"
         ]
@@ -89,11 +198,12 @@
     },
     "/api/v1/auth/refresh": {
       "post": {
+        "description": "Public, but the refresh cookie is the credential — this route reads no body and accepts no fallback. Rotates the pair: the old refresh token is revoked, a new one replaces the cookie and a fresh access token comes back in the body. Presenting an access token here fails, and re-using an already-rotated refresh token is treated as replay.",
         "operationId": "AuthController_refresh_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Pair rotated. New refresh cookie set on the response.",
             "content": {
               "application/json": {
                 "schema": {
@@ -101,48 +211,27 @@
                 }
               }
             }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/api/v1/auth/logout": {
-      "post": {
-        "operationId": "AuthController_logout_v1",
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/api/v1/auth/me": {
-      "get": {
-        "operationId": "AuthController_me_v1",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — No refresh cookie, or a token that is expired, revoked, replayed or of the wrong type.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MeDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -153,6 +242,80 @@
             "bearer": []
           }
         ],
+        "summary": "Rotate the session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "description": "Public, and deliberately forgiving: clears the refresh cookie and revokes the stored token when one is present, but answers 204 either way so a client can always reach a logged-out state.",
+        "operationId": "AuthController_logout_v1",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Session closed and cookie cleared. Empty body."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Log out",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "The account behind the bearer token, with its space and role — the context every other route scopes to. Reachable with an incomplete profile, so a client can read it to decide whether to send the user to `POST /auth/complete-profile` first.",
+        "operationId": "AuthController_me_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current account, space and role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the current user",
         "tags": [
           "auth"
         ]
@@ -160,6 +323,7 @@
     },
     "/api/v1/auth/complete-profile": {
       "post": {
+        "description": "Fills in what registration or an invitation left open. One of the few routes reachable with an incomplete profile — every other protected route answers 403 until this succeeds. Re-issues the session afterwards, because the token claims change: a new access token comes back in the body and the refresh cookie is replaced.",
         "operationId": "AuthController_completeProfile_v1",
         "parameters": [],
         "requestBody": {
@@ -174,11 +338,83 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Profile completed and session re-issued.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The profile is already completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -189,6 +425,7 @@
             "bearer": []
           }
         ],
+        "summary": "Complete the profile",
         "tags": [
           "auth"
         ]
@@ -196,6 +433,7 @@
     },
     "/api/v1/auth/password-reset/request": {
       "post": {
+        "description": "Public. Answers 202 with the same acknowledgement whether or not the address has an account — telling the two apart would turn this route into an account-existence oracle. Delivery happens out of band.",
         "operationId": "CredentialRecoveryController_requestPasswordReset_v1",
         "parameters": [],
         "requestBody": {
@@ -209,8 +447,8 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "202": {
+            "description": "Request accepted. Same answer for an unknown address.",
             "content": {
               "application/json": {
                 "schema": {
@@ -218,8 +456,33 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or an email that is not an address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
+        "summary": "Request a password reset",
         "tags": [
           "auth"
         ]
@@ -227,6 +490,7 @@
     },
     "/api/v1/auth/password-reset/confirm": {
       "post": {
+        "description": "Public — the reset token is the credential. Sets the new password and revokes the token. Single-use: replaying it answers 401. Existing sessions are not silently kept alive, so the caller logs in again afterwards.",
         "operationId": "CredentialRecoveryController_confirmPasswordReset_v1",
         "parameters": [],
         "requestBody": {
@@ -241,7 +505,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Password changed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -249,8 +513,57 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or a password that fails the policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Unknown, expired or already-used reset token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
+        "summary": "Confirm a password reset",
         "tags": [
           "auth"
         ]
@@ -258,6 +571,7 @@
     },
     "/api/v1/auth/magic-link/request": {
       "post": {
+        "description": "Public. Answers 202 with the same acknowledgement whether or not the address has an account — telling the two apart would turn this route into an account-existence oracle. Delivery happens out of band.",
         "operationId": "CredentialRecoveryController_requestMagicLink_v1",
         "parameters": [],
         "requestBody": {
@@ -271,8 +585,8 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "202": {
+            "description": "Request accepted. Same answer for an unknown address.",
             "content": {
               "application/json": {
                 "schema": {
@@ -280,8 +594,33 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or an email that is not an address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
+        "summary": "Request a magic-link login",
         "tags": [
           "auth"
         ]
@@ -289,6 +628,7 @@
     },
     "/api/v1/auth/magic-link/consume": {
       "post": {
+        "description": "Public — the magic-link token is the credential, so no password is involved. Opens a session: the access token comes back in the body, the refresh token only as an `httpOnly` path-scoped cookie. Single-use: replaying answers 401.",
         "operationId": "CredentialRecoveryController_consumeMagicLink_v1",
         "parameters": [],
         "requestBody": {
@@ -303,7 +643,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Session opened. Refresh token set as a cookie, never in the body.",
             "content": {
               "application/json": {
                 "schema": {
@@ -311,8 +651,57 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Unknown, expired or already-used magic-link token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
+        "summary": "Log in with a magic link",
         "tags": [
           "auth"
         ]
@@ -320,6 +709,7 @@
     },
     "/api/v1/auth/face/identities": {
       "post": {
+        "description": "Registers a face token against the calling account so it can be used to log in later. Enrollment replaces the previous active identity rather than adding a second one; the replaced record is kept as history, so enrollments stay auditable.",
         "operationId": "FaceIdentityController_register_v1",
         "parameters": [],
         "requestBody": {
@@ -333,12 +723,84 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "201": {
+            "description": "Identity enrolled and now the active one.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FaceIdentityDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token, or the account cannot be used for face login.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -349,6 +811,7 @@
             "bearer": []
           }
         ],
+        "summary": "Enroll a face identity",
         "tags": [
           "auth"
         ]
@@ -356,6 +819,7 @@
     },
     "/api/v1/auth/face/login": {
       "post": {
+        "description": "Public — the face token is the credential, so no password is involved. Opens a session: the access token comes back in the body, the refresh token only as an `httpOnly` path-scoped cookie. An unrecognized face and a disabled account answer the same 401, on purpose.",
         "operationId": "FaceIdentityController_login_v1",
         "parameters": [],
         "requestBody": {
@@ -370,11 +834,59 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Session opened. Refresh token set as a cookie, never in the body.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Face not recognized, or the account cannot be used.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -385,6 +897,7 @@
             "bearer": []
           }
         ],
+        "summary": "Log in with a face identity",
         "tags": [
           "auth"
         ]
@@ -392,6 +905,7 @@
     },
     "/api/v1/invitations": {
       "post": {
+        "description": "Admin only. Creates a pending invitation for an email address and hands the invitee a single-use token, delivered out of band. The token is the whole credential — the invitee needs no account first.",
         "operationId": "InvitationsController_create_v1",
         "parameters": [],
         "requestBody": {
@@ -405,12 +919,108 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "201": {
+            "description": "Invitation created and pending.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InvitationDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or an email that is not an address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — That email already belongs to the space, or already has a pending invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -421,6 +1031,7 @@
             "bearer": []
           }
         ],
+        "summary": "Invite somebody to the space",
         "tags": [
           "invitations"
         ]
@@ -428,6 +1039,7 @@
     },
     "/api/v1/invitations/accept": {
       "post": {
+        "description": "Public — the invitee has no session yet, so the invitation token is the credential. Consumes the token, joins the space and opens a session: the access token comes back in the body, the refresh token only as an `httpOnly` path-scoped cookie. A token is single-use; replaying it answers 401.",
         "operationId": "InvitationsController_accept_v1",
         "parameters": [],
         "requestBody": {
@@ -442,7 +1054,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Invitation consumed. Refresh token set as a cookie, never in the body.",
             "content": {
               "application/json": {
                 "schema": {
@@ -450,6 +1062,78 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Unknown, expired or already-used invitation token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The invited account is already a member of the space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -457,6 +1141,7 @@
             "bearer": []
           }
         ],
+        "summary": "Accept an invitation",
         "tags": [
           "invitations"
         ]
@@ -464,11 +1149,12 @@
     },
     "/health/live": {
       "get": {
+        "description": "Public. Answers as long as the process is up and accepting requests. Runs no indicator, so it never fails for a dependency — restart the process when this stops answering.",
         "operationId": "HealthController_live",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The Health Check is successful",
+            "description": "Process is up. Terminus report: `{ status: \"ok\", info, error, details }`.\n\nThe Health Check is successful",
             "content": {
               "application/json": {
                 "schema": {
@@ -625,6 +1311,7 @@
             }
           }
         },
+        "summary": "Liveness probe",
         "tags": [
           "health"
         ]
@@ -632,11 +1319,12 @@
     },
     "/health/ready": {
       "get": {
+        "description": "Public. Pings the database. Answers whether this instance can serve traffic — the check a load balancer should route on.",
         "operationId": "HealthController_ready",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The Health Check is successful",
+            "description": "Database reachable. Terminus report: `{ status: \"ok\", info, error, details }`.\n\nThe Health Check is successful",
             "content": {
               "application/json": {
                 "schema": {
@@ -710,7 +1398,7 @@
             }
           },
           "503": {
-            "description": "The Health Check is not successful",
+            "description": "At least one indicator is down. Same Terminus report with `status: \"error\"`.\n\nThe Health Check is not successful",
             "content": {
               "application/json": {
                 "schema": {
@@ -793,6 +1481,7 @@
             }
           }
         },
+        "summary": "Readiness probe",
         "tags": [
           "health"
         ]
@@ -800,11 +1489,12 @@
     },
     "/health/dependencies": {
       "get": {
+        "description": "Public. Short-timeout reachability check against the face-auth detection API. Deliberately separate from `/health/ready`: a degraded upstream is reported here without marking the instance not-ready, because camera and zone management keep working without it. Only person detection stops.",
         "operationId": "HealthController_dependencies",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The Health Check is successful",
+            "description": "Upstream reachable. Terminus report: `{ status: \"ok\", info, error, details }`.\n\nThe Health Check is successful",
             "content": {
               "application/json": {
                 "schema": {
@@ -878,7 +1568,7 @@
             }
           },
           "503": {
-            "description": "The Health Check is not successful",
+            "description": "At least one indicator is down. Same Terminus report with `status: \"error\"`.\n\nThe Health Check is not successful",
             "content": {
               "application/json": {
                 "schema": {
@@ -961,6 +1651,7 @@
             }
           }
         },
+        "summary": "Upstream reachability",
         "tags": [
           "health"
         ]
@@ -968,15 +1659,88 @@
     },
     "/api/v1/dvr": {
       "get": {
+        "description": "The DVR the caller space watches, without its password — the stored credential is never returned by any route. Answers 404 while no recorder has been configured yet, which is the normal state of a new space.",
         "operationId": "DvrController_findOne_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Recorder configuration, password omitted.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DvrDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The space has no recorder configured yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -987,11 +1751,13 @@
             "bearer": []
           }
         ],
+        "summary": "Read the space recorder",
         "tags": [
           "dvr"
         ]
       },
       "put": {
+        "description": "Admin only. Stores the recorder the space watches and immediately discovers its channels. Connectivity is tested first and a configuration that cannot be reached is not stored, so a 502 or 504 leaves the previous recorder in place. Discovered channels are reconciled by external id: a channel that comes back keeps its monitor configuration, one that stopped answering becomes `isConfigured: false` rather than being deleted.",
         "operationId": "DvrController_configure_v1",
         "parameters": [],
         "requestBody": {
@@ -1006,11 +1772,131 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Recorder stored and reconciled. Password omitted.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DvrDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or a recorder URL that is not usable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The recorder refused the credentials or answered an error. Nothing was stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time. Nothing was stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1021,6 +1907,7 @@
             "bearer": []
           }
         ],
+        "summary": "Initialize or re-point the recorder",
         "tags": [
           "dvr"
         ]
@@ -1028,15 +1915,136 @@
     },
     "/api/v1/dvr/discovery": {
       "post": {
+        "description": "Admin only. Re-runs discovery against the already-stored credentials, so it takes no body. Use it after adding or moving channels on the recorder. Same reconciliation as `PUT /dvr`: matching channels keep their configuration, channels that stopped answering become `isConfigured: false`.",
         "operationId": "DvrController_rediscover_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Discovery finished and cameras reconciled.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DvrDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The space has no recorder configured yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The recorder refused the stored credentials or answered an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1047,6 +2055,7 @@
             "bearer": []
           }
         ],
+        "summary": "Re-run channel discovery",
         "tags": [
           "dvr"
         ]
@@ -1054,12 +2063,14 @@
     },
     "/api/v1/snapshots/{id}": {
       "get": {
+        "description": "Answers the raw image bytes of one stored frame. This is the only route that serves them: snapshots live in the database and are resolved inside the caller space, so another space's id answers 404 rather than the image. Cached `private, max-age=60` — the bytes are per-space and must not be shared.",
         "operationId": "SnapshotsController_read_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Snapshot id, taken from a camera read or a capture answer.",
             "schema": {
               "type": "string"
             }
@@ -1067,7 +2078,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Snapshot bytes",
+            "description": "Snapshot bytes. `Content-Type` follows the stored image.",
             "content": {
               "image/jpeg": {
                 "schema": {
@@ -1076,6 +2087,78 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No snapshot with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1083,6 +2166,7 @@
             "bearer": []
           }
         ],
+        "summary": "Read a stored snapshot",
         "tags": [
           "snapshots"
         ]
@@ -1090,11 +2174,12 @@
     },
     "/api/v1/cameras": {
       "get": {
+        "description": "Every camera discovered on the space recorder, soft-deleted ones excluded. Each carries its discovery fields, its monitor configuration and a derived `latestSnapshotUrl`. A camera the recorder stopped reporting stays in the list with `isConfigured: false` rather than disappearing.",
         "operationId": "CamerasController_findAll_v1",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Cameras of the caller space.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1105,38 +2190,51 @@
                 }
               }
             }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "cameras"
-        ]
-      }
-    },
-    "/api/v1/cameras/{id}": {
-      "get": {
-        "operationId": "CamerasController_findOne_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CameraDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1147,17 +2245,130 @@
             "bearer": []
           }
         ],
+        "summary": "List the cameras of the space",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{id}": {
+      "get": {
+        "description": "Full detail for a single camera: discovery fields, monitor configuration and the derived `latestSnapshotUrl`. This is the only route that returns the recorder stream URL, because it can embed recorder credentials.",
+        "operationId": "CamerasController_findOne_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The camera.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CameraDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read one camera",
         "tags": [
           "cameras"
         ]
       },
       "put": {
+        "description": "Admin only. Operator-editable fields only — `externalId` and `status` come from discovery and are rejected here. Switching a camera to full-frame monitoring requires an `alertType`, since there are no zones to take the alert level from.",
         "operationId": "CamerasController_update_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1175,7 +2386,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Camera after the update.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1183,92 +2394,99 @@
                 }
               }
             }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "cameras"
-        ]
-      },
-      "delete": {
-        "operationId": "CamerasController_remove_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "cameras"
-        ]
-      }
-    },
-    "/api/v1/cameras/{id}/status": {
-      "get": {
-        "operationId": "CamerasController_status_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "cameras"
-        ]
-      }
-    },
-    "/api/v1/cameras/{id}/snapshots": {
-      "post": {
-        "operationId": "CamerasController_capture_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "",
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, a rejected discovery field, or full-frame monitoring without an alertType.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SnapshotDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1279,6 +2497,393 @@
             "bearer": []
           }
         ],
+        "summary": "Update a camera",
+        "tags": [
+          "cameras"
+        ]
+      },
+      "delete": {
+        "description": "Admin only. Logical delete: the camera leaves every read and the DVR poll list, its alert history is kept. A later discovery run can bring the same channel back.",
+        "operationId": "CamerasController_remove_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Camera removed. Empty body."
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a camera",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{id}/status": {
+      "get": {
+        "description": "Live view of the polling pipeline for one camera: last poll, last success, last error and its code, upstream latency, and current occupancy per monitored area. Held in memory, so it resets when the process restarts.",
+        "operationId": "CamerasController_status_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pipeline status: `lastPollAt`, `lastSuccessAt`, `lastErrorCode`, latency and per-area occupancy."
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read the pipeline status of a camera",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{id}/snapshots": {
+      "post": {
+        "description": "Pulls a frame from the recorder immediately instead of waiting for the next poll, stores it, and answers its metadata including the authenticated URL to read the bytes from `GET /snapshots/{id}`. Runs no detection — use `POST /cameras/{id}/analyze` for that.",
+        "operationId": "CamerasController_capture_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Frame captured and stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — The recorder returned a frame over the stored-size limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The recorder refused the request or answered an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Capture a snapshot now",
         "tags": [
           "cameras"
         ]
@@ -1286,12 +2891,14 @@
     },
     "/api/v1/cameras/{id}/analyze": {
       "post": {
+        "description": "Runs the detection pipeline synchronously against an image you upload, as the manual path for when the recorder is unreachable. Answers the detected persons, the per-zone results and any alerts raised; a frame that raises an alert is stored, the rest are not. The upload must be a real image — the magic numbers are checked, not just the declared type — and must fit `SNAPSHOT_MAX_BYTES`.",
         "operationId": "CamerasController_analyze_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1314,8 +2921,176 @@
           }
         },
         "responses": {
-          "201": {
-            "description": ""
+          "200": {
+            "description": "Detection result: `persons`, `zoneResults` and the `alerts` raised, if any."
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Missing file, a file that is not an image, or one over the size limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The camera is disabled or has no monitoring configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The detection upstream failed, or its circuit is open.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The detection upstream did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1323,6 +3098,7 @@
             "bearer": []
           }
         ],
+        "summary": "Analyze an uploaded frame",
         "tags": [
           "cameras"
         ]
@@ -1508,12 +3284,14 @@
     },
     "/api/v1/cameras/{cameraId}/zones": {
       "get": {
+        "description": "Every rectangle configured on the camera, each with the alert level it raises. An empty list means the camera is either unmonitored or monitored full-frame.",
         "operationId": "ZonesController_findByCamera_v1",
         "parameters": [
           {
             "name": "cameraId",
             "required": true,
             "in": "path",
+            "description": "Camera the zones belong to. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1521,7 +3299,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Zones of the camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1532,6 +3310,78 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1539,17 +3389,20 @@
             "bearer": []
           }
         ],
+        "summary": "List the monitor zones of a camera",
         "tags": [
           "zones"
         ]
       },
       "post": {
+        "description": "Admin only. Adds one percentage rectangle to a camera. Coordinates are percent of frame, not pixels, so the zone keeps its meaning if the recorder changes resolution. The rectangle must stay inside the frame and have a positive area; a rectangle that does not answers `INVALID_ZONE`.",
         "operationId": "ZonesController_create_v1",
         "parameters": [
           {
             "name": "cameraId",
             "required": true,
             "in": "path",
+            "description": "Camera the zones belong to. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1566,12 +3419,109 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "",
+          "201": {
+            "description": "Zone created.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.<br>`INVALID_ZONE` — Rectangle is outside the frame or has no area.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_ZONE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1582,6 +3532,7 @@
             "bearer": []
           }
         ],
+        "summary": "Create a monitor zone",
         "tags": [
           "zones"
         ]
@@ -1589,12 +3540,14 @@
     },
     "/api/v1/zones/{id}": {
       "get": {
+        "description": "One rectangle with its alert level and the camera it belongs to.",
         "operationId": "ZonesController_findOne_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Zone id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1602,11 +3555,83 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "The zone.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No zone with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1617,17 +3642,20 @@
             "bearer": []
           }
         ],
+        "summary": "Read a monitor zone",
         "tags": [
           "zones"
         ]
       },
       "put": {
+        "description": "Admin only. Partial update — the sent fields are merged onto the stored zone and the merged rectangle is what gets validated, so moving one edge cannot push the zone out of the frame.",
         "operationId": "ZonesController_update_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Zone id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1645,11 +3673,108 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Zone after the merge.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MonitorZoneDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.<br>`INVALID_ZONE` — The merged rectangle is outside the frame or has no area.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_ZONE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No zone with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1660,17 +3785,20 @@
             "bearer": []
           }
         ],
+        "summary": "Update a monitor zone",
         "tags": [
           "zones"
         ]
       },
       "delete": {
+        "description": "Admin only. Logical delete: the zone leaves every read and stops raising alerts, the alerts it already raised stay in the history.",
         "operationId": "ZonesController_remove_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Zone id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -1678,7 +3806,79 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "Zone removed. Empty body."
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No zone with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1686,6 +3886,7 @@
             "bearer": []
           }
         ],
+        "summary": "Delete a monitor zone",
         "tags": [
           "zones"
         ]
@@ -1694,34 +3895,42 @@
   },
   "info": {
     "title": "Tu Seguridad API",
-    "description": "",
+    "description": "Space-scoped video surveillance API. Every route outside `auth` and `health` resolves resources inside the caller space, taken from the bearer token, so an id from another space answers 404 rather than a result. Writes that change what the system watches are admin-only. Failures answer `{ statusCode, code, message }` — branch on `code`, not on the message.",
     "version": "1.0",
     "contact": {}
   },
   "tags": [
     {
       "name": "auth",
-      "description": ""
+      "description": "Login, registration, session rotation, password reset, magic links, face identity."
     },
     {
       "name": "invitations",
-      "description": ""
+      "description": "Admin-issued invitations to a space, and their acceptance."
+    },
+    {
+      "name": "dvr",
+      "description": "The space recorder: credentials, connectivity and channel discovery."
     },
     {
       "name": "cameras",
-      "description": ""
+      "description": "Discovered cameras, monitor configuration, snapshots and manual analysis."
     },
     {
       "name": "zones",
-      "description": ""
+      "description": "Percentage-rectangle monitor areas inside a camera frame."
+    },
+    {
+      "name": "snapshots",
+      "description": "Stored frame bytes. The only route that serves them."
     },
     {
       "name": "events",
-      "description": ""
+      "description": "Alert history."
     },
     {
       "name": "health",
-      "description": ""
+      "description": "Liveness, readiness and upstream reachability. Outside the API prefix."
     }
   ],
   "servers": [],
@@ -1734,6 +3943,42 @@
       }
     },
     "schemas": {
+      "ApiErrorDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "number",
+            "example": 404,
+            "description": "HTTP status, the same value as the response status line."
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "VALIDATION_ERROR",
+              "INVALID_ZONE",
+              "UNAUTHORIZED",
+              "FORBIDDEN",
+              "NOT_FOUND",
+              "CONFLICT",
+              "UPSTREAM_ERROR",
+              "UPSTREAM_TIMEOUT",
+              "INTERNAL_ERROR"
+            ],
+            "example": "NOT_FOUND",
+            "description": "Stable machine-readable code. Branch on this, not on the message."
+          },
+          "message": {
+            "type": "string",
+            "example": "Camera 7f3a not found",
+            "description": "Human-readable reason. Never carries credentials, tokens or snapshot URLs."
+          }
+        },
+        "required": [
+          "statusCode",
+          "code",
+          "message"
+        ]
+      },
       "LoginDto": {
         "type": "object",
         "properties": {
@@ -1755,7 +4000,9 @@
         "type": "object",
         "properties": {
           "accessToken": {
-            "type": "string"
+            "type": "string",
+            "description": "Bearer token for the `Authorization` header. Short-lived — rotate through `POST /auth/refresh` when it expires.",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI..."
           }
         },
         "required": [
