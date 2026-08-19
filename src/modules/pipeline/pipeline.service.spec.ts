@@ -76,7 +76,6 @@ describe('PipelineService', () => {
   let zoneAccessor: { findByCamera: jest.Mock };
   let snapshotService: { store: jest.Mock };
   let statusRegistry: { record: jest.Mock };
-  let alertEmitter: { emit: jest.Mock };
   let service: PipelineService;
 
   beforeEach(() => {
@@ -86,7 +85,6 @@ describe('PipelineService', () => {
       store: jest.fn().mockResolvedValue(buildData({ id: 'snapshot-uuid' })),
     };
     statusRegistry = { record: jest.fn() };
-    alertEmitter = { emit: jest.fn().mockResolvedValue(undefined) };
     service = new PipelineService(
       faceAuthClient as never,
       zoneAccessor as never,
@@ -95,7 +93,6 @@ describe('PipelineService', () => {
       // Real engine with a one-poll threshold: alert-level selection is the
       // behavior under test, and mocking it away would test nothing.
       new OccupancyEngine(1, 1),
-      alertEmitter,
     );
   });
 
@@ -208,22 +205,6 @@ describe('PipelineService', () => {
       expect(result.data.alerts).toHaveLength(0);
     }
     expect(snapshotService.store).not.toHaveBeenCalled();
-    expect(alertEmitter.emit).not.toHaveBeenCalled();
-  });
-
-  it('hands every raised alert to the emitter with its space', async () => {
-    faceAuthClient.detectPersons.mockResolvedValue(detection());
-
-    await service.processImage(spaceId, buildCamera(), image);
-
-    expect(alertEmitter.emit).toHaveBeenCalledTimes(1);
-    expect(alertEmitter.emit).toHaveBeenCalledWith(
-      spaceId,
-      expect.objectContaining({
-        cameraId: 'camera-uuid',
-        alertType: 'intruder',
-      }),
-    );
   });
 
   it('still reports the alert when the frame could not be stored', async () => {

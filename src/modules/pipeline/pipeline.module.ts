@@ -4,8 +4,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { EnvNames } from '../../cross/common/constants';
 import { FaceAuthClientModule } from '../face-auth-client/face-auth-client.module';
 import { SnapshotsModule } from '../snapshots/snapshots.module';
-import { AlertEmitterPort } from './alert-emitter.port';
-import { LoggedAlertEmitterService } from './logged-alert-emitter.service';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
 import { PollingScheduler } from './polling.scheduler';
@@ -27,7 +25,6 @@ import { PollingScheduler } from './polling.scheduler';
           config.getOrThrow<number>(EnvNames.EXIT_CONSECUTIVE_POLLS),
         ),
     },
-    { provide: AlertEmitterPort, useClass: LoggedAlertEmitterService },
   ],
   exports: [PipelineService],
 })

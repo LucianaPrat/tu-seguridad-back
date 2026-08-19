@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiCreatedResponse,
   ApiConsumes,
   ApiOkResponse,
   ApiTags,
@@ -84,7 +85,7 @@ export class CamerasController {
 
   @HttpCode(HttpStatus.CREATED)
   @Post(':id/snapshots')
-  @ApiOkResponse({ type: SnapshotDto })
+  @ApiCreatedResponse({ type: SnapshotDto })
   capture(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,

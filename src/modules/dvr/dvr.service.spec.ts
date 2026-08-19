@@ -89,6 +89,20 @@ describe('DvrService', () => {
   });
 
   describe('configure', () => {
+    it('rejects a URL with embedded credentials before discovery or persistence', async () => {
+      const result = await service.configure(spaceId, {
+        ...CONFIGURE_DTO,
+        url: 'http://user:password@192.168.1.10:8000',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(dvrClient.discoverChannels).not.toHaveBeenCalled();
+      expect(dvrAccessor.upsertConfiguration).not.toHaveBeenCalled();
+    });
+
     it('rejects an unknown IANA timezone without touching the accessor', async () => {
       const result = await service.configure(spaceId, {
         ...CONFIGURE_DTO,

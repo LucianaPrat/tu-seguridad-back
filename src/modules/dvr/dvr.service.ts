@@ -31,6 +31,11 @@ export class DvrService {
     spaceId: string,
     dto: ConfigureDvrDto,
   ): Promise<Either<DvrDto>> {
+    const urlError = validateDvrUrl(dto.url);
+    if (urlError) {
+      return buildError(ErrorCode.VALIDATION_ERROR, urlError);
+    }
+
     if (!isValidTimezone(dto.timezone)) {
       return buildError(
         ErrorCode.VALIDATION_ERROR,
@@ -116,6 +121,21 @@ function toConnection(credentials: DvrCredentials) {
     username: credentials.username,
     password: credentials.password,
   };
+}
+
+function validateDvrUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname || !['http:', 'https:'].includes(parsed.protocol)) {
+      return 'url must start with http:// or https:// and carry a host';
+    }
+    if (parsed.username || parsed.password) {
+      return 'url must not include credentials';
+    }
+  } catch {
+    return 'url must start with http:// or https:// and carry a host';
+  }
+  return undefined;
 }
 
 /**

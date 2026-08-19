@@ -40,7 +40,7 @@ describe('CamerasService', () => {
     captureAndStore: jest.Mock;
   };
   let statusRegistry: { get: jest.Mock };
-  let pipelineService: { processImage: jest.Mock };
+  let pipelineService: { processImage: jest.Mock; resetOccupancy: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let service: CamerasService;
 
@@ -57,7 +57,7 @@ describe('CamerasService', () => {
       captureAndStore: jest.fn(),
     };
     statusRegistry = { get: jest.fn() };
-    pipelineService = { processImage: jest.fn() };
+    pipelineService = { processImage: jest.fn(), resetOccupancy: jest.fn() };
     configService = {
       getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
     };
@@ -191,6 +191,22 @@ describe('CamerasService', () => {
         spaceId,
         'camera-uuid',
         expect.objectContaining({ isConfigured: true }),
+      );
+    });
+
+    it('resets occupancy when monitor configuration changes', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      cameraAccessor.countMonitorZones.mockResolvedValue(1);
+      cameraAccessor.update.mockResolvedValue(
+        buildCamera({ monitorMode: 'partial' }),
+      );
+
+      await service.update(spaceId, 'camera-uuid', {
+        monitorMode: 'partial',
+      });
+
+      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+        'camera-uuid',
       );
     });
   });

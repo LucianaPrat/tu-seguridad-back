@@ -11,7 +11,6 @@ import { SnapshotService } from '../snapshots/snapshot.service';
 import { toRectangle } from '../zones/zone.mapper';
 import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
 import { AlertCandidate } from './alert-candidate';
-import { AlertEmitterPort } from './alert-emitter.port';
 import { AnalysisResult, ZoneResult } from './analysis-result';
 import {
   AnchorWithScore,
@@ -27,8 +26,11 @@ export class PipelineService {
     private readonly snapshotService: SnapshotService,
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly occupancyEngine: OccupancyEngine,
-    private readonly alertEmitter: AlertEmitterPort,
   ) {}
+
+  resetOccupancy(cameraId: string): void {
+    this.occupancyEngine.reset(cameraId);
+  }
 
   /**
    * One detection pass over one frame. Callers hand in an already-captured
@@ -96,10 +98,6 @@ export class PipelineService {
       personsDetected: transition.personsInZone,
       confidence: transition.confidence,
     }));
-    for (const alert of alerts) {
-      await this.alertEmitter.emit(spaceId, alert);
-    }
-
     const zoneResults: ZoneResult[] = zones.map((zone) => ({
       zoneId: zone.zoneId,
       alertType: zone.alertType,
