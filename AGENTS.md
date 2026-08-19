@@ -45,19 +45,30 @@ Git identity (see [`.standards/standards/GIT.md`](.standards/standards/GIT.md), 
 
 ## Checks
 
-Names are owned by [`.standards/standards/CHECKS.md`](.standards/standards/CHECKS.md). What this repo
-exposes today:
+Names are owned by [`.standards/standards/CHECKS.md`](.standards/standards/CHECKS.md). All six are
+exposed:
 
-- lint: `npm run lint`
+- format: `npm run format:check` — check-only. `npm run format` is the mutating one.
+- lint: `npm run lint` — check-only, `--max-warnings 0`. `npm run lint:fix` is the mutating one.
+- typecheck: `npm run typecheck` — `tsc --noEmit`. Runs against `tsconfig.json`, so `test/`, specs,
+  `scripts/`, and `prisma/` are typechecked; `npm run build` uses `tsconfig.build.json`, which
+  excludes them.
 - test: `npm run test:all` — unit + integration + e2e. "Tests pass" never means unit only.
 - build: `npm run build`
-- format, typecheck, security: **not exposed yet**. Not a declared override, an open gap — see
-  [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md). `lint` and `format` also still run in mutating
-  mode, so neither is a valid gate until that is fixed.
+- security: `npm run security`
+  Runs: `npm audit --omit=dev --audit-level=critical && secretlint "**/*"`
 
-Audit gate scope, as configured in `.github/workflows/pr-tests.yml`:
-`npm audit --omit=dev --audit-level=critical` — production dependencies, critical severity only. Why
-that scope and not `--audit-level=high`: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+Audit gate scope: production dependencies, critical severity only. Why that scope and not
+`--audit-level=high`: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+
+Secret scanner: `secretlint` with `@secretlint/secretlint-rule-preset-recommend`, configured in
+[`.secretlintrc.json`](.secretlintrc.json). Two things to know before touching it:
+
+- It scans the working tree, not git history. A secret committed and later deleted is outside its
+  reach — that sweep is still open, see [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md).
+- One narrow allow is configured: the fake basic-auth URL `user:pass@dvr.local` used as a fixture in
+  `src/observability/sentry.spec.ts`, which tests exactly that `snapshotUrl` gets scrubbed. The allow
+  is pinned to that host — any other basic-auth credential still fails the check.
 
 ## Workflow: plans
 

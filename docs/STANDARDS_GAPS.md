@@ -12,12 +12,7 @@ written reason. It does not leave by being forgotten.
 
 | Gap | Rule | Fix |
 |---|---|---|
-| No `format:check` script. `format` runs `prettier --write`. | CHECKS.md six checks; DELIVERY.md "a lint or format command used as a gate MUST be check-only" | add `format:check` (`prettier --check`), keep `format` as the mutating one |
-| `lint` runs `eslint --fix` and CI uses that same command | DELIVERY.md, gate integrity | `lint` becomes check-only, `lint:fix` becomes the mutating command |
-| No `--max-warnings 0` | DELIVERY.md "warnings MUST fail the gate" | add the flag once the warnings below are resolved |
-| No `typecheck` script | CHECKS.md | `tsc --noEmit` |
-| No `security` script, no secret scanner anywhere | CHECKS.md "the security check", SECURITY.md | `npm audit --omit=dev --audit-level=critical && gitleaks detect --source . --redact` |
-| CI runs audit, lint, build, test — no `format`, `typecheck`, or `security`, and the order differs from the canonical one | DELIVERY.md, continuous integration | reorder to install → format → lint → typecheck → build → test → security, with the OpenAPI drift check and prisma migrate/seed inserted after build |
+| `security` scans the working tree only, not git history | CHECKS.md "the security check", SECURITY.md | `secretlint` reads files as they are now, so a secret committed and later removed stays invisible to it. One-off sweep of the 102 commits with `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source /repo --redact`, then decide whether it stays a periodic job |
 | No `permissions:` block in `pr-tests.yml` | DELIVERY.md "every workflow MUST declare an explicit least-privilege permissions block" | add `permissions: contents: read` |
 | No CI check of the PR title/body for agent traces | GIT.md, "No agent traces" — a git hook cannot see a PR body | wire `.standards/scripts/check-pr-body.sh` into the workflow |
 | No `validate-standards` workflow, and `pr-tests.yml` checks out without `submodules: true`, so `.standards/` is empty in CI | central README.md, "Option C, CI validation" | copy `.standards/docs/examples/validate-consumer-standards.yml` into `.github/workflows/`; it also carries the PR-body check above |
