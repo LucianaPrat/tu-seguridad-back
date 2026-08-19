@@ -154,6 +154,7 @@ Infra concerns handled by frameworks below. **Every external integration is opt-
 | Structured logging | `nestjs-pino` + `pino-http` | `src/cross/config/logger.options.ts` | JSON logs, per-request id, `snapshotUrl`/`Authorization`/`Fa-Token` redaction. Always on. |
 | Tracing | OpenTelemetry SDK | `src/observability/tracing.ts`, `tracing.helpers.ts` | Opt-in via `OTEL_ENABLED`. Loaded **before** `ConfigModule` (reads `dotenv` itself). `withSpan(name, attrs, fn)` wraps spans; no-op when disabled. |
 | Error tracking | `@sentry/node` | `src/observability/sentry.ts`, `main.ts`, `either.interceptor.ts` | Opt-in via `SENTRY_DSN`. `initSentry()` runs before `NestFactory.create`. `Sentry.captureException` fires **only** on interceptor's unexpected-500 branch — never for `Either` failures or mapped `HttpException` (no routine 4xx noise). `beforeSend`/`beforeBreadcrumb` scrub `snapshotUrl` + auth headers. Unset DSN = zero network activity. |
+| Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
 | Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
@@ -215,6 +216,11 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector. |
 | `OTEL_SERVICE_NAME` | `tu-seguridad-back` | Reported service name. |
 | `SENTRY_DSN` | — | Opt-in error tracking. Unset = disabled (no network activity). Only unexpected 500s reported; secrets scrubbed. |
+| `MAIL_ENABLED` | `false` | Master switch for credential delivery over SMTP. Off = invitation/magic-link/reset tokens are only logged, no relay contacted. Forced off by the e2e harness. |
+| `SMTP_HOST` / `SMTP_PORT` | `127.0.0.1` / `1025` | Defaults describe the local mailpit container ([`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md)). Port `465` switches to implicit TLS; anything else stays plain or negotiates STARTTLS. |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | Both optional. Empty user means authentication is skipped entirely, which is what mailpit wants. Never a `smtp://user:pass@host` URL — separate values keep `secretlint` quiet and the password out of a loggable string. |
+| `MAIL_FROM` | `Tu Seguridad <no-reply@tu-seguridad.local>` | `From` header, address or `Name <address>` form. |
+| `APP_BASE_URL` | `http://localhost:5173` | Origin the emailed links point at — the frontend, not this API. A subpath (`https://host/app`) is preserved. |
 
 ## Docs map
 

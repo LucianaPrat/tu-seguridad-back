@@ -17,6 +17,26 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 - VS Code Prisma extension flags `datasource db { url, shadowDatabaseUrl }` in `schema.prisma` as deprecated (bundled language server validates ahead against Prisma 7 rules, even though installed CLI is `6.19.3` and still supports inline `url`/`shadowDatabaseUrl` today). Prisma 7 splits this in two: Migrate's connection URL moves to `prisma.config.ts`; `PrismaClient` (`src/data/prisma/prisma.service.ts`) stops reading `DATABASE_URL` implicitly, instead takes an `adapter` (direct connection) or `accelerateUrl` in its constructor. Not urgent — revisit when bumping to Prisma 7, confirm exact `defineConfig`/adapter API at that time rather than guessing now.
 - MySQL in dev runs as docker container (`mysql-local`), NOT a systemd service. Don't waste a step on `systemctl start mysql`.
 
+## Mail (local)
+
+- Dev SMTP is a plain container, same as MySQL — this repo has no compose file and does not need one:
+  `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`. Web UI on
+  <http://localhost:8025>, SMTP on `1025`, no authentication. Then set `MAIL_ENABLED=true` in `.env`;
+  the other mail defaults already point at it. Cleanup: `docker stop mailpit && docker rm mailpit`.
+- Mailpit **catches** mail, it never delivers it. To land a message in a real Gmail inbox, point the
+  same code at Google — no code change, four variables: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`,
+  `SMTP_USER=<your gmail address>`, `SMTP_PASSWORD=<16-char App Password>`.
+
+  An App Password is not the account password. It requires 2-Step Verification on the Google account,
+  is generated and revoked at <https://myaccount.google.com/apppasswords>, and grants mail-send on
+  that account to whoever holds it. It belongs in the gitignored `.env` and nowhere else — not in
+  `.env.example`, not in a commit, not in a PR description. Gmail also caps sends at roughly 500/day,
+  which is a testing tool, not a delivery channel.
+- `MAIL_ENABLED=true` in a developer `.env` used to be enough to make `npm run test:e2e` send real
+  mail: `test/setup-e2e-env.ts` loads `dotenv/config`, and the e2e harness overrides
+  `FaceAuthClientService` and `DvrClientPort` but not `CredentialDeliveryPort`. That setup file now
+  forces the switch off. Any new harness that boots `AuthModule` must do the same.
+
 ## Infra / CI (plan 02)
 
 - **`npm audit` gate scope.** CI runs `npm audit --omit=dev --audit-level=critical`, not `--audit-level=high` on the full tree. Advisory DB updates constantly → full-tree `high` gate turns red on unrelated PRs the moment a new transitive advisory lands (it happened — 30 new `high`s, all dev tooling + transitive prod, 0 critical, appeared days after a green run). Dev-tooling vulns (jest/babel/etc.) never ship; high transitive prod advisories are Dependabot's job. Gate blocks only production-dependency **critical** severity. If it ever fires, fix the dep — don't widen `--audit-level` or `|| true` it.
