@@ -47,8 +47,17 @@ export const createPinoHttpOptions = (config: ConfigService): Options => {
     transport: isProduction
       ? undefined
       : { target: 'pino-pretty', options: { singleLine: true } },
+    // Header paths, not field names: pino-http serializes `req`/`res` itself, so
+    // `redactLogObject` below never sees them. `cookie` and `set-cookie` carry
+    // the refresh token — every login and every refresh would otherwise write a
+    // usable credential to the log at info level.
     redact: {
-      paths: ['req.headers.authorization', 'req.headers["fa-token"]'],
+      paths: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.headers["fa-token"]',
+        'res.headers["set-cookie"]',
+      ],
       censor: '[Redacted]',
     },
     formatters: {

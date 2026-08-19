@@ -76,6 +76,7 @@ describe('PipelineService', () => {
   let zoneAccessor: { findByCamera: jest.Mock };
   let snapshotService: { store: jest.Mock };
   let statusRegistry: { record: jest.Mock };
+  let alertEvents: { record: jest.Mock };
   let service: PipelineService;
 
   beforeEach(() => {
@@ -85,6 +86,7 @@ describe('PipelineService', () => {
       store: jest.fn().mockResolvedValue(buildData({ id: 'snapshot-uuid' })),
     };
     statusRegistry = { record: jest.fn() };
+    alertEvents = { record: jest.fn().mockResolvedValue([]) };
     service = new PipelineService(
       faceAuthClient as never,
       zoneAccessor as never,
@@ -93,6 +95,7 @@ describe('PipelineService', () => {
       // Real engine with a one-poll threshold: alert-level selection is the
       // behavior under test, and mocking it away would test nothing.
       new OccupancyEngine(1, 1),
+      alertEvents as never,
     );
   });
 
@@ -236,6 +239,37 @@ describe('PipelineService', () => {
       expect(result.data.persons).toHaveLength(0);
       expect(result.data.alerts).toHaveLength(0);
     }
+  });
+
+  it('hands the candidates it raised to the alert-event domain', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
+
+    await service.processImage(spaceId, buildCamera(), image);
+
+    expect(alertEvents.record).toHaveBeenCalledWith(spaceId, [
+      expect.objectContaining({
+        cameraId: 'camera-uuid',
+        cameraLabel: 'Front door – Street side',
+        zoneId: null,
+        alertType: 'intruder',
+        snapshotId: 'snapshot-uuid',
+      }),
+    ]);
+  });
+
+  it('records nothing when the frame raised no alert', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(
+      buildData({
+        personsDetected: false,
+        imageWidth: 1920,
+        imageHeight: 1080,
+        persons: [],
+      }),
+    );
+
+    await service.processImage(spaceId, buildCamera(), image);
+
+    expect(alertEvents.record).not.toHaveBeenCalled();
   });
 
   it('records the upstream failure and passes it through', async () => {

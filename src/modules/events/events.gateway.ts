@@ -8,6 +8,12 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { EnvNames } from '../../cross/common/constants';
+import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+
+/** The one message the namespace emits. Clients subscribe to it by name. */
+export const ALERT_EVENT_MESSAGE = 'alert-event';
+
+const spaceRoom = (spaceId: string) => `space:${spaceId}`;
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
@@ -22,7 +28,7 @@ export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
     private readonly configService: ConfigService,
   ) {}
 
-  handleConnection(client: Socket): void {
+  async handleConnection(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token as string | undefined;
     if (!token) {
       this.logger.warn(`Client ${client.id} connected without a token`);
@@ -30,14 +36,29 @@ export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
       return;
     }
 
+    let payload: JwtPayload;
     try {
-      this.jwtService.verify(token, {
+      payload = this.jwtService.verify<JwtPayload>(token, {
         secret: this.configService.get<string>(EnvNames.JWT_SECRET),
       });
     } catch {
       this.logger.warn(`Client ${client.id} rejected: invalid token`);
       client.disconnect(true);
+      return;
     }
+
+    // A socket is subscribed to its own space and nothing else. Without the
+    // room, `server.emit` would fan every space's alerts out to every connected
+    // client — the one place in this API where tenant scoping is not a `where`
+    // clause, and so the one place it has to be spelled out.
+    if (!payload.spaceId) {
+      this.logger.warn(`Client ${client.id} rejected: token carries no space`);
+      client.disconnect(true);
+      return;
+    }
+    // `join` is synchronous on the in-memory adapter and a promise on a
+    // clustered one; awaiting covers both.
+    await client.join(spaceRoom(payload.spaceId));
   }
 
   // On shutdown (SIGINT/SIGTERM via enableShutdownHooks), disconnect every
@@ -50,11 +71,11 @@ export class EventsGateway implements OnGatewayConnection, OnModuleDestroy {
   }
 
   /**
-   * Transport only: the gateway authenticates the socket and fans a payload
-   * out. What an alert looks like on the wire belongs to the alert-event
-   * domain, which calls this with its own DTO.
+   * Transport only: the gateway authenticates the socket and fans a payload out
+   * to one space. What an alert looks like on the wire belongs to the
+   * alert-event domain, which calls this with its own DTO.
    */
-  broadcast(event: string, payload: unknown): void {
-    this.server.emit(event, payload);
+  broadcast(spaceId: string, event: string, payload: unknown): void {
+    this.server.to(spaceRoom(spaceId)).emit(event, payload);
   }
 }

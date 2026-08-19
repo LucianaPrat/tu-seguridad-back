@@ -1328,6 +1328,184 @@
         ]
       }
     },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "AlertEventsController_query_v1",
+        "parameters": [
+          {
+            "name": "alertType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "intruder",
+                "suspicious"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Inclusive lower bound on detectedAt, ISO 8601",
+            "schema": {
+              "example": "2026-08-01T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "nextCursor from the previous page",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertEventPageDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/acknowledgements": {
+      "post": {
+        "operationId": "AlertEventsController_acknowledge_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboundAcknowledgementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/{id}": {
+      "get": {
+        "operationId": "AlertEventsController_findOne_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertEventDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/{id}/deliveries": {
+      "get": {
+        "operationId": "AlertEventsController_findDeliveries_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventDeliveryDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/v1/cameras/{cameraId}/zones": {
       "get": {
         "operationId": "ZonesController_findByCamera_v1",
@@ -2058,6 +2236,152 @@
           "byteSize",
           "capturedAt",
           "url"
+        ]
+      },
+      "AlertEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cameraId": {
+            "type": "string",
+            "nullable": true
+          },
+          "zoneId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null when the camera monitors the full frame"
+          },
+          "cameraLabel": {
+            "type": "string",
+            "example": "Camera 01 – Front gate"
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ]
+          },
+          "detectedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "snapshotUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Authenticated URL of the frame the alert was raised on"
+          },
+          "acknowledgedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "acknowledgedByUserId": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "cameraLabel",
+          "alertType",
+          "detectedAt"
+        ]
+      },
+      "AlertEventPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertEventDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Opaque cursor for the next page; null when the last page was returned"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InboundAcknowledgementDto": {
+        "type": "object",
+        "properties": {
+          "correlationId": {
+            "type": "string",
+            "description": "The correlation id sent with the delivery"
+          }
+        },
+        "required": [
+          "correlationId"
+        ]
+      },
+      "EventDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "call",
+              "whatsapp",
+              "email"
+            ]
+          },
+          "recipientUserId": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "failed",
+              "delivered"
+            ]
+          },
+          "sentAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "inboundReceivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the provider callback for this attempt arrived"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "eventId",
+          "channel",
+          "recipientUserId",
+          "status",
+          "createdAt"
         ]
       },
       "MonitorZoneDto": {

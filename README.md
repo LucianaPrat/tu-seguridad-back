@@ -96,9 +96,13 @@ Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/do
 | `GET /api/v1/snapshots/:id` | The stored image bytes, space-scoped. The only route that serves them. |
 | `GET/POST /api/v1/cameras/:id/zones` | List / create percentage-rectangle monitor zones. Creating is admin-only. |
 | `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` validates the merged rectangle; `DELETE` is logical. Both admin-only. |
+| `GET /api/v1/events` | Alert history of the caller's space, newest first. Filters: `alertType`, `from` (ISO 8601 lower bound). Keyset pagination: `limit` (default 25, max 100) plus the opaque `cursor` echoed back as `nextCursor`. |
+| `GET /api/v1/events/:id` | One alert event. Carries the camera label copied at detection time, so a renamed or deleted camera does not rewrite it. |
+| `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. |
+| `POST /api/v1/events/acknowledgements` | Public provider webhook. Body `{ correlationId }`. Answers `202 { accepted: true }` for a match, a repeat and an unknown id alike, so it reveals no event. Idempotent: the first callback acknowledges the event, later ones change nothing. |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
 | `GET /health/dependencies` | Public. Separate from `ready`: short-timeout reachability check against face-auth upstream. Degraded upstream reports here **without** marking whole app not-ready (camera/zone CRUD still works). |
-| WS namespace `/events` | JWT in handshake `auth.token`. Transport only until the alert-event domain lands; clients are disconnected cleanly on graceful shutdown. |
+| WS namespace `/events` | JWT in handshake `auth.token`; the socket joins a room for the `spaceId` in its own claims, so an alert is fanned out only to its space. Emits `alert-event` with the same shape as `GET /api/v1/events/:id`. A token carrying no space is rejected. Clients are disconnected cleanly on graceful shutdown. |
 
 Full interactive docs: `GET /docs` (Swagger UI), machine-readable spec at `/docs-json`.
 

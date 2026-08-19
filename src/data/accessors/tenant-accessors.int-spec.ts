@@ -7,6 +7,7 @@ import { AlertEventAccessorService } from './alert-event.accessor';
 import { AuthTokenAccessorService } from './auth-token.accessor';
 import { CameraAccessorService } from './camera.accessor';
 import { DvrAccessorService } from './dvr.accessor';
+import { EventDeliveryAccessorService } from './event-delivery.accessor';
 import { InvitationAccessorService } from './invitation.accessor';
 import { SnapshotAccessorService } from './snapshot.accessor';
 import { UserFaceIdentityAccessorService } from './user-face-identity.accessor';
@@ -43,6 +44,7 @@ describe('tenant-scoped accessors (int)', () => {
     credentialHash,
   );
   const alertEventAccessor = new AlertEventAccessorService(prisma);
+  const deliveryAccessor = new EventDeliveryAccessorService(prisma);
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -410,5 +412,231 @@ describe('tenant-scoped accessors (int)', () => {
         detectedAt: new Date(),
       }),
     ).resolves.toBeNull();
+  });
+
+  it('pages history by keyset without skipping or repeating events that share an instant', async () => {
+    const tenant = await createTenant('history');
+    // One detection frame writes an event per entered area, all with the same
+    // `detectedAt` — the case a timestamp-only cursor gets wrong.
+    const detectedAt = new Date('2026-08-01T10:00:00.000Z');
+    for (let index = 0; index < 3; index += 1) {
+      const created = await alertEventAccessor.create(tenant.space.id, {
+        cameraId: tenant.camera.id,
+        cameraLabelSnapshot: `${tenant.camera.name} #${index}`,
+        alertType: 'intruder',
+        detectedAt,
+      });
+      if (!created) {
+        throw new Error('fixture event creation unexpectedly failed');
+      }
+    }
+
+    const firstPage = await alertEventAccessor.query(tenant.space.id, {
+      take: 2,
+    });
+    const secondPage = await alertEventAccessor.query(tenant.space.id, {
+      take: 2,
+      cursor: {
+        detectedAt: firstPage[1].detectedAt,
+        id: firstPage[1].id,
+      },
+    });
+
+    expect(firstPage).toHaveLength(2);
+    expect(secondPage).toHaveLength(1);
+    expect(
+      new Set([...firstPage, ...secondPage].map((event) => event.id)).size,
+    ).toBe(3);
+  });
+
+  it('filters history by alert type and date lower bound, and never crosses spaces', async () => {
+    const tenantA = await createTenant('filter-alpha');
+    const tenantB = await createTenant('filter-bravo');
+    const old = await alertEventAccessor.create(tenantA.space.id, {
+      cameraId: tenantA.camera.id,
+      cameraLabelSnapshot: 'old suspicious',
+      alertType: 'suspicious',
+      detectedAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
+    const recent = await alertEventAccessor.create(tenantA.space.id, {
+      cameraId: tenantA.camera.id,
+      cameraLabelSnapshot: 'recent intruder',
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    await alertEventAccessor.create(tenantB.space.id, {
+      cameraId: tenantB.camera.id,
+      cameraLabelSnapshot: 'other space',
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-02T00:00:00.000Z'),
+    });
+    if (!old || !recent) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+
+    await expect(
+      alertEventAccessor.query(tenantA.space.id, { take: 10 }),
+    ).resolves.toHaveLength(2);
+    await expect(
+      alertEventAccessor.query(tenantA.space.id, {
+        take: 10,
+        alertType: 'intruder',
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: recent.id })]);
+    await expect(
+      alertEventAccessor.query(tenantA.space.id, {
+        take: 10,
+        from: new Date('2026-07-15T00:00:00.000Z'),
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: recent.id })]);
+    await expect(
+      alertEventAccessor.findById(tenantB.space.id, recent.id),
+    ).resolves.toBeNull();
+  });
+
+  it('keeps an event readable with its own label after its camera and zone are logically deleted', async () => {
+    const tenant = await createTenant('history-soft-delete');
+    const zone = await zoneAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      x: '0',
+      y: '0',
+      width: '50',
+      height: '50',
+      alertType: 'suspicious',
+    });
+    if (!zone) {
+      throw new Error('fixture zone creation unexpectedly failed');
+    }
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      zoneId: zone.id,
+      cameraLabelSnapshot: 'Gate camera – Front',
+      alertType: 'suspicious',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+
+    await zoneAccessor.softDelete(tenant.space.id, zone.id);
+    await cameraAccessor.softDelete(tenant.space.id, tenant.camera.id);
+
+    await expect(
+      alertEventAccessor.findById(tenant.space.id, event.id),
+    ).resolves.toMatchObject({
+      cameraId: tenant.camera.id,
+      zoneId: zone.id,
+      cameraLabelSnapshot: 'Gate camera – Front',
+      alertType: 'suspicious',
+    });
+  });
+
+  it('fans one event out across channels and recipients, and refuses foreign ones', async () => {
+    const tenantA = await createTenant('delivery-alpha');
+    const tenantB = await createTenant('delivery-bravo');
+    const event = await alertEventAccessor.create(tenantA.space.id, {
+      cameraId: tenantA.camera.id,
+      cameraLabelSnapshot: tenantA.camera.name,
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+
+    const written = await deliveryAccessor.createManyForEvent(
+      tenantA.space.id,
+      event.id,
+      [
+        {
+          channel: 'email',
+          recipientUserId: tenantA.user.id,
+          correlationId: 'correlation-email',
+        },
+        {
+          channel: 'whatsapp',
+          recipientUserId: tenantA.user.id,
+          correlationId: 'correlation-whatsapp',
+        },
+        {
+          channel: 'email',
+          recipientUserId: tenantB.user.id,
+          correlationId: 'correlation-foreign',
+        },
+      ],
+    );
+
+    expect(written).toBe(2);
+    const deliveries = await deliveryAccessor.findByEventId(
+      tenantA.space.id,
+      event.id,
+    );
+    expect(deliveries.map((delivery) => delivery.channel).sort()).toEqual([
+      'email',
+      'whatsapp',
+    ]);
+    expect(deliveries.every((delivery) => delivery.status === 'pending')).toBe(
+      true,
+    );
+    // The event itself is in Space A, so Space B cannot list its attempts.
+    await expect(
+      deliveryAccessor.findByEventId(tenantB.space.id, event.id),
+    ).resolves.toEqual([]);
+    // Nor address a delivery to Space A's event at all.
+    await expect(
+      deliveryAccessor.createManyForEvent(tenantB.space.id, event.id, [
+        {
+          channel: 'email',
+          recipientUserId: tenantB.user.id,
+          correlationId: 'correlation-cross-space',
+        },
+      ]),
+    ).resolves.toBe(0);
+  });
+
+  it('acknowledges an event from one inbound callback and ignores every repeat', async () => {
+    const tenant = await createTenant('inbound');
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      cameraLabelSnapshot: tenant.camera.name,
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+    await deliveryAccessor.createManyForEvent(tenant.space.id, event.id, [
+      {
+        channel: 'email',
+        recipientUserId: tenant.user.id,
+        correlationId: 'correlation-inbound',
+      },
+    ]);
+
+    const first = await deliveryAccessor.consumeInbound('correlation-inbound');
+    const repeat = await deliveryAccessor.consumeInbound('correlation-inbound');
+    const unknown = await deliveryAccessor.consumeInbound('never-issued');
+
+    expect(first).toMatchObject({
+      eventId: event.id,
+      acknowledgedByUserId: tenant.user.id,
+    });
+    expect(repeat).toBeNull();
+    expect(unknown).toBeNull();
+
+    const [delivery] = await deliveryAccessor.findByEventId(
+      tenant.space.id,
+      event.id,
+    );
+    expect(delivery).toMatchObject({ status: 'delivered' });
+    expect(delivery.inboundReceivedAt).not.toBeNull();
+    const acknowledged = await alertEventAccessor.findById(
+      tenant.space.id,
+      event.id,
+    );
+    expect(acknowledged).toMatchObject({
+      acknowledgedByUserId: tenant.user.id,
+    });
+    expect(acknowledged?.acknowledgedAt).toEqual(delivery.inboundReceivedAt);
   });
 });

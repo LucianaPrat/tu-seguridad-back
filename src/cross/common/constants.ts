@@ -118,6 +118,17 @@ export const ALERT_ROUTING_DEFAULTS: readonly {
   { alertType: 'suspicious', channel: 'email', enabled: true },
 ];
 
+/**
+ * Alert history paging. `alert_events` is the highest-volume table in the
+ * schema, so every list answer is bounded: the setup-era `/events` route
+ * returned a default 100 rows with no cursor and got slower as a space aged.
+ */
+export const EventHistory = {
+  DEFAULT_PAGE_SIZE: 25,
+  MAX_PAGE_SIZE: 100,
+  MAX_CURSOR_LENGTH: 128,
+} as const;
+
 export const PipelineDefaults = {
   CONFIDENCE_THRESHOLD: 0.45,
   ENTER_CONSECUTIVE_POLLS: 2,
