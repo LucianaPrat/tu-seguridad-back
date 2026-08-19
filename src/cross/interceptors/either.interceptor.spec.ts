@@ -1,7 +1,7 @@
 import { CallHandler, ExecutionContext, HttpException } from '@nestjs/common';
 import * as Sentry from '@sentry/node';
 import { PinoLogger } from 'nestjs-pino';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 import { ERROR_CODE_HTTP_STATUS, ErrorCode } from '../common/constants';
 import { buildData, buildError } from '../errors/either';
 import { EitherInterceptor } from './either.interceptor';
@@ -20,7 +20,7 @@ describe('EitherInterceptor', () => {
     captureException.mockClear();
   });
 
-  function handlerOf(value$: ReturnType<typeof of>): CallHandler {
+  function handlerOf(value$: Observable<unknown>): CallHandler {
     return { handle: () => value$ } as CallHandler;
   }
 
