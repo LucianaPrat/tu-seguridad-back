@@ -49,14 +49,18 @@ Names are owned by [`.standards/standards/CHECKS.md`](.standards/standards/CHECK
 exposed:
 
 - format: `npm run format:check` — check-only. `npm run format` is the mutating one.
-- lint: `npm run lint` — check-only, `--max-warnings 0`. `npm run lint:fix` is the mutating one.
-- typecheck: `npm run typecheck` — `tsc --noEmit`. Runs against `tsconfig.json`, so `test/`, specs,
+- lint: `npm run lint` — check-only, `--max-warnings 0`. `npm run lint:fix` is the mutating one, and
+  carries `--max-warnings 0` too, so the fix loop and the gate agree on pass/fail.
+- typecheck: `npm run typecheck` — `tsc --noEmit --incremental false`, so the check writes no
+  `tsbuildinfo` into `dist/`. Runs against `tsconfig.json`, so `test/`, specs,
   `scripts/`, and `prisma/` are typechecked; `npm run build` uses `tsconfig.build.json`, which
   excludes them.
 - test: `npm run test:all` — unit + integration + e2e. "Tests pass" never means unit only.
 - build: `npm run build`
 - security: `npm run security`
-  Runs: `npm audit --omit=dev --audit-level=critical && secretlint "**/*"`
+  Runs `npm audit --omit=dev --audit-level=critical`, then `secretlint "**/*"`, then exits non-zero if
+  either failed. Deliberately not `&&`: CHECKS.md requires both operations to run, and chaining lets a
+  red audit skip the secret scan entirely.
 
 Audit gate scope: production dependencies, critical severity only. Why that scope and not
 `--audit-level=high`: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
@@ -64,11 +68,15 @@ Audit gate scope: production dependencies, critical severity only. Why that scop
 Secret scanner: `secretlint` with `@secretlint/secretlint-rule-preset-recommend`, configured in
 [`.secretlintrc.json`](.secretlintrc.json). Two things to know before touching it:
 
-- It scans the working tree, not git history. A secret committed and later deleted is outside its
-  reach — that sweep is still open, see [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md).
+- It scans the non-gitignored working tree, not git history. Ignored paths (`.env`, `dist/`,
+  `coverage/`) are out of reach by design — nothing there is ever committed. A secret committed and
+  later deleted is out of reach too, and that sweep is still open. So is the preset's detection
+  surface: it does not recognise this repo's own env-var secret shapes. Both in
+  [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md).
 - One narrow allow is configured: the fake basic-auth URL `user:pass@dvr.local` used as a fixture in
   `src/observability/sentry.spec.ts`, which tests exactly that `snapshotUrl` gets scrubbed. The allow
-  is pinned to that host — any other basic-auth credential still fails the check.
+  is anchored to that exact host — `user:pass@dvr.local.example.com` and every other basic-auth
+  credential still fail the check.
 
 ## Workflow: plans
 

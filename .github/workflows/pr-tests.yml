@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   NODE_ENV: test
   DATABASE_URL: mysql://root:root@127.0.0.1:3306/tu-seguridad-test
@@ -73,9 +76,5 @@ jobs:
 
       - run: npm run test:all
 
-      # Dependency audit + secret scan. Audit gate blocks only on
-      # production-dependency vulnerabilities at critical severity. Dev-tooling
-      # advisories (jest/babel/etc.) never ship, and high transitive advisories
-      # churn constantly — those are surfaced and updated by Dependabot (see
-      # dependabot.yml) rather than hard-failing every PR.
+      # Dependency audit + secret scan. Gate scope and why: see AGENTS.md "Checks".
       - run: npm run security
