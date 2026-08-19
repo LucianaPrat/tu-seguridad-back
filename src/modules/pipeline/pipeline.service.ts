@@ -6,6 +6,7 @@ import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
 import { toCameraLabel } from '../cameras/camera.mapper';
 import { CapturedImage } from '../dvr/dvr-client.port';
+import { AlertEventsService } from '../events/alert-events.service';
 import { FaceAuthClientService } from '../face-auth-client/face-auth-client.service';
 import { SnapshotService } from '../snapshots/snapshot.service';
 import { toRectangle } from '../zones/zone.mapper';
@@ -26,6 +27,7 @@ export class PipelineService {
     private readonly snapshotService: SnapshotService,
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly occupancyEngine: OccupancyEngine,
+    private readonly alertEvents: AlertEventsService,
   ) {}
 
   resetOccupancy(cameraId: string): void {
@@ -112,6 +114,13 @@ export class PipelineService {
       lastPersonsDetected: persons.length > 0,
       zones: zoneResults,
     });
+
+    // History, routing and the socket broadcast happen here rather than in the
+    // two callers (the poll tick and the manual analyze route): an alert that is
+    // recorded on one path and not the other is the bug this centralizes away.
+    if (alerts.length > 0) {
+      await this.alertEvents.record(spaceId, alerts);
+    }
 
     return buildData({ persons, zoneResults, alerts });
   }

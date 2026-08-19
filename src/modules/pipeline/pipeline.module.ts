@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EnvNames } from '../../cross/common/constants';
+import { EventsModule } from '../events/events.module';
 import { FaceAuthClientModule } from '../face-auth-client/face-auth-client.module';
 import { SnapshotsModule } from '../snapshots/snapshots.module';
 import { OccupancyEngine } from './occupancy.engine';
@@ -9,7 +10,12 @@ import { PipelineService } from './pipeline.service';
 import { PollingScheduler } from './polling.scheduler';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), FaceAuthClientModule, SnapshotsModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    FaceAuthClientModule,
+    SnapshotsModule,
+    EventsModule,
+  ],
   providers: [
     PipelineService,
     PollingScheduler,

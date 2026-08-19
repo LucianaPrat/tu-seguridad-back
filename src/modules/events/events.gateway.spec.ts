@@ -5,10 +5,12 @@ import { Test } from '@nestjs/testing';
 import { AddressInfo } from 'net';
 import { Server } from 'http';
 import { io, Socket as ClientSocket } from 'socket.io-client';
-import { EventsGateway } from './events.gateway';
+import { ALERT_EVENT_MESSAGE, EventsGateway } from './events.gateway';
 
 describe('EventsGateway', () => {
   const secret = 'gateway-test-secret';
+  const spaceA = 'space-a-uuid';
+  const spaceB = 'space-b-uuid';
 
   let app: INestApplication;
   let jwtService: JwtService;
@@ -50,6 +52,16 @@ describe('EventsGateway', () => {
     });
   }
 
+  function tokenFor(spaceId?: string): string {
+    return jwtService.sign({
+      sub: 1,
+      email: 'admin@example.com',
+      role: 'admin',
+      profileCompleted: true,
+      ...(spaceId ? { spaceId } : {}),
+    });
+  }
+
   it('disconnects a client that connects with a bad token', (done) => {
     const client = connect('garbage-token');
 
@@ -68,32 +80,54 @@ describe('EventsGateway', () => {
     });
   }, 5000);
 
-  it('accepts a valid token and delivers a broadcast within 1s', (done) => {
-    const token = jwtService.sign({
-      sub: 1,
-      email: 'admin@example.com',
-      role: 'admin',
+  /**
+   * A pre-tenant token verifies but names no space, so there is no room to put
+   * the socket in. Broadcasts are addressed by space, so accepting it would
+   * leave a connected client that either receives nothing or, on a future
+   * `server.emit`, receives everything.
+   */
+  it('disconnects a client whose token carries no space', (done) => {
+    const client = connect(tokenFor());
+
+    client.on('disconnect', () => {
+      client.close();
+      done();
     });
-    const client = connect(token);
+  }, 5000);
+
+  it('delivers a broadcast for the socket own space within 1s', (done) => {
+    const client = connect(tokenFor(spaceA));
 
     client.on('connect', () => {
-      client.once('alert-event', (payload: { id: string }) => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
         expect(payload).toEqual({ id: 'evt-1' });
         client.close();
         done();
       });
 
-      gateway.broadcast('alert-event', { id: 'evt-1' });
+      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'evt-1' });
+    });
+  }, 5000);
+
+  it('never delivers another space broadcast to this socket', (done) => {
+    const client = connect(tokenFor(spaceA));
+
+    client.on('connect', () => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
+        // Space B was broadcast first. Anything but the space A payload here
+        // means the room is not scoping the fan-out.
+        expect(payload).toEqual({ id: 'own-space' });
+        client.close();
+        done();
+      });
+
+      gateway.broadcast(spaceB, ALERT_EVENT_MESSAGE, { id: 'other-space' });
+      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'own-space' });
     });
   }, 5000);
 
   it('disconnects connected clients cleanly on module destroy', (done) => {
-    const token = jwtService.sign({
-      sub: 1,
-      email: 'admin@example.com',
-      role: 'admin',
-    });
-    const client = connect(token);
+    const client = connect(tokenFor(spaceA));
 
     client.on('connect', () => {
       client.on('disconnect', () => {
