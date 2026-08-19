@@ -4,7 +4,6 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
 // `import type` is required: these appear in decorated parameter positions and
@@ -45,10 +44,14 @@ export class SnapshotsController {
     name: 'id',
     description: 'Snapshot id, taken from a camera read or a capture answer.',
   })
-  @ApiProduces('image/jpeg')
+  // Content type is declared on the 200 only, not with an operation-level
+  // `@ApiProduces`: that one applies to every response, and it would tell a
+  // client the JSON error bodies below are `image/jpeg` too.
   @ApiOkResponse({
     description: 'Snapshot bytes. `Content-Type` follows the stored image.',
-    schema: { type: 'string', format: 'binary' },
+    content: {
+      'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+    },
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',

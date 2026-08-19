@@ -55,7 +55,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -65,7 +79,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -113,7 +141,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -123,7 +165,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -161,7 +217,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -220,7 +290,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -268,7 +352,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -278,7 +376,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -288,7 +400,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -336,7 +462,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -379,7 +519,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -389,7 +543,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -432,7 +600,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -475,7 +657,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -485,7 +681,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -528,7 +738,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -538,7 +762,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -548,7 +786,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -596,7 +848,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -606,7 +872,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -654,7 +934,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -664,7 +958,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -674,7 +982,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -684,7 +1006,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -732,7 +1068,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -742,7 +1092,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -752,7 +1116,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1300,7 +1678,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1310,7 +1702,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1320,7 +1726,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1366,7 +1786,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1376,7 +1810,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1386,7 +1834,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1396,7 +1858,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1406,7 +1882,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1444,7 +1934,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1454,7 +1958,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1464,7 +1982,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1474,7 +2006,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1484,7 +2030,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1531,9 +2091,23 @@
           "401": {
             "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
             "content": {
-              "image/jpeg": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1541,9 +2115,23 @@
           "403": {
             "description": "`FORBIDDEN` — Caller has not completed their profile.",
             "content": {
-              "image/jpeg": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1551,9 +2139,23 @@
           "404": {
             "description": "`NOT_FOUND` — No snapshot with that id in the caller space.",
             "content": {
-              "image/jpeg": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1594,7 +2196,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1604,7 +2220,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1652,7 +2282,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1662,7 +2306,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1672,7 +2330,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1728,7 +2400,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1738,7 +2424,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1748,7 +2448,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1758,7 +2472,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1797,7 +2525,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1807,7 +2549,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1817,7 +2573,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1858,7 +2628,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1868,7 +2652,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1878,7 +2676,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1926,7 +2738,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1936,7 +2762,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1946,7 +2786,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1956,7 +2810,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1966,7 +2834,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1976,7 +2858,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2033,7 +2929,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2043,7 +2953,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2053,7 +2977,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2063,7 +3001,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2073,7 +3025,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2083,7 +3049,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2093,7 +3073,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2322,7 +3316,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2332,7 +3340,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2342,7 +3364,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2398,7 +3434,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_ZONE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2408,7 +3459,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2418,7 +3483,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2428,7 +3507,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2476,7 +3569,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2486,7 +3593,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2496,7 +3617,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2552,7 +3687,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_ZONE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2562,7 +3712,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2572,7 +3736,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2582,7 +3760,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2621,7 +3813,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2631,7 +3837,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2641,7 +3861,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorDto"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2709,36 +3943,6 @@
       }
     },
     "schemas": {
-      "LoginDto": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string",
-            "example": "admin@example.com"
-          },
-          "password": {
-            "type": "string",
-            "example": "change-me"
-          }
-        },
-        "required": [
-          "email",
-          "password"
-        ]
-      },
-      "AccessTokenDto": {
-        "type": "object",
-        "properties": {
-          "accessToken": {
-            "type": "string",
-            "description": "Bearer token for the `Authorization` header. Short-lived — rotate through `POST /auth/refresh` when it expires.",
-            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI..."
-          }
-        },
-        "required": [
-          "accessToken"
-        ]
-      },
       "ApiErrorDto": {
         "type": "object",
         "properties": {
@@ -2773,6 +3977,36 @@
           "statusCode",
           "code",
           "message"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "admin@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "change-me"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "AccessTokenDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "Bearer token for the `Authorization` header. Short-lived — rotate through `POST /auth/refresh` when it expires.",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI..."
+          }
+        },
+        "required": [
+          "accessToken"
         ]
       },
       "RegisterDto": {

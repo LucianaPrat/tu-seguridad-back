@@ -19,7 +19,15 @@ describe('ApiFailures', () => {
     API_RESPONSE_METADATA,
     // eslint-disable-next-line @typescript-eslint/unbound-method -- reading decorator metadata off the method, never calling it
     Target.prototype.handler,
-  ) as Record<string, { description: string; type: unknown }>;
+  ) as Record<
+    string,
+    {
+      description: string;
+      schema: {
+        allOf: [unknown, { properties: { code: { enum: string[] } } }];
+      };
+    }
+  >;
 
   it('merges codes that share an HTTP status into one response entry', () => {
     const badRequest =
@@ -31,9 +39,24 @@ describe('ApiFailures', () => {
   });
 
   it('points every failure at the shared error schema', () => {
-    expect(Object.values(responses).map((response) => response.type)).toEqual([
-      ApiErrorDto,
-      ApiErrorDto,
+    for (const response of Object.values(responses)) {
+      expect(response.schema.allOf[0]).toEqual({
+        $ref: `#/components/schemas/${ApiErrorDto.name}`,
+      });
+    }
+  });
+
+  it('narrows each response to the codes that route can actually answer', () => {
+    const badRequest =
+      responses[ERROR_CODE_HTTP_STATUS[ErrorCode.INVALID_ZONE]];
+    const notFound = responses[ERROR_CODE_HTTP_STATUS[ErrorCode.NOT_FOUND]];
+
+    expect(badRequest.schema.allOf[1].properties.code.enum).toEqual([
+      ErrorCode.VALIDATION_ERROR,
+      ErrorCode.INVALID_ZONE,
+    ]);
+    expect(notFound.schema.allOf[1].properties.code.enum).toEqual([
+      ErrorCode.NOT_FOUND,
     ]);
   });
 });
