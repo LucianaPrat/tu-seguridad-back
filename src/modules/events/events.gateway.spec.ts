@@ -68,7 +68,7 @@ describe('EventsGateway', () => {
     });
   }, 5000);
 
-  it('accepts a valid token and delivers a broadcast zone-event within 1s', (done) => {
+  it('accepts a valid token and delivers a broadcast within 1s', (done) => {
     const token = jwtService.sign({
       sub: 1,
       email: 'admin@example.com',
@@ -77,13 +77,13 @@ describe('EventsGateway', () => {
     const client = connect(token);
 
     client.on('connect', () => {
-      client.once('zone-event', (payload: { eventId: string }) => {
-        expect(payload).toEqual({ eventId: 'evt-1' });
+      client.once('alert-event', (payload: { id: string }) => {
+        expect(payload).toEqual({ id: 'evt-1' });
         client.close();
         done();
       });
 
-      gateway.broadcastZoneEvent({ eventId: 'evt-1' } as never);
+      gateway.broadcast('alert-event', { id: 'evt-1' });
     });
   }, 5000);
 

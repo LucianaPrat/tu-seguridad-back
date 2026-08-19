@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
-import { EventsController } from './events.controller';
 import { EventsGateway } from './events.gateway';
-import { EventsService } from './events.service';
 
+/**
+ * Only the socket transport for now. The alert-event query API and the payload
+ * it broadcasts arrive with the alert-event domain; the setup-era `ZoneEvent`
+ * controller, service and DTOs were removed with the schema they read.
+ */
 @Module({
   imports: [AuthModule],
-  controllers: [EventsController],
-  providers: [EventsService, EventsGateway],
-  exports: [EventsService],
+  providers: [EventsGateway],
+  exports: [EventsGateway],
 })
 export class EventsModule {}

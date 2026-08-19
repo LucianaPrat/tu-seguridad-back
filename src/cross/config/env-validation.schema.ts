@@ -10,6 +10,11 @@ const stringRequiredInProduction = (devDefault: string) =>
 
 const ADMIN_PASSWORD_MIN_LENGTH = 16;
 
+// MySQL MEDIUMBLOB tops out at 16,777,215 bytes. The limit an operator may set
+// stays under it: a snapshot the column cannot hold fails at the write, after
+// the DVR round trip and the detection call have already been paid for.
+const MEDIUMBLOB_MAX_BYTES = 16_777_215;
+
 const encryptionKeySchema = () =>
   Joi.string()
     .base64()
@@ -74,8 +79,20 @@ export const envValidationSchema = Joi.object({
   [EnvNames.FACE_AUTH_TOKEN]: stringRequiredInProduction('change-me'),
   [EnvNames.DETECT_TIMEOUT_MS]: Joi.number().default(10000),
 
+  [EnvNames.DVR_TIMEOUT_MS]: Joi.number().default(5000),
+
   [EnvNames.POLLING_ENABLED]: Joi.boolean().default(false),
+  [EnvNames.POLLING_INTERVAL_SECONDS]: Joi.number()
+    .integer()
+    .min(1)
+    .max(3600)
+    .default(5),
   [EnvNames.SNAPSHOT_TIMEOUT_MS]: Joi.number().default(5000),
+  [EnvNames.SNAPSHOT_MAX_BYTES]: Joi.number()
+    .integer()
+    .min(1024)
+    .max(MEDIUMBLOB_MAX_BYTES)
+    .default(2_000_000),
   [EnvNames.ENTER_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(2),
   [EnvNames.EXIT_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(3),
 

@@ -6,17 +6,27 @@ interface LoginResponseBody {
 }
 
 /** Logs in as the seeded admin over the real HTTP login route. */
-export async function authAs(httpServer: Server): Promise<string> {
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
+export function authAs(httpServer: Server): Promise<string> {
+  return loginAs(
+    httpServer,
+    process.env.ADMIN_EMAIL ?? '',
+    process.env.ADMIN_PASSWORD ?? '',
+  );
+}
 
+/** Logs in as any seeded account; the token carries that account's space. */
+export async function loginAs(
+  httpServer: Server,
+  email: string,
+  password: string,
+): Promise<string> {
   const response = await request(httpServer)
     .post('/api/v1/auth/login')
     .send({ email, password });
 
   if (response.status !== 200) {
     throw new Error(
-      `authAs() login failed with status ${response.status}: ${JSON.stringify(response.body)}`,
+      `loginAs(${email}) failed with status ${response.status}: ${JSON.stringify(response.body)}`,
     );
   }
 

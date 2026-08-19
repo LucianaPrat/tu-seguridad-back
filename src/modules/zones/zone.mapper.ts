@@ -1,15 +1,26 @@
-import { Zone } from '@prisma/client';
-import { Point } from './geometry';
-import { ZoneDto } from './dto/zone.dto';
+import { MonitorZone } from '@prisma/client';
+import { MonitorZoneDto } from './dto/zone.dto';
+import { Rectangle } from './rectangle';
 
-export function toZoneDto(zone: Zone): ZoneDto {
+/**
+ * `DECIMAL(5,2)` comes back as a Prisma `Decimal`, which serializes as a string
+ * and would reach the UI as `"12.50"`. The conversion happens once, here.
+ */
+export function toRectangle(zone: MonitorZone): Rectangle {
+  return {
+    x: Number(zone.x),
+    y: Number(zone.y),
+    width: Number(zone.width),
+    height: Number(zone.height),
+  };
+}
+
+export function toMonitorZoneDto(zone: MonitorZone): MonitorZoneDto {
   return {
     id: zone.id,
     cameraId: zone.cameraId,
-    name: zone.name,
-    enabled: zone.enabled,
-    polygon: zone.polygon as unknown as Point[],
-    geometryVersion: zone.geometryVersion,
+    ...toRectangle(zone),
+    alertType: zone.alertType,
     createdAt: zone.createdAt,
     updatedAt: zone.updatedAt,
   };

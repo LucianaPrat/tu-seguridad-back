@@ -1,35 +1,39 @@
+import { MonitorZone, Prisma } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { ZonesService } from './zones.service';
 
-describe('ZonesService', () => {
-  const validSquare = [
-    { x: 0, y: 0 },
-    { x: 1, y: 0 },
-    { x: 1, y: 1 },
-    { x: 0, y: 1 },
-  ];
-
-  const camera = { id: 'camera_01' };
-
-  const zone = {
-    id: 'zone_lobby',
-    cameraId: 'camera_01',
-    name: 'Lobby',
-    enabled: true,
-    polygon: validSquare,
-    geometryVersion: 1,
+function buildZone(overrides: Partial<MonitorZone> = {}): MonitorZone {
+  return {
+    id: 'zone-uuid',
+    cameraId: 'camera-uuid',
+    x: new Prisma.Decimal(10),
+    y: new Prisma.Decimal(20),
+    width: new Prisma.Decimal(30),
+    height: new Prisma.Decimal(40),
+    alertType: 'intruder',
+    deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
   };
+}
+
+describe('ZonesService', () => {
+  const spaceId = 'space-uuid';
+  const validRectangle = { x: 10, y: 10, width: 20, height: 20 };
 
   let zoneAccessor: {
     findByCamera: jest.Mock;
     findById: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
-    delete: jest.Mock;
+    softDelete: jest.Mock;
   };
-  let cameraAccessor: { findById: jest.Mock };
+  let cameraAccessor: {
+    findById: jest.Mock;
+    update: jest.Mock;
+    countMonitorZones: jest.Mock;
+  };
   let service: ZonesService;
 
   beforeEach(() => {
@@ -38,180 +42,173 @@ describe('ZonesService', () => {
       findById: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      delete: jest.fn(),
+      softDelete: jest.fn(),
     };
-    cameraAccessor = { findById: jest.fn() };
+    cameraAccessor = {
+      findById: jest.fn(),
+      update: jest.fn(),
+      countMonitorZones: jest.fn(),
+    };
     service = new ZonesService(zoneAccessor as never, cameraAccessor as never);
   });
 
   describe('create', () => {
-    it('returns NOT_FOUND when the camera does not exist', async () => {
+    it('rejects a rectangle that runs past the right edge of the frame', async () => {
+      const result = await service.create(spaceId, 'camera-uuid', {
+        x: 90,
+        y: 10,
+        width: 20,
+        height: 10,
+        alertType: 'intruder',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
+      });
+      expect(zoneAccessor.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a zero-sized rectangle', async () => {
+      const result = await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        width: 0,
+        alertType: 'intruder',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
+      });
+    });
+
+    it('returns NOT_FOUND when the camera belongs to another space', async () => {
+      zoneAccessor.create.mockResolvedValue(null);
+
+      const result = await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        alertType: 'intruder',
+      });
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.NOT_FOUND });
+    });
+
+    it('returns the zone as numbers, not decimal strings', async () => {
+      zoneAccessor.create.mockResolvedValue(buildZone());
       cameraAccessor.findById.mockResolvedValue(null);
 
-      const result = await service.create('camera_missing', {
-        id: 'zone_lobby',
-        name: 'Lobby',
-        polygon: validSquare,
-      });
-
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
-      expect(zoneAccessor.create).not.toHaveBeenCalled();
-    });
-
-    it('returns CONFLICT when the zone id is already taken', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      zoneAccessor.findById.mockResolvedValue(zone);
-
-      const result = await service.create('camera_01', {
-        id: 'zone_lobby',
-        name: 'Lobby',
-        polygon: validSquare,
-      });
-
-      expect(result).toMatchObject({ code: ErrorCode.CONFLICT });
-      expect(zoneAccessor.create).not.toHaveBeenCalled();
-    });
-
-    it('returns INVALID_POLYGON for a geometrically invalid polygon', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      zoneAccessor.findById.mockResolvedValue(null);
-
-      const result = await service.create('camera_01', {
-        id: 'zone_lobby',
-        name: 'Lobby',
-        polygon: [
-          { x: 0, y: 0 },
-          { x: 1, y: 1 },
-        ],
-      });
-
-      expect(result).toMatchObject({ code: ErrorCode.INVALID_POLYGON });
-      expect(zoneAccessor.create).not.toHaveBeenCalled();
-    });
-
-    it('creates a zone with geometryVersion 1 when everything checks out', async () => {
-      cameraAccessor.findById.mockResolvedValue(camera);
-      zoneAccessor.findById.mockResolvedValue(null);
-      zoneAccessor.create.mockResolvedValue(zone);
-
-      const result = await service.create('camera_01', {
-        id: 'zone_lobby',
-        name: 'Lobby',
-        polygon: validSquare,
+      const result = await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        alertType: 'intruder',
       });
 
       expect(result.ok).toBe(true);
-      expect(zoneAccessor.create).toHaveBeenCalledWith(
-        expect.objectContaining({ cameraId: 'camera_01', geometryVersion: 1 }),
+      if (result.ok) {
+        expect(result.data).toMatchObject({
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 40,
+        });
+      }
+    });
+
+    it('marks a partial camera configured once its first zone exists', async () => {
+      zoneAccessor.create.mockResolvedValue(buildZone());
+      cameraAccessor.findById.mockResolvedValue({
+        id: 'camera-uuid',
+        monitorMode: 'partial',
+      });
+      cameraAccessor.countMonitorZones.mockResolvedValue(1);
+
+      await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        alertType: 'intruder',
+      });
+
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        { isConfigured: true },
       );
+    });
+
+    it('leaves a full-frame camera configuration alone', async () => {
+      zoneAccessor.create.mockResolvedValue(buildZone());
+      cameraAccessor.findById.mockResolvedValue({
+        id: 'camera-uuid',
+        monitorMode: 'full',
+      });
+
+      await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        alertType: 'intruder',
+      });
+
+      expect(cameraAccessor.update).not.toHaveBeenCalled();
     });
   });
 
   describe('update', () => {
-    it('returns NOT_FOUND for a missing zone', async () => {
-      zoneAccessor.findById.mockResolvedValue(null);
-
-      const result = await service.update('zone_missing', {});
-
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
-    });
-
-    it('bumps geometryVersion when the polygon changes', async () => {
-      zoneAccessor.findById.mockResolvedValue(zone);
-      zoneAccessor.update.mockResolvedValue({ ...zone, geometryVersion: 2 });
-
-      const result = await service.update('zone_lobby', {
-        polygon: validSquare,
-      });
-
-      expect(result.ok).toBe(true);
-      expect(zoneAccessor.update).toHaveBeenCalledWith(
-        'zone_lobby',
-        expect.objectContaining({ geometryVersion: 2 }),
+    it('validates the merged rectangle, not only the submitted fields', async () => {
+      zoneAccessor.findById.mockResolvedValue(
+        buildZone({ x: new Prisma.Decimal(80), width: new Prisma.Decimal(20) }),
       );
-    });
 
-    it('does not bump geometryVersion when the polygon is unchanged', async () => {
-      zoneAccessor.findById.mockResolvedValue(zone);
-      zoneAccessor.update.mockResolvedValue({ ...zone, name: 'Renamed' });
+      const result = await service.update(spaceId, 'zone-uuid', { x: 90 });
 
-      const result = await service.update('zone_lobby', {
-        name: 'Renamed',
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
       });
-
-      expect(result.ok).toBe(true);
-      expect(zoneAccessor.update).toHaveBeenCalledWith(
-        'zone_lobby',
-        expect.objectContaining({ geometryVersion: 1 }),
-      );
-    });
-
-    it('returns INVALID_POLYGON without bumping geometryVersion for a bad polygon', async () => {
-      zoneAccessor.findById.mockResolvedValue(zone);
-
-      const result = await service.update('zone_lobby', {
-        polygon: [
-          { x: 0, y: 0 },
-          { x: 1, y: 1 },
-        ],
-      });
-
-      expect(result).toMatchObject({ code: ErrorCode.INVALID_POLYGON });
       expect(zoneAccessor.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps the stored alert level when the update omits it', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone());
+      zoneAccessor.update.mockResolvedValue(
+        buildZone({ x: new Prisma.Decimal(5) }),
+      );
+
+      await service.update(spaceId, 'zone-uuid', { x: 5 });
+
+      expect(zoneAccessor.update).toHaveBeenCalledWith(spaceId, 'zone-uuid', {
+        x: 5,
+        y: 20,
+        width: 30,
+        height: 40,
+        alertType: 'intruder',
+      });
     });
   });
 
   describe('delete', () => {
-    it('returns NOT_FOUND for a missing zone', async () => {
+    it('returns NOT_FOUND for a zone outside the space', async () => {
       zoneAccessor.findById.mockResolvedValue(null);
 
-      const result = await service.delete('zone_missing');
+      const result = await service.delete(spaceId, 'zone-uuid');
 
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.NOT_FOUND });
+      expect(zoneAccessor.softDelete).not.toHaveBeenCalled();
     });
 
-    it('deletes an existing zone', async () => {
-      zoneAccessor.findById.mockResolvedValue(zone);
+    it('disarms a partial camera when its last zone is deleted', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone());
+      zoneAccessor.softDelete.mockResolvedValue(true);
+      cameraAccessor.findById.mockResolvedValue({
+        id: 'camera-uuid',
+        monitorMode: 'partial',
+      });
+      cameraAccessor.countMonitorZones.mockResolvedValue(0);
 
-      const result = await service.delete('zone_lobby');
+      const result = await service.delete(spaceId, 'zone-uuid');
 
       expect(result).toEqual({ ok: true, data: null });
-      expect(zoneAccessor.delete).toHaveBeenCalledWith('zone_lobby');
-    });
-  });
-
-  describe('validate', () => {
-    it('returns NOT_FOUND when no override is given and the zone does not exist', async () => {
-      zoneAccessor.findById.mockResolvedValue(null);
-
-      const result = await service.validate('zone_missing');
-
-      expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
-    });
-
-    it('validates the stored polygon when no override is given', async () => {
-      zoneAccessor.findById.mockResolvedValue(zone);
-
-      const result = await service.validate('zone_lobby');
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data).toEqual({ valid: true, violations: [] });
-      }
-    });
-
-    it('always returns 200-shaped data (never an Either error) for an invalid override polygon', async () => {
-      const result = await service.validate('zone_lobby', [
-        { x: 0, y: 0 },
-        { x: 1, y: 1 },
-      ]);
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.valid).toBe(false);
-        expect(result.data.violations.length).toBeGreaterThan(0);
-      }
-      expect(zoneAccessor.findById).not.toHaveBeenCalled();
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        { isConfigured: false },
+      );
     });
   });
 });

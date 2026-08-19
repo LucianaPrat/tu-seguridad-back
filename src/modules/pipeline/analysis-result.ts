@@ -1,13 +1,16 @@
+import { AlertType } from '@prisma/client';
 import { PersonDetection } from '../face-auth-client/detect-persons-response';
-import { ZoneEventDto } from '../events/dto/zone-event.dto';
+import { AlertCandidate } from './alert-candidate';
 
 export interface ZoneResult {
-  zoneId: string;
+  /** `null` on a full-frame camera. */
+  zoneId: string | null;
+  alertType: AlertType;
   occupied: boolean;
 }
 
 export interface AnalysisResult {
   persons: PersonDetection[];
   zoneResults: ZoneResult[];
-  eventsEmitted: ZoneEventDto[];
+  alerts: AlertCandidate[];
 }

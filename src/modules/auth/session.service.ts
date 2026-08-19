@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { SpaceMember, User } from '@prisma/client';
@@ -169,7 +170,11 @@ export class SessionService {
   }
 
   private signRefreshToken(claims: JwtPayload): string {
-    const payload: RefreshJwtPayload = { ...claims, type: 'refresh' };
+    const payload: RefreshJwtPayload = {
+      ...claims,
+      type: 'refresh',
+      jti: randomUUID(),
+    };
     return this.jwtService.sign(payload, {
       secret: this.configService.get<string>(EnvNames.JWT_REFRESH_SECRET),
       expiresIn: asExpiresIn(

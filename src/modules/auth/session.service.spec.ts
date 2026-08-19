@@ -118,6 +118,23 @@ describe('SessionService', () => {
       );
     });
 
+    /**
+     * Two sessions issued in the same second must not sign the same string:
+     * identical payloads hash identically and collide on
+     * `auth_tokens.token_hash`, which is exactly what a fast refresh does.
+     */
+    it('gives every refresh token its own jti', async () => {
+      await service.issue(user, member, context);
+      await service.issue(user, member, context);
+
+      const refreshPayloads = jwtService.sign.mock.calls
+        .map(([payload]: [Record<string, unknown>]) => payload)
+        .filter((payload) => payload.type === 'refresh');
+      expect(refreshPayloads).toHaveLength(2);
+      expect(refreshPayloads[0].jti).toEqual(expect.any(String));
+      expect(refreshPayloads[0].jti).not.toBe(refreshPayloads[1].jti);
+    });
+
     it('persists the refresh token with the expiry taken off its own exp claim', async () => {
       await service.issue(user, member, context);
 

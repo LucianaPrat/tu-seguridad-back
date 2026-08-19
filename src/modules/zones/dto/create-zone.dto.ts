@@ -1,36 +1,34 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsBoolean,
-  IsOptional,
-  IsString,
-  Length,
-  Matches,
-  ValidateNested,
-} from 'class-validator';
-import { PointDto } from './point.dto';
+import { ApiProperty } from '@nestjs/swagger';
+import { AlertType } from '@prisma/client';
+import { IsEnum, IsNumber, Max, Min } from 'class-validator';
+import { ZoneGeometry } from '../../../cross/common/constants';
 
 export class CreateZoneDto {
-  @ApiProperty({ example: 'zone_lobby', pattern: '^zone_[a-z0-9_]+$' })
-  @Matches(/^zone_[a-z0-9_]+$/, {
-    message: 'id must match /^zone_[a-z0-9_]+$/',
-  })
-  id!: string;
+  @ApiProperty({ example: 12.5 })
+  @IsNumber({ maxDecimalPlaces: ZoneGeometry.DECIMAL_PLACES })
+  @Min(ZoneGeometry.MIN_PERCENT)
+  @Max(ZoneGeometry.MAX_PERCENT)
+  x!: number;
 
-  @ApiProperty({ example: 'Lobby' })
-  @IsString()
-  @Length(1, 100)
-  name!: string;
+  @ApiProperty({ example: 20 })
+  @IsNumber({ maxDecimalPlaces: ZoneGeometry.DECIMAL_PLACES })
+  @Min(ZoneGeometry.MIN_PERCENT)
+  @Max(ZoneGeometry.MAX_PERCENT)
+  y!: number;
 
-  @ApiPropertyOptional({ default: true })
-  @IsOptional()
-  @IsBoolean()
-  enabled?: boolean = true;
+  @ApiProperty({ example: 30 })
+  @IsNumber({ maxDecimalPlaces: ZoneGeometry.DECIMAL_PLACES })
+  @Min(ZoneGeometry.MIN_PERCENT)
+  @Max(ZoneGeometry.MAX_PERCENT)
+  width!: number;
 
-  @ApiProperty({ type: [PointDto] })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => PointDto)
-  polygon!: PointDto[];
+  @ApiProperty({ example: 40 })
+  @IsNumber({ maxDecimalPlaces: ZoneGeometry.DECIMAL_PLACES })
+  @Min(ZoneGeometry.MIN_PERCENT)
+  @Max(ZoneGeometry.MAX_PERCENT)
+  height!: number;
+
+  @ApiProperty({ enum: AlertType, description: 'Alert level this zone raises' })
+  @IsEnum(AlertType)
+  alertType!: AlertType;
 }

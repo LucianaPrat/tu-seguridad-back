@@ -33,6 +33,42 @@ export class SnapshotAccessorService {
     });
   }
 
+  /**
+   * Latest snapshot id per camera, for the list response's derived URL. Two
+   * queries instead of one per camera: the grid renders every camera in the
+   * space at once, and a per-row lookup is the N+1 that shows up as soon as a
+   * space owns more than a handful of channels.
+   */
+  async findLatestIdsByCameraIds(
+    spaceId: string,
+    cameraIds: string[],
+  ): Promise<Map<string, string>> {
+    if (cameraIds.length === 0) {
+      return new Map();
+    }
+
+    const latest = await this.prisma.snapshot.groupBy({
+      by: ['cameraId'],
+      where: { cameraId: { in: cameraIds }, camera: { dvr: { spaceId } } },
+      _max: { capturedAt: true },
+    });
+    const pairs = latest.flatMap((row) =>
+      row._max.capturedAt
+        ? [{ cameraId: row.cameraId, capturedAt: row._max.capturedAt }]
+        : [],
+    );
+    if (pairs.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.prisma.snapshot.findMany({
+      where: { OR: pairs },
+      select: { id: true, cameraId: true },
+      orderBy: { id: 'asc' },
+    });
+    return new Map(rows.map((row) => [row.cameraId, row.id]));
+  }
+
   findById(spaceId: string, snapshotId: string): Promise<Snapshot | null> {
     return this.prisma.snapshot.findFirst({
       where: { id: snapshotId, camera: { dvr: { spaceId } } },

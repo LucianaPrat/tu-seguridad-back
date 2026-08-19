@@ -6,15 +6,24 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
+import { createHash } from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import { Server } from 'http';
 import { AddressInfo } from 'net';
 import { AppModule } from '../../src/app.module';
-import { ALERT_ROUTING_DEFAULTS } from '../../src/cross/common/constants';
+import {
+  ALERT_ROUTING_DEFAULTS,
+  ErrorCode,
+} from '../../src/cross/common/constants';
 import { setupSwagger } from '../../src/cross/config/swagger.config';
-import { buildData, Either } from '../../src/cross/errors/either';
+import { buildData, buildError, Either } from '../../src/cross/errors/either';
 import { validationExceptionFactory } from '../../src/cross/errors/validation-exception.factory';
 import { PrismaService } from '../../src/data/prisma/prisma.service';
+import {
+  CapturedImage,
+  DiscoveredChannel,
+  DvrClientPort,
+} from '../../src/modules/dvr/dvr-client.port';
 import { DetectPersonsResponse } from '../../src/modules/face-auth-client/detect-persons-response';
 import { FaceAuthClientService } from '../../src/modules/face-auth-client/face-auth-client.service';
 
@@ -33,6 +42,44 @@ export class FakeFaceAuthClientService {
   }
 }
 
+/**
+ * Stands in for a real recorder. Tests set `channels` and `image`, or flip
+ * `reachable` to false to rehearse an unreachable DVR — the e2e suite must be
+ * able to run the whole tenant flow with no appliance on the network.
+ */
+export class FakeDvrClientService extends DvrClientPort {
+  channels: DiscoveredChannel[] = [];
+  image: Buffer = Buffer.from('fake-snapshot-bytes');
+  mimeType = 'image/jpeg';
+  reachable = true;
+
+  discoverChannels(): Promise<Either<DiscoveredChannel[]>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'DVR channel discovery failed'),
+      );
+    }
+    return Promise.resolve(buildData(this.channels));
+  }
+
+  captureSnapshot(): Promise<Either<CapturedImage>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
+      );
+    }
+    return Promise.resolve(
+      buildData({
+        data: this.image,
+        mimeType: this.mimeType,
+        byteSize: this.image.byteLength,
+        sha256: createHash('sha256').update(this.image).digest('hex'),
+        capturedAt: new Date(),
+      }),
+    );
+  }
+}
+
 export interface SeededAdmin {
   userId: number;
   email: string;
@@ -47,6 +94,7 @@ export interface E2eContext {
   prisma: PrismaService;
   jwtService: JwtService;
   fakeFaceAuthClient: FakeFaceAuthClientService;
+  fakeDvrClient: FakeDvrClientService;
 }
 
 /**
@@ -58,12 +106,15 @@ export interface E2eContext {
  */
 export async function bootstrapE2eApp(): Promise<E2eContext> {
   const fakeFaceAuthClient = new FakeFaceAuthClientService();
+  const fakeDvrClient = new FakeDvrClientService();
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   })
     .overrideProvider(FaceAuthClientService)
     .useValue(fakeFaceAuthClient)
+    .overrideProvider(DvrClientPort)
+    .useValue(fakeDvrClient)
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -99,6 +150,7 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     prisma,
     jwtService: app.get(JwtService),
     fakeFaceAuthClient,
+    fakeDvrClient,
   };
 }
 

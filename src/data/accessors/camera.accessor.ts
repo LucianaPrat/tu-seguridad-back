@@ -1,15 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { Camera, Prisma } from '@prisma/client';
+import { Camera, CameraStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class CameraAccessorService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Ordered by the recorder's channel key, not by the UUID primary key: the
+  // dashboard grid renders in this order, and a UUID order is arbitrary and
+  // reshuffles as cameras come and go.
   findAll(spaceId: string): Promise<Camera[]> {
     return this.prisma.camera.findMany({
       where: { dvr: { spaceId }, deletedAt: null },
-      orderBy: { id: 'asc' },
+      orderBy: { externalId: 'asc' },
     });
   }
 
@@ -61,7 +64,29 @@ export class CameraAccessorService {
         isConfigured: true,
         isEnabled: true,
       },
-      orderBy: { id: 'asc' },
+      orderBy: { externalId: 'asc' },
+    });
+  }
+
+  countBySpace(spaceId: string): Promise<number> {
+    return this.prisma.camera.count({
+      where: { dvr: { spaceId }, deletedAt: null },
+    });
+  }
+
+  /**
+   * Freshness and reachability of one camera, written by whichever transport
+   * pulled the frame. Never touches a soft-deleted row: a deleted camera is
+   * not polled, and a late poll result must not resurrect it into the reads.
+   */
+  async recordCaptureOutcome(
+    spaceId: string,
+    id: string,
+    outcome: { status: CameraStatus; lastSnapshotAt?: Date },
+  ): Promise<void> {
+    await this.prisma.camera.updateMany({
+      where: { id, deletedAt: null, dvr: { spaceId } },
+      data: outcome,
     });
   }
 
