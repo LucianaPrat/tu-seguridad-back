@@ -8,7 +8,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiAcceptedResponse,
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
@@ -44,7 +49,7 @@ export class AlertEventsController {
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
   @Post('acknowledgements')
-  @ApiOkResponse({ type: AcknowledgementDto })
+  @ApiAcceptedResponse({ type: AcknowledgementDto })
   acknowledge(
     @Body() dto: InboundAcknowledgementDto,
   ): Promise<Either<AcknowledgementDto>> {
