@@ -106,4 +106,23 @@ export const envValidationSchema = Joi.object({
   [EnvNames.OTEL_SERVICE_NAME]: Joi.string().default('tu-seguridad-back'),
 
   [EnvNames.SENTRY_DSN]: Joi.string().optional(),
+
+  // Mail is opt-in: unset means credentials are only logged, exactly as before a
+  // transport existed. Defaults describe the local mailpit container, so a
+  // developer who flips the switch needs no other variable.
+  [EnvNames.MAIL_ENABLED]: Joi.boolean().default(false),
+  [EnvNames.SMTP_HOST]: Joi.string().default('127.0.0.1'),
+  [EnvNames.SMTP_PORT]: Joi.number().port().default(1025),
+  // Optional on purpose: mailpit accepts unauthenticated submission, and an empty
+  // string must not become a login attempt with a blank password.
+  [EnvNames.SMTP_USER]: Joi.string().allow('').optional(),
+  [EnvNames.SMTP_PASSWORD]: Joi.string().allow('').optional(),
+  [EnvNames.MAIL_FROM]: Joi.string().default(
+    'Tu Seguridad <no-reply@tu-seguridad.local>',
+  ),
+  // ponytail: defaulted rather than required in production, because a production
+  // boot with MAIL_ENABLED=false must not be blocked by a mail variable. Promote
+  // it to stringRequiredInProduction when mail actually ships, and add it to the
+  // schema spec's productionEnv fixture in the same change.
+  [EnvNames.APP_BASE_URL]: Joi.string().uri().default('http://localhost:5173'),
 });

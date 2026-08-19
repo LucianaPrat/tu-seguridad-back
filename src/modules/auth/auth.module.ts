@@ -17,6 +17,7 @@ import { FaceIdentityService } from './face-identity.service';
 import { LoggedCredentialDeliveryService } from './logged-credential-delivery.service';
 import { RefreshCookieService } from './refresh-cookie.service';
 import { SessionService } from './session.service';
+import { SmtpCredentialDeliveryService } from './smtp-credential-delivery.service';
 
 @Module({
   imports: [
@@ -42,11 +43,19 @@ import { SessionService } from './session.service';
     CredentialRecoveryService,
     FaceIdentityService,
     RefreshCookieService,
-    // Until a mail provider is chosen, delivery is a logging placeholder. The
-    // port is what the domain depends on, so swapping it touches this line only.
+    // Mail is opt-in. With MAIL_ENABLED the credential goes out over SMTP;
+    // without it delivery stays the logging placeholder, so a machine with no
+    // relay — CI included — behaves exactly as it did before a transport existed.
+    // The port is what the domain depends on, so the choice lives on this line
+    // only. Both implementations take nothing but ConfigService, hence the
+    // direct construction instead of two more providers.
     {
       provide: CredentialDeliveryPort,
-      useClass: LoggedCredentialDeliveryService,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        config.get<boolean>(EnvNames.MAIL_ENABLED)
+          ? new SmtpCredentialDeliveryService(config)
+          : new LoggedCredentialDeliveryService(config),
     },
     // Authentication first, then authorization, then the profile-completion gate.
     // All three are global: the route someone forgets to decorate is the one that

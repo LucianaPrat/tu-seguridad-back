@@ -40,6 +40,14 @@ export const EnvNames = {
   OTEL_SERVICE_NAME: 'OTEL_SERVICE_NAME',
 
   SENTRY_DSN: 'SENTRY_DSN',
+
+  MAIL_ENABLED: 'MAIL_ENABLED',
+  SMTP_HOST: 'SMTP_HOST',
+  SMTP_PORT: 'SMTP_PORT',
+  SMTP_USER: 'SMTP_USER',
+  SMTP_PASSWORD: 'SMTP_PASSWORD',
+  MAIL_FROM: 'MAIL_FROM',
+  APP_BASE_URL: 'APP_BASE_URL',
 } as const;
 
 export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
