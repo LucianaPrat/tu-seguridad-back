@@ -97,10 +97,13 @@ project fact no standard can know.
 - **Env access exceptions.** `process.env` may be read only in `main.ts` and
   `src/observability/tracing.ts` — tracing runs before `ConfigModule` exists and loads `dotenv`
   itself. Everywhere else: `ConfigService.get(EnvNames.X)`.
-- **`snapshotUrl` is a secret-bearing field.** It may embed DVR basic-auth credentials. Never log it,
-  never return it outside the single-camera detail `GET`. A new place that could surface it must be
-  checked against `nestjs-pino`'s redaction config, Sentry's `beforeSend` scrub, and every DTO/mapper
-  on the path.
+- **Secret-bearing fields live in one list.** `SENSITIVE_FIELD_NAMES`
+  (`src/cross/common/sensitive-fields.ts`) is read by both egress channels — `nestjs-pino`'s log
+  formatter and Sentry's `beforeSend`/`beforeBreadcrumb`. A new secret-bearing field lands there in
+  the same commit that introduces it; two lists drift, and the drift only shows up in production
+  logs. What must never leave the process: `Dvr.passwordEncrypted` and the plaintext behind it,
+  every `tokenHash`, the delivery `correlationId`, and snapshot BLOB bytes. Snapshots are served
+  only by `GET /snapshots/:id`; a DTO carries the URL, never the bytes.
 - **Accessor layering is verifiable.** `grep -rn "PrismaService" src/modules/` must stay empty.
 - **Test database migration.** After `npx prisma migrate dev --name <description>`, apply the same
   migration to the test database: `DATABASE_URL="$DATABASE_URL_TEST" npx prisma migrate deploy`.
@@ -129,7 +132,11 @@ The generic structure, naming, and validation rules are in
 Suffixes, guards, and harness rules: [`.standards/stacks/NESTJS.md`](.standards/stacks/NESTJS.md),
 "Testing". This repo's commands: `npm test`, `npm run test:int`, `npm run test:e2e`,
 `npm run test:all`. Integration specs live beside the accessor they test, e2e under `test/`.
-Truncation order is FK-safe: `zone_events` → `zones` → `cameras` → `users` → `hits`.
+Truncation order is FK-safe and owned by one place — `test/utils/truncate-all.ts`. It runs leaves
+first: deliveries and alert events, then snapshots, monitor zones, cameras and the DVR, then the
+per-space rows (routing, tokens, face identities, invitations, memberships), then spaces, and users
+last. A new table joins that list in the commit that adds it; a spec that truncates on its own will
+pass alone and fail in suite order.
 
 ## Agent output style
 
