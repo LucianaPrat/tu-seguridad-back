@@ -1895,6 +1895,159 @@
         ]
       }
     },
+    "/api/v1/dvr/connection-test": {
+      "post": {
+        "description": "Admin only. Answers whether the recorder carried in the body is reachable and accepts the credentials, and writes nothing at all: no configuration, no cameras, not even `lastTestAt`, so a failed probe cannot make the recorder the space already polls look broken. This is the \"test connection\" button that precedes `PUT /dvr`. The body carries credentials only — a time zone is not part of a connectivity probe and is rejected.",
+        "operationId": "DvrController_testConnection_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDvrConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The recorder answered and accepted the credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrConnectionResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or a recorder URL that is not usable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The recorder refused the credentials or answered an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Test recorder credentials without storing them",
+        "tags": [
+          "dvr"
+        ]
+      }
+    },
     "/api/v1/dvr/discovery": {
       "post": {
         "description": "Admin only. Re-runs discovery against the already-stored credentials, so it takes no body. Use it after adding or moving channels on the recorder. Same reconciliation as `PUT /dvr`: matching channels keep their configuration, channels that stopped answering become `isConfigured: false`.",
@@ -4483,6 +4636,40 @@
           "username",
           "password",
           "timezone"
+        ]
+      },
+      "TestDvrConnectionDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "example": "http://192.168.1.10:8000"
+          },
+          "username": {
+            "type": "string",
+            "example": "admin"
+          },
+          "password": {
+            "type": "string",
+            "example": "dvr-password"
+          }
+        },
+        "required": [
+          "url",
+          "username",
+          "password"
+        ]
+      },
+      "DvrConnectionResultDto": {
+        "type": "object",
+        "properties": {
+          "channelCount": {
+            "type": "number",
+            "description": "Channels the recorder listed. Nothing is stored."
+          }
+        },
+        "required": [
+          "channelCount"
         ]
       },
       "CameraDto": {

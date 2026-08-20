@@ -104,6 +104,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `GET /api/v1/dvr` | Bearer. The space's recorder without its password. |
 | `PUT /api/v1/dvr` | Space admin. Initialize or re-point the recorder: connectivity is tested first, and a configuration that cannot be reached is not stored. Discovers and reconciles the camera channels. |
 | `POST /api/v1/dvr/discovery` | Space admin. Re-runs discovery against the stored credentials. Matching channels keep their configuration; channels that stopped answering become `isConfigured: false`. |
+| `POST /api/v1/dvr/connection-test` | Space admin. Probes the recorder carried in the body — reachable, credentials accepted — and stores nothing: no configuration, no cameras, not even `lastTestAt`. Body carries credentials only, a time zone is rejected. |
 | `GET /api/v1/cameras`, `GET /api/v1/cameras/:id` | Cameras of the caller's space, soft-deleted ones excluded. Carries the discovery fields, the monitor configuration and a derived `latestSnapshotUrl`. |
 | `PUT /api/v1/cameras/:id` | Space admin. Operator-editable fields only — `externalId` and `status` are rejected. Full-frame monitoring requires an `alertType`. |
 | `DELETE /api/v1/cameras/:id` | Space admin. Logical delete: the camera leaves every read and the poll list, its alert history stays. |
