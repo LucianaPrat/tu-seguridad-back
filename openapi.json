@@ -18,6 +18,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Service banner",
         "tags": [
           "health"
@@ -100,9 +103,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Log in with email and password",
         "tags": [
@@ -186,9 +187,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Register an account",
         "tags": [
@@ -238,9 +237,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Rotate the session",
         "tags": [
@@ -259,9 +256,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Log out",
         "tags": [
@@ -310,11 +305,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read the current user",
         "tags": [
           "auth"
@@ -420,11 +410,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Complete the profile",
         "tags": [
           "auth"
@@ -482,6 +467,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Request a password reset",
         "tags": [
           "auth"
@@ -563,6 +551,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Confirm a password reset",
         "tags": [
           "auth"
@@ -620,6 +611,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Request a magic-link login",
         "tags": [
           "auth"
@@ -701,6 +695,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Log in with a magic link",
         "tags": [
           "auth"
@@ -806,11 +803,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Enroll a face identity",
         "tags": [
           "auth"
@@ -893,9 +885,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Log in with a face identity",
         "tags": [
@@ -1026,11 +1016,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Invite somebody to the space",
         "tags": [
           "invitations"
@@ -1137,9 +1122,7 @@
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
         "summary": "Accept an invitation",
         "tags": [
@@ -1311,6 +1294,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Liveness probe",
         "tags": [
           "health"
@@ -1481,6 +1467,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Readiness probe",
         "tags": [
           "health"
@@ -1651,6 +1640,9 @@
             }
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Upstream reachability",
         "tags": [
           "health"
@@ -1746,11 +1738,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read the space recorder",
         "tags": [
           "dvr"
@@ -1902,11 +1889,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Initialize or re-point the recorder",
         "tags": [
           "dvr"
@@ -2050,11 +2032,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Re-run channel discovery",
         "tags": [
           "dvr"
@@ -2161,11 +2138,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read a stored snapshot",
         "tags": [
           "snapshots"
@@ -2240,11 +2212,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "List the cameras of the space",
         "tags": [
           "cameras"
@@ -2253,7 +2220,7 @@
     },
     "/api/v1/cameras/{id}": {
       "get": {
-        "description": "Full detail for a single camera: discovery fields, monitor configuration and the derived `latestSnapshotUrl`. This is the only route that returns the recorder stream URL, because it can embed recorder credentials.",
+        "description": "Full detail for a single camera: discovery fields, monitor configuration and the derived `latestSnapshotUrl`. No recorder URL or credential is on this shape — the recorder is read from `GET /dvr`, and its password never leaves the process.",
         "operationId": "CamerasController_findOne_v1",
         "parameters": [
           {
@@ -2350,11 +2317,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read one camera",
         "tags": [
           "cameras"
@@ -2492,11 +2454,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Update a camera",
         "tags": [
           "cameras"
@@ -2593,11 +2550,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Delete a camera",
         "tags": [
           "cameras"
@@ -2696,11 +2648,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read the pipeline status of a camera",
         "tags": [
           "cameras"
@@ -2878,11 +2825,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Capture a snapshot now",
         "tags": [
           "cameras"
@@ -3093,11 +3035,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Analyze an uploaded frame",
         "tags": [
           "cameras"
@@ -3106,6 +3043,7 @@
     },
     "/api/v1/events": {
       "get": {
+        "description": "Alerts raised inside the caller space, newest first. Paging is keyset, not offset: send back the `nextCursor` of the previous page, and stop when it comes back `null`. The cursor is opaque — one detection frame writes an event per entered area with the same `detectedAt`, so it carries the event id too and a timestamp of your own will not work in its place. Each item keeps the camera label copied at detection time, so a deleted camera still renders.",
         "operationId": "AlertEventsController_query_v1",
         "parameters": [
           {
@@ -3153,7 +3091,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "One page of history, plus the cursor for the next one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3161,13 +3099,81 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — A cursor this API did not issue, a `limit` over the ceiling, or a malformed `from`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
+        "summary": "Page the alert history of the space",
         "tags": [
           "events"
         ]
@@ -3175,6 +3181,7 @@
     },
     "/api/v1/events/acknowledgements": {
       "post": {
+        "description": "The inbound webhook for a notification provider. Public: no webhook authentication scheme is chosen yet, so the correlation id issued with the delivery is the only credential, and it is never returned by any other route. The first callback acknowledges the alert; a repeat and an id that matches nothing are answered identically, so the response reveals no event.",
         "operationId": "AlertEventsController_acknowledge_v1",
         "parameters": [],
         "requestBody": {
@@ -3189,7 +3196,7 @@
         },
         "responses": {
           "202": {
-            "description": "",
+            "description": "Callback accepted. Same answer for a match, a repeat and an unknown id.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3197,13 +3204,36 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Missing `correlationId`, or one over the maximum token length.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "security": [
-          {
-            "bearer": []
-          }
+          {}
         ],
+        "summary": "Acknowledge an alert from a provider callback",
         "tags": [
           "events"
         ]
@@ -3211,12 +3241,14 @@
     },
     "/api/v1/events/{id}": {
       "get": {
+        "description": "One alert with the camera label and alert type copied at detection time, the snapshot that raised it if one was stored, and who acknowledged it. History is immutable: logically deleting the camera or the zone it names does not change it.",
         "operationId": "AlertEventsController_findOne_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Alert event id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -3224,7 +3256,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "The alert.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3232,13 +3264,81 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
+        "summary": "Read one alert",
         "tags": [
           "events"
         ]
@@ -3246,12 +3346,14 @@
     },
     "/api/v1/events/{id}/deliveries": {
       "get": {
+        "description": "One row per channel and recipient the alert was routed to, with its status and the timestamp of any provider callback. Attempts are planned, not yet sent — no provider ships with this API — so they stay `pending`. The correlation id is never in this response: it is what the acknowledgement route accepts, and a member holding it could acknowledge an alert they never received.",
         "operationId": "AlertEventsController_findDeliveries_v1",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "description": "Alert event id. Resolved inside the caller space only.",
             "schema": {
               "type": "string"
             }
@@ -3259,7 +3361,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Delivery attempts planned for that alert.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3270,13 +3372,81 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
+        "summary": "List the delivery attempts of an alert",
         "tags": [
           "events"
         ]
@@ -3384,11 +3554,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "List the monitor zones of a camera",
         "tags": [
           "zones"
@@ -3527,11 +3692,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Create a monitor zone",
         "tags": [
           "zones"
@@ -3637,11 +3797,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Read a monitor zone",
         "tags": [
           "zones"
@@ -3780,11 +3935,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Update a monitor zone",
         "tags": [
           "zones"
@@ -3881,11 +4031,6 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
         "summary": "Delete a monitor zone",
         "tags": [
           "zones"
@@ -4752,5 +4897,10 @@
         }
       }
     }
-  }
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ]
 }

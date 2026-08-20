@@ -8,7 +8,6 @@ import {
   Put,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -28,7 +27,6 @@ import { MonitorZoneDto } from './dto/zone.dto';
 import { ZonesService } from './zones.service';
 
 @ApiTags('zones')
-@ApiBearerAuth()
 /**
  * Zones are percentage rectangles over a camera frame, so they survive a
  * resolution change on the recorder. Reads are open to any member; every write

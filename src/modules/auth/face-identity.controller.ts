@@ -7,7 +7,6 @@ import {
   Res,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -31,7 +30,6 @@ import { FaceIdentityService } from './face-identity.service';
 import { RefreshCookieService } from './refresh-cookie.service';
 
 @ApiTags('auth')
-@ApiBearerAuth()
 @Controller('auth/face')
 export class FaceIdentityController {
   constructor(

@@ -15,7 +15,7 @@ export class CredentialHashService {
     value: string,
   ): string {
     return this.hash(
-      `auth-token:${purpose.replace('_', '-')}` as CredentialPurpose,
+      `auth-token:${purpose.replaceAll('_', '-')}` as CredentialPurpose,
       value,
     );
   }

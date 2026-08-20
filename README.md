@@ -2,11 +2,13 @@
 
 Backend for "person detection in restricted zones" system. 8 home cameras behind DVR/NVR. Owns tenant/camera/zone config (MySQL), detection-pipeline orchestration, zone evaluation (percentage rectangles + hysteresis), alert history, live event push to frontend over WebSocket. Person detection delegated to external upstream API ([face-auth](#face-auth-upstream-contract)) — backend sends snapshots, gets back bounding boxes + precomputed foot-point anchor.
 
-Engineering rules are central, consumed as a submodule at [`.standards/`](.standards/README.md) (`git submodule update --init` in a fresh clone or worktree). This repo's own facts, standards map, and declared overrides: [`AGENTS.md`](AGENTS.md). Full architecture + task-by-task plan: [`plans/01.setup.md`](plans/01.setup.md). Live status of every task: [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md). Design decisions: [`ARCHITECTURE.md`](ARCHITECTURE.md). Tooling/ops gotchas: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+Engineering rules are central, consumed as a submodule at [`.standards/`](.standards/README.md) (`git submodule update --init` in a fresh clone or worktree). This repo's own facts, standards map, and declared overrides: [`AGENTS.md`](AGENTS.md). Work is driven by numbered plans under [`plans/`](plans/), executed in order, each with a companion tracker carrying live status — the current domain model comes from [`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md), not from the setup plan it superseded. Design decisions: [`ARCHITECTURE.md`](ARCHITECTURE.md). Tooling/ops gotchas: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
 
 ## Status
 
-All 25 setup-plan tasks done — see [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) for task-by-task record (what built, how verified, any deviations). Second plan, [`02.infra-hardening`](plans/02.infra-hardening.md), in progress: dependency scanning, face-auth circuit breaker, Sentry error tracking, deeper health checks + graceful shutdown, OpenAPI contract artifact all **merged** (see [Observability, resilience & supply chain](#observability-resilience--supply-chain)); Prometheus metrics, deploy pipeline, `snapshotUrl` encryption + `sops` secrets still open — live status in [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md). Out-of-scope-for-now items (per-track events, alerting, notifications) under [Roadmap](#roadmap).
+All 25 setup-plan tasks done — see [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) for task-by-task record (what built, how verified, any deviations). Second plan, [`02.infra-hardening`](plans/02.infra-hardening.md), in progress: dependency scanning, face-auth circuit breaker, Sentry error tracking, deeper health checks + graceful shutdown, OpenAPI contract artifact all **merged** (see [Observability, resilience & supply chain](#observability-resilience--supply-chain)); Prometheus metrics, deploy pipeline and `sops` secrets still open — live status in [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md).
+
+Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md), **complete**: the setup-era single-admin camera/polygon-zone/zone-event schema is gone, replaced by the tenant model the frontend needs — a `Space` as tenant root, one DVR per space owning its discovered cameras, percentage-rectangle monitor zones, snapshot bytes in MySQL behind a space-scoped route, and alert history with per-channel delivery attempts. It was a deliberate breaking change to schema and API, safe only because production held no data. Task-by-task record: [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md). What it deliberately did **not** ship — the notification provider itself, webhook authentication, snapshot retention, detection cooldown — is under [Roadmap](#roadmap).
 
 ## Stack
 
@@ -17,7 +19,8 @@ All 25 setup-plan tasks done — see [`plans/01.setup.tasks.md`](plans/01.setup.
 | API docs | `@nestjs/swagger` (UI at `/docs`, bearer auth) |
 | Validation | `class-validator`/`class-transformer`, global `ValidationPipe` |
 | Config | `@nestjs/config` + Joi env schema, fail-fast |
-| Auth | `@nestjs/jwt` (access + refresh), users in MySQL, bcrypt |
+| Auth | `@nestjs/jwt` access token + database-backed refresh (`auth_tokens`), bcrypt passwords, space + role claims |
+| Secrets at rest | AES-256-GCM field encryption for the DVR password (`DVR_PASSWORD_ENCRYPTION_KEY`); every other credential stored as a purpose-separated hash |
 | Rate limiting | `@nestjs/throttler`, global guard, production only |
 | Security | helmet, CORS allowlist, cookie-parser, compression |
 | Health | `@nestjs/terminus` — `/health/live`, `/health/ready` (DB ping), `/health/dependencies` (face-auth reachability) |
@@ -76,14 +79,28 @@ Which of these map to the canonical check names (`format`, `lint`, `typecheck`, 
 
 ## API surface
 
-Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/docs*` and `/health/*` — version-neutral, unprefixed. Everything needs bearer JWT except login, refresh, logout, health, docs.
+Everything prefixed `/api/v1` (global prefix `api` + URI versioning) except `/docs*` and `/health/*` — version-neutral, unprefixed. Bearer JWT is the default; `@Public()` routes are the exception, and they are exactly the ones that cannot have a session yet or are called by something that is not a browser: login, register, refresh, logout, the password-reset and magic-link pairs, face login, invitation acceptance, the provider acknowledgement webhook, health, docs and the scaffold root route.
+
+The tenant rule holds everywhere else: a request derives its `spaceId` from the caller's own membership claim, never from the path or the body, and every accessor puts it in the `where`. An id belonging to another space answers `404`, not `403` — the difference itself would confirm the row exists. Writes that change what the system watches (DVR, cameras, zones, invitations) are admin-only; members read.
+
+The `03` plan replaced these shapes destructively rather than shipping a `/v2` beside them: the setup-era `/v1` had no consumer and no compatibility window was agreed, so a second version number would have pointed at nothing. See [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md).
 
 | Method & path | Notes |
 |---|---|
 | `POST /api/v1/auth/login` | Public. Email+password → `{accessToken}` in the body; refresh token set as an `httpOnly`, path-scoped cookie, never returned in the body. |
 | `POST /api/v1/auth/refresh` | Public. Reads the refresh cookie — no body fallback — rotates the pair and re-sets the cookie. |
 | `POST /api/v1/auth/logout` | Public. Clears the refresh cookie, 204. |
-| `GET /api/v1/auth/me` | Bearer. Current user from the access-token payload. |
+| `POST /api/v1/auth/register` | Public. Creates the account, its space, and the owner `admin` membership in one transaction, then opens a session. 201. |
+| `GET /api/v1/auth/me` | Bearer. Current user from the access-token payload: space id, membership role, `profileCompleted`, active state. Reachable with an incomplete profile. |
+| `POST /api/v1/auth/complete-profile` | Bearer. The only other route an incomplete profile can reach — sets name, phone and a real password, then lifts the gate. |
+| `POST /api/v1/auth/password-reset/request` | Public. Always `202 {accepted:true}`, registered address or not — the answer must not enumerate accounts. Token delivered out of band. |
+| `POST /api/v1/auth/password-reset/confirm` | Public. Consumes the token, sets the new password. Single use. |
+| `POST /api/v1/auth/magic-link/request` | Public. Same `202` shape and same non-enumeration rule as the reset request. |
+| `POST /api/v1/auth/magic-link/consume` | Public. Consumes the token and opens a session — access token in the body, refresh only as the cookie. |
+| `POST /api/v1/auth/face/identities` | Bearer. Enrolls a face-provider identity, storing only its hash. Re-enrolling revokes the previous active identity rather than overwriting it. 201. |
+| `POST /api/v1/auth/face/login` | Public. Looks the presented provider token up by hash; only an active identity authenticates. |
+| `POST /api/v1/invitations` | Space admin. Invites an email to the space; the single-use token is delivered out of band and is never in the response. 201. |
+| `POST /api/v1/invitations/accept` | Public — the invitee has no session, the token is the credential. Creates/links exactly one user and one membership, then opens a profile-completion session. Replay answers 401. |
 | `GET /api/v1/dvr` | Bearer. The space's recorder without its password. |
 | `PUT /api/v1/dvr` | Space admin. Initialize or re-point the recorder: connectivity is tested first, and a configuration that cannot be reached is not stored. Discovers and reconciles the camera channels. |
 | `POST /api/v1/dvr/discovery` | Space admin. Re-runs discovery against the stored credentials. Matching channels keep their configuration; channels that stopped answering become `isConfigured: false`. |
@@ -108,7 +125,13 @@ Full interactive docs: `GET /docs` (Swagger UI), machine-readable spec at `/docs
 
 ## Auth model
 
-JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`/`JWT_REFRESH_EXPIRES_IN`). The refresh token travels **only** as an `httpOnly`, path-scoped cookie (`secure` in production), with `maxAge` derived from the token's own `exp` — never in a response body, and `/auth/refresh` accepts no body fallback. Global `JwtAuthGuard` protects every route by default; `@Public()` opts route out (login, refresh, logout, health, docs, scaffold root route). `@CurrentUser()` reads JWT payload attached to request. Cross-token misuse rejected both directions — refresh token used as bearer access token fails signature verification (different secret) plus explicit `type` check; access token presented to `/auth/refresh` fails same `type` check other way.
+JWT access + refresh, both signed with distinct secrets and TTLs (`JWT_SECRET`/`JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`/`JWT_REFRESH_EXPIRES_IN`). The access token carries the caller's `spaceId`, membership role, `profileCompleted` and active state, so a request needs no membership lookup to know its tenant. The refresh token travels **only** as an `httpOnly`, path-scoped cookie (`secure` in production), with `maxAge` derived from the token's own `exp` — never in a response body, and `/auth/refresh` accepts no body fallback.
+
+**Refresh is stateful, not just signed.** Every refresh token has an `auth_tokens` row holding its hash, purpose, expiry and rotation parent. Refreshing looks the presented cookie up by hash, checks purpose/expiry/revocation, revokes it, and writes the rotated successor — one transaction, so a replayed cookie finds a revoked row and is rejected instead of minting a second live session. The same table backs magic links and password resets, one purpose per row; raw values exist only in the cookie or the delivered link, never in the database.
+
+Three global guards, in order: `JwtAuthGuard` (every route unless `@Public()`), `RolesGuard` (`@Roles(SpaceMemberRole.admin)` on space configuration), and `ProfileCompletedGuard` — an account created by invitation arrives with no name, phone or usable password, and reaches nothing but `/auth/me` and `/auth/complete-profile` until it fills them in (`@AllowIncompleteProfile()` marks those two). `@CurrentUser()` reads the JWT payload off the request. A deactivated user, or one with no accepted membership, is rejected at login rather than issued a token. Cross-token misuse is rejected both directions — a refresh token used as a bearer access token fails signature verification (different secret) plus an explicit `type` check; an access token presented to `/auth/refresh` fails the same check the other way.
+
+Face Auth is a second credential on the same accounts: `user_face_identities` stores only the hash of the provider token, many rows per user, and only an active one authenticates. Re-enrolling revokes the previous active identity in the same transaction instead of overwriting it, so a revocation stays visible.
 
 ## face-auth upstream contract
 
@@ -145,23 +168,37 @@ Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit brea
 
 `PollingScheduler` drives steps 1–6 automatically every `POLLING_INTERVAL_SECONDS` when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable. A camera whose previous poll is still in flight is counted as skipped, not queued behind it. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
 
+## Snapshot storage
+
+Frame bytes live in MySQL, in a `snapshots` `MEDIUMBLOB` alongside their camera, MIME type, byte size, SHA-256 and capture time. Why MySQL and not object storage, and what that costs: [`docs/decisions/001-mysql-snapshot-storage.md`](docs/decisions/001-mysql-snapshot-storage.md).
+
+What that means operationally:
+
+- **Bytes leave the process through exactly one route**, `GET /api/v1/snapshots/:id`, and only after the caller's space is matched through `camera.dvr.spaceId`. A snapshot id from another space answers `404`. No DTO anywhere carries the bytes — camera and event shapes carry a URL derived from the id.
+- **A row is written only when there is a reason to keep it**: when a frame raises an alert, or when `POST /cameras/:id/snapshots` is asked for one explicitly. A poll tick that sees nothing writes no BLOB — otherwise the table would grow every `POLLING_INTERVAL_SECONDS` per camera, forever, and retention would already be overdue.
+- **`SNAPSHOT_MAX_BYTES` is checked before the write**, against the same ceiling for stored and analyzed images. Its hard maximum is MySQL's `MEDIUMBLOB` limit of 16,777,215 bytes, so a value above that is rejected by the Joi schema at boot rather than by the database at 3am.
+- **Nothing deletes them, ever.** There is no retention job, no TTL and no size cap on the table; it only grows. Camera deletion is logical, and `snapshots.camera_id` is `RESTRICT`, so even a physical camera purge would be refused while its frames exist — the bytes outlive the camera by design, because the alert history points at them. Sizing the disk and adding a retention schedule is operational work this plan deliberately deferred; watch `SELECT COUNT(*), SUM(byte_size) FROM snapshots` until it exists.
+- **Backups carry the images.** A `mysqldump` of this schema is as large as the stored frames, so plan backup windows and restore times against snapshot volume, not against row counts.
+
+Moving to object storage later touches the snapshot accessor, the snapshot service and the URL mapper — the rest of the domain refers to snapshots by id and does not care where the bytes are.
+
 ## Observability, resilience & supply chain
 
 Infra concerns handled by frameworks below. **Every external integration is opt-in and no-ops cleanly when its env var is unset** — same posture as `OTEL_ENABLED`. Local dev never depends on running external service; production turns each on via env.
 
 | Concern | Framework / tool | Where | How it's wired |
 |---|---|---|---|
-| Structured logging | `nestjs-pino` + `pino-http` | `src/cross/config/logger.options.ts` | JSON logs, per-request id, `snapshotUrl`/`Authorization`/`Fa-Token` redaction. Always on. |
+| Structured logging | `nestjs-pino` + `pino-http` | `src/cross/config/logger.options.ts` | JSON logs, per-request id, redaction driven by `SENSITIVE_FIELD_NAMES` — the same list Sentry's scrub reads, so a new secret-bearing field is covered on both channels at once. `pino-http` serializes `req`/`res` with its own serializers, so the `set-cookie` and `cookie` headers are redacted by explicit path on top of the deep redactor. Always on. |
 | Tracing | OpenTelemetry SDK | `src/observability/tracing.ts`, `tracing.helpers.ts` | Opt-in via `OTEL_ENABLED`. Loaded **before** `ConfigModule` (reads `dotenv` itself). `withSpan(name, attrs, fn)` wraps spans; no-op when disabled. |
-| Error tracking | `@sentry/node` | `src/observability/sentry.ts`, `main.ts`, `either.interceptor.ts` | Opt-in via `SENTRY_DSN`. `initSentry()` runs before `NestFactory.create`. `Sentry.captureException` fires **only** on interceptor's unexpected-500 branch — never for `Either` failures or mapped `HttpException` (no routine 4xx noise). `beforeSend`/`beforeBreadcrumb` scrub `snapshotUrl` + auth headers. Unset DSN = zero network activity. |
+| Error tracking | `@sentry/node` | `src/observability/sentry.ts`, `main.ts`, `either.interceptor.ts` | Opt-in via `SENTRY_DSN`. `initSentry()` runs before `NestFactory.create`. `Sentry.captureException` fires **only** on interceptor's unexpected-500 branch — never for `Either` failures or mapped `HttpException` (no routine 4xx noise). `beforeSend`/`beforeBreadcrumb` both run `scrubSensitive`, which redacts every name in `SENSITIVE_FIELD_NAMES` — the same list the logging row above reads — at any depth in the event or breadcrumb, so a new secret-bearing field is added in one place. Unset DSN = zero network activity. |
 | Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
 | Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
-| API contract | `@nestjs/swagger` + a committed artifact | `scripts/export-openapi.ts`, `openapi.json` | `openapi.json` — diffable, version-controlled artifact. CI regenerates it, fails on drift — run `npm run openapi:export` and commit after any DTO/route change. Live UI still at `/docs`, raw at `/docs-json`. |
+| API contract | `@nestjs/swagger` + a committed artifact | `scripts/export-openapi.ts`, `openapi.json` | `openapi.json` — diffable, version-controlled artifact. CI regenerates it, fails on drift — run `npm run openapi:export` and commit after any DTO/route change. Live UI still at `/docs`, raw at `/docs-json`. Bearer is a document-level security requirement, and `@Public()` emits the per-operation opt-out alongside the guard metadata — so the contract cannot claim a public route needs a token, or the reverse. |
 | Supply chain | `npm audit` + Dependabot | `.github/workflows/pr-tests.yml`, `.github/dependabot.yml` | CI gate `npm audit --omit=dev --audit-level=critical` blocks only production-dependency **critical** vulnerabilities (dev tooling doesn't ship; high transitive advisories churn constantly). Dependabot opens weekly grouped update PRs against `develop` for the rest. |
 
-> **In flight** (open PRs, tracked in [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), not yet on `develop`): Prometheus `/metrics` (T04), SSH/PM2 deploy pipeline (T02), `snapshotUrl` field encryption at rest + `sops`/`age` secrets (T06). Check [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) for live status before assuming any present.
+> **In flight** (open PRs, tracked in [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), not yet on `develop`): Prometheus `/metrics` (T04), SSH/PM2 deploy pipeline (T02), `sops`/`age` secrets (T06). Check [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) for live status before assuming any present. That plan's "`snapshotUrl` field encryption at rest" item is **closed by other means**: plan 03 removed the column, so no credential-bearing URL is persisted at all, and the field encryption it asked for now protects `dvrs.password_encrypted` instead.
 
 ## Testing
 
@@ -171,7 +208,7 @@ Three levels, matching plan's convention:
 |---|---|---|---|
 | Unit | `*.spec.ts` | `npm test` | Nothing — no DB, no network. |
 | Integration | `*.int-spec.ts` | `npm run test:int` | Real local MySQL, `DATABASE_URL_TEST`. Truncates tables — **never** point it at the dev database. |
-| E2E | `*.e2e-spec.ts` | `npm run test:e2e` | Same test DB; boots real app (HTTP + WebSocket); `FaceAuthClientService` replaced by fake — no real upstream calls. |
+| E2E | `*.e2e-spec.ts` | `npm run test:e2e` | Same test DB; boots the real app (HTTP + WebSocket). Three ports are faked in `test/utils/bootstrap-e2e-app.ts` — face-auth detection, the DVR client, and credential delivery — so the whole tenant flow runs with no upstream, no recorder on the network and no relay, and a test can read the one-time token a real invitee would get by mail. |
 
 `npm run test:all` runs all three in sequence (what CI does). `npm run test:cov` runs unit coverage with enforced 80%-lines floor (`*.module.ts`/`*.dto.ts`/test files themselves excluded from coverage denominator — boilerplate, no branching logic).
 
@@ -206,10 +243,14 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `DATABASE_URL` | — | Primary MySQL connection. Required in production. |
 | `DATABASE_URL_TEST` | — | Test DB — used by `test:int`/`test:e2e`, never dev DB. |
 | `SHADOW_DATABASE_URL` | — | Optional; Prisma's shadow DB for `migrate dev`. Not in original plan spec, added when needed. |
+| `DVR_PASSWORD_ENCRYPTION_KEY` | all-zero placeholder | Base64, must decode to **exactly 32 bytes** — the AES-256-GCM key for `dvrs.password_encrypted`. Required in production, where the placeholder committed in `.env.example` is rejected by name: it decodes to 32 valid bytes, so a length check alone would let a copied example file encrypt real recorder passwords under a key published in this repo. Rotating it makes every stored DVR password undecryptable — re-enter the recorder credentials through `PUT /dvr` after a rotation. Generate one with `openssl rand -base64 32`. |
 | `FACE_AUTH_API_URL` / `FACE_AUTH_DOMAIN` / `FACE_AUTH_TOKEN` | — | Upstream face-auth tenant. Required in production. |
 | `DETECT_TIMEOUT_MS` | `10000` | face-auth request timeout. |
 | `POLLING_ENABLED` | `false` | Master switch for DVR polling scheduler. |
+| `POLLING_INTERVAL_SECONDS` | `5` | Seconds between poll ticks, `1`–`3600`. One interval for the whole process, not one per camera. |
+| `DVR_TIMEOUT_MS` | `5000` | Recorder channel-discovery timeout. |
 | `SNAPSHOT_TIMEOUT_MS` | `5000` | DVR snapshot fetch timeout. |
+| `SNAPSHOT_MAX_BYTES` | `2000000` | Largest frame accepted for storage or analysis, `1024`–`16777215`. The ceiling is MySQL's `MEDIUMBLOB` limit: a frame the column cannot hold is refused up front rather than after the recorder round trip and the detection call are already paid for. See [Snapshot storage](#snapshot-storage). |
 | `ENTER_CONSECUTIVE_POLLS` / `EXIT_CONSECUTIVE_POLLS` | `2` / `3` | Occupancy hysteresis thresholds. |
 | `THROTTLE_TTL_SECONDS` / `THROTTLE_LIMIT` | `1` / `10` | Inbound rate limit — production only. |
 | `OTEL_ENABLED` | `false` | Opt-in OpenTelemetry tracing. |
@@ -230,6 +271,10 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | [`plans/01.setup.tasks.md`](plans/01.setup.tasks.md) | Live status per task, how each verified. |
 | [`plans/02.infra-hardening.md`](plans/02.infra-hardening.md) | Infra plan: CD, resilience, observability, security. Per-task DoD. |
 | [`plans/02.infra-hardening.tasks.md`](plans/02.infra-hardening.tasks.md) | Live status + deviations for infra tasks (merged vs open). |
+| [`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md) | The tenant/alert data-model plan: target relational model, cross-cutting scoping rules, T01–T08 with per-task DoD. |
+| [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md) | Live status per task, the design decisions taken along the way, verification evidence, and what was deliberately deferred. |
+| [`plans/DATA_MODEL_REQUIREMENTS.md`](plans/DATA_MODEL_REQUIREMENTS.md) | The UI-derived input for plan 03: what the frontend screens need, kept distinct from the backend decisions. |
+| [`docs/decisions/`](docs/decisions/) | Decision records. `001` — why snapshot bytes live in MySQL and what replacing that touches. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Decisions behind the layering: accessor conventions, resilience/observability choices, deviations from plan. |
 | [`AGENTS.md`](AGENTS.md) | Project facts, git identity, `Applicable standards` map, check commands, repo-specific rules, declared overrides. Read this before the central standards. |
 | [`.standards/`](.standards/README.md) | Central engineering standards, consumed as a submodule. Read order, precedence, per-stack rules. Never edited from here. |
@@ -240,7 +285,13 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 
 ## Roadmap
 
-- **02 — infra hardening** ([`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), in progress): CD pipeline, circuit breaker, Prometheus metrics, Sentry, dependency scanning, secrets + `snapshotUrl` encryption, deeper health checks + graceful shutdown, OpenAPI contract. **Deferred** in that plan: Docker, anything Redis-dependent (distributed throttler storage, cache, socket.io adapter, BullMQ) — cost-prohibitive at current scale.
-- **03** — Per-track events (`track_id`) once face-auth exposes tracking; `PERSON_UPDATED_IN_ZONE`; movement-vs-presence rules.
-- **04** — Business layer: alert rules, schedules, notifications, clip/snapshot storage, authorization of known persons.
-- DVR snapshot reliability (retries, backoff, reconnection metrics), per-camera FPS tuning.
+- **02 — infra hardening** ([`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), in progress): CD pipeline, circuit breaker, Prometheus metrics, Sentry, dependency scanning, `sops` secrets, deeper health checks + graceful shutdown, OpenAPI contract. **Deferred** in that plan: Docker, anything Redis-dependent (distributed throttler storage, cache, socket.io adapter, BullMQ) — cost-prohibitive at current scale.
+- **03 — tenant alert data model** ([`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md), **done**): spaces, memberships and invitations, DVR-owned cameras, rectangle monitor zones, MySQL snapshots, alert history and delivery planning.
+- **Deferred out of 03, in rough order of need:**
+  - The notification provider itself. Delivery rows are planned and stay `pending` — `sent`/`failed`, `providerMessageId` and `error` exist in the schema with no writer. The sender interface ships with the provider that needs it, not before.
+  - Webhook authentication for `POST /events/acknowledgements`. It is public today and the correlation id is its only credential.
+  - Snapshot retention and the move to object storage ([Snapshot storage](#snapshot-storage)), plus alert-event retention and partitioning.
+  - Detection cooldown and deduplication — a camera that keeps seeing someone raises one alert per hysteresis cycle, and nothing suppresses a burst.
+  - Poll versus DVR push/WebSocket. Both must drive the same discovery, status and snapshot services; the schema does not pick a winner.
+- **04** — Per-track events (`track_id`) once face-auth exposes tracking; `PERSON_UPDATED_IN_ZONE`; movement-vs-presence rules; authorization of known persons; alert schedules.
+- DVR snapshot reliability (retries, backoff, reconnection metrics), per-camera FPS tuning, per-camera confidence threshold (today the pipeline uses one `PipelineDefaults.CONFIDENCE_THRESHOLD` for every camera).

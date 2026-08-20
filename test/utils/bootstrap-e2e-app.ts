@@ -20,6 +20,11 @@ import { buildData, buildError, Either } from '../../src/cross/errors/either';
 import { validationExceptionFactory } from '../../src/cross/errors/validation-exception.factory';
 import { PrismaService } from '../../src/data/prisma/prisma.service';
 import {
+  CredentialDelivery,
+  CredentialDeliveryPort,
+  DeliveredCredentialPurpose,
+} from '../../src/modules/auth/credential-delivery.port';
+import {
   CapturedImage,
   DiscoveredChannel,
   DvrClientPort,
@@ -80,6 +85,30 @@ export class FakeDvrClientService extends DvrClientPort {
   }
 }
 
+/**
+ * Stands in for the real mail/SMS provider. The raw credential never reaches
+ * any response body — this is the only way an e2e test can get at it — so
+ * tests read it off `deliveries`, or the `lastTokenFor` helper.
+ */
+export class FakeCredentialDeliveryService extends CredentialDeliveryPort {
+  deliveries: CredentialDelivery[] = [];
+
+  deliver(delivery: CredentialDelivery): Promise<void> {
+    this.deliveries.push(delivery);
+    return Promise.resolve();
+  }
+
+  lastTokenFor(purpose: DeliveredCredentialPurpose): string {
+    const match = this.deliveries.findLast(
+      (delivery) => delivery.purpose === purpose,
+    );
+    if (!match) {
+      throw new Error(`no credential delivered for purpose "${purpose}"`);
+    }
+    return match.token;
+  }
+}
+
 export interface SeededAdmin {
   userId: number;
   email: string;
@@ -95,6 +124,7 @@ export interface E2eContext {
   jwtService: JwtService;
   fakeFaceAuthClient: FakeFaceAuthClientService;
   fakeDvrClient: FakeDvrClientService;
+  fakeCredentialDelivery: FakeCredentialDeliveryService;
 }
 
 /**
@@ -107,6 +137,7 @@ export interface E2eContext {
 export async function bootstrapE2eApp(): Promise<E2eContext> {
   const fakeFaceAuthClient = new FakeFaceAuthClientService();
   const fakeDvrClient = new FakeDvrClientService();
+  const fakeCredentialDelivery = new FakeCredentialDeliveryService();
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -115,6 +146,8 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     .useValue(fakeFaceAuthClient)
     .overrideProvider(DvrClientPort)
     .useValue(fakeDvrClient)
+    .overrideProvider(CredentialDeliveryPort)
+    .useValue(fakeCredentialDelivery)
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -151,6 +184,7 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     jwtService: app.get(JwtService),
     fakeFaceAuthClient,
     fakeDvrClient,
+    fakeCredentialDelivery,
   };
 }
 

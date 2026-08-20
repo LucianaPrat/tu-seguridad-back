@@ -14,7 +14,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-  ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
   ApiConsumes,
@@ -38,7 +37,6 @@ import { CameraDto } from './dto/camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 
 @ApiTags('cameras')
-@ApiBearerAuth()
 @Controller('cameras')
 export class CamerasController {
   constructor(private readonly camerasService: CamerasService) {}
@@ -69,8 +67,8 @@ export class CamerasController {
     summary: 'Read one camera',
     description:
       'Full detail for a single camera: discovery fields, monitor configuration and the ' +
-      'derived `latestSnapshotUrl`. This is the only route that returns the recorder ' +
-      'stream URL, because it can embed recorder credentials.',
+      'derived `latestSnapshotUrl`. No recorder URL or credential is on this shape — ' +
+      'the recorder is read from `GET /dvr`, and its password never leaves the process.',
   })
   @ApiParam({
     name: 'id',
