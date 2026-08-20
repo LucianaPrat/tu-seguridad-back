@@ -7,12 +7,7 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOkResponse,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SpaceMemberRole } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
@@ -25,7 +20,6 @@ import { DvrDto } from './dto/dvr.dto';
 import { DvrService } from './dvr.service';
 
 @ApiTags('dvr')
-@ApiBearerAuth()
 @Controller('dvr')
 export class DvrController {
   constructor(private readonly dvrService: DvrService) {}

@@ -9,7 +9,6 @@ import {
   Res,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -42,7 +41,6 @@ import {
 } from './session.service';
 
 @ApiTags('auth')
-@ApiBearerAuth()
 @Controller('auth')
 export class AuthController {
   constructor(

@@ -7,7 +7,6 @@ import {
   Res,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -34,7 +33,6 @@ import { InvitationDto } from './dto/invitation.dto';
 import { InvitationsService } from './invitations.service';
 
 @ApiTags('invitations')
-@ApiBearerAuth()
 @Controller('invitations')
 export class InvitationsController {
   constructor(

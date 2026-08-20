@@ -1,6 +1,10 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 
+// `addSecurityRequirements` makes bearer the document-level default, so a route
+// that needs no token opts out once — in `@Public()`, next to the guard metadata
+// — instead of every authenticated route opting in and every public route on a
+// decorated controller inheriting a requirement it does not have.
 export function buildSwaggerConfig() {
   return new DocumentBuilder()
     .setTitle('Tu Seguridad API')
@@ -13,6 +17,7 @@ export function buildSwaggerConfig() {
     )
     .setVersion('1.0')
     .addBearerAuth()
+    .addSecurityRequirements('bearer')
     .addTag(
       'auth',
       'Login, registration, session rotation, password reset, magic links, face identity.',

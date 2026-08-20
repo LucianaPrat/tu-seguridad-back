@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
-  ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -31,7 +30,6 @@ import { InboundAcknowledgementDto } from './dto/inbound-acknowledgement.dto';
 import { QueryAlertEventsDto } from './dto/query-alert-events.dto';
 
 @ApiTags('events')
-@ApiBearerAuth()
 @Controller('events')
 export class AlertEventsController {
   constructor(private readonly alertEventsService: AlertEventsService) {}

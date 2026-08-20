@@ -1,6 +1,5 @@
 import { Controller, Get, Param, Res } from '@nestjs/common';
 import {
-  ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -21,7 +20,6 @@ import { SnapshotService } from './snapshot.service';
 const CACHE_CONTROL = 'private, max-age=60';
 
 @ApiTags('snapshots')
-@ApiBearerAuth()
 @Controller('snapshots')
 export class SnapshotsController {
   constructor(private readonly snapshotService: SnapshotService) {}

@@ -14,7 +14,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-  ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
   ApiConsumes,
@@ -38,7 +37,6 @@ import { CameraDto } from './dto/camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 
 @ApiTags('cameras')
-@ApiBearerAuth()
 @Controller('cameras')
 export class CamerasController {
   constructor(private readonly camerasService: CamerasService) {}
