@@ -1,4 +1,14 @@
+import { createHash } from 'node:crypto';
 import { CredentialHashService } from './credential-hash.service';
+
+// The digest the service must produce for a given purpose label. Recomputed here
+// rather than snapshotted, so the assertion names the label under test.
+const digestFor = (purpose: string, value: string) =>
+  createHash('sha256')
+    .update(purpose, 'utf8')
+    .update('\0', 'utf8')
+    .update(value, 'utf8')
+    .digest('hex');
 
 describe('CredentialHashService', () => {
   let service: CredentialHashService;
@@ -32,6 +42,20 @@ describe('CredentialHashService', () => {
   it('keeps face-identity hashes apart from other purposes', () => {
     expect(service.hashFaceIdentity('same-value')).not.toBe(
       service.hashInvitation('same-value'),
+    );
+  });
+
+  // Pairwise inequality alone would pass on a label the service never meant to
+  // derive: an underscore left in place still hashes to something unique. Every
+  // underscore has to become a dash, or a persisted hash stops verifying with no
+  // error anywhere.
+  it.each([
+    ['refresh', 'auth-token:refresh'],
+    ['magic_link', 'auth-token:magic-link'],
+    ['password_reset', 'auth-token:password-reset'],
+  ] as const)('derives the %s purpose label as %s', (purpose, label) => {
+    expect(service.hashAuthToken(purpose, 'same-value')).toBe(
+      digestFor(label, 'same-value'),
     );
   });
 
