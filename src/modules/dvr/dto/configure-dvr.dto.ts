@@ -16,7 +16,15 @@ export class ConfigureDvrDto {
   @Length(1, 255)
   url!: string;
 
+  /**
+   * A digest header cannot carry a control character, so a username holding one
+   * could never be presented to the recorder at all. Refusing it here is the
+   * operator's 400 instead of an opaque upstream failure at discovery time.
+   */
   @ApiProperty({ example: 'admin' })
+  @Matches(/^[^\p{Cc}]+$/u, {
+    message: 'username must not contain control characters',
+  })
   @IsString()
   @Length(1, 100)
   username!: string;
