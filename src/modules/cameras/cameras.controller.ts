@@ -69,8 +69,8 @@ export class CamerasController {
     summary: 'Read one camera',
     description:
       'Full detail for a single camera: discovery fields, monitor configuration and the ' +
-      'derived `latestSnapshotUrl`. This is the only route that returns the recorder ' +
-      'stream URL, because it can embed recorder credentials.',
+      'derived `latestSnapshotUrl`. No recorder URL or credential is on this shape — ' +
+      'the recorder is read from `GET /dvr`, and its password never leaves the process.',
   })
   @ApiParam({
     name: 'id',
