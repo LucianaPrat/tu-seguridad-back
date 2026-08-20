@@ -64,4 +64,64 @@ describe('envValidationSchema', () => {
       expect(value[EnvNames.ADMIN_PASSWORD]).toBe('change-me');
     });
   });
+
+  describe('DVR_PASSWORD_ENCRYPTION_KEY', () => {
+    const PLACEHOLDER = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    const withAdminPassword = {
+      ...productionEnv,
+      [EnvNames.ADMIN_PASSWORD]: 'sixteen-char-pwd',
+    };
+
+    it('rejects a production boot with no encryption key', () => {
+      const env = Object.fromEntries(
+        Object.entries(withAdminPassword).filter(
+          ([name]) => name !== EnvNames.DVR_PASSWORD_ENCRYPTION_KEY,
+        ),
+      );
+
+      const { error } = validate(env);
+
+      expect(error?.message).toContain(EnvNames.DVR_PASSWORD_ENCRYPTION_KEY);
+    });
+
+    // The placeholder is committed in .env.example and decodes to 32 valid
+    // bytes, so the length check alone lets a copied example file through.
+    it('rejects the .env.example placeholder in production', () => {
+      const { error } = validate({
+        ...withAdminPassword,
+        [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]: PLACEHOLDER,
+      });
+
+      expect(error?.message).toContain('.env.example');
+    });
+
+    it('rejects a production key that does not decode to 32 bytes', () => {
+      const { error } = validate({
+        ...withAdminPassword,
+        [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]: 'dG9vLXNob3J0',
+      });
+
+      expect(error?.message).toContain('32 bytes');
+    });
+
+    it('accepts a real 32-byte production key', () => {
+      const { error, value } = validate(withAdminPassword);
+
+      expect(error).toBeUndefined();
+      expect(value[EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]).toBe(
+        productionEnv[EnvNames.DVR_PASSWORD_ENCRYPTION_KEY],
+      );
+    });
+
+    // Outside production the placeholder is the point: a fresh clone boots
+    // without an operator generating a key first.
+    it('keeps the placeholder default outside production', () => {
+      const { error, value } = validate({
+        [EnvNames.NODE_ENV]: 'development',
+      });
+
+      expect(error).toBeUndefined();
+      expect(value[EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]).toBe(PLACEHOLDER);
+    });
+  });
 });

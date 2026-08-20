@@ -15,6 +15,12 @@ const ADMIN_PASSWORD_MIN_LENGTH = 16;
 // the DVR round trip and the detection call have already been paid for.
 const MEDIUMBLOB_MAX_BYTES = 16_777_215;
 
+// Committed in .env.example so a fresh clone boots. That is exactly why
+// production must not accept it: an operator who copies the example file
+// verbatim would encrypt every DVR password under a key published in the repo,
+// and a 32-byte length check alone waves it through.
+const DEV_PLACEHOLDER_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
 const encryptionKeySchema = () =>
   Joi.string()
     .base64()
@@ -31,7 +37,13 @@ const encryptionKeySchema = () =>
 const base64KeyRequiredInProduction = (devDefault: string) =>
   encryptionKeySchema().when(EnvNames.NODE_ENV, {
     is: 'production',
-    then: encryptionKeySchema().required(),
+    then: encryptionKeySchema()
+      .required()
+      .invalid(DEV_PLACEHOLDER_KEY)
+      .messages({
+        'any.invalid':
+          'must decode to exactly 32 bytes and must not be the placeholder key from .env.example',
+      }),
     otherwise: encryptionKeySchema().default(devDefault),
   });
 
@@ -68,9 +80,8 @@ export const envValidationSchema = Joi.object({
     'mysql://USER:PASSWORD@127.0.0.1:3306/tu-seguridad-test',
   ),
   [EnvNames.SHADOW_DATABASE_URL]: Joi.string().optional(),
-  [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]: base64KeyRequiredInProduction(
-    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
-  ),
+  [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]:
+    base64KeyRequiredInProduction(DEV_PLACEHOLDER_KEY),
 
   [EnvNames.FACE_AUTH_API_URL]: stringRequiredInProduction(
     'https://api.face-auth.me',
