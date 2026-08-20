@@ -8,12 +8,30 @@ const stringRequiredInProduction = (devDefault: string) =>
     otherwise: Joi.string().default(devDefault),
   });
 
+// Same rule, for a variable whose dev default is a placeholder committed in
+// .env.example rather than a real working value. Production must reject the
+// placeholder outright: `.required()` alone waves it through, because the
+// variable *is* set — it is just published in the repo, so an operator who
+// copies the example file verbatim signs every token with a secret anyone with
+// repo access can read.
+const secretRequiredInProduction = (placeholder: string) =>
+  Joi.string().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: Joi.string().required().invalid(placeholder).messages({
+      'any.invalid':
+        '{{#label}} must not be the placeholder value committed in .env.example',
+    }),
+    otherwise: Joi.string().default(placeholder),
+  });
+
 const ADMIN_PASSWORD_MIN_LENGTH = 16;
 
 // MySQL MEDIUMBLOB tops out at 16,777,215 bytes. The limit an operator may set
 // stays under it: a snapshot the column cannot hold fails at the write, after
 // the DVR round trip and the detection call have already been paid for.
 const MEDIUMBLOB_MAX_BYTES = 16_777_215;
+
+const ENCRYPTION_KEY_BYTES = 32;
 
 // Committed in .env.example so a fresh clone boots. That is exactly why
 // production must not accept it: an operator who copies the example file
@@ -24,28 +42,36 @@ const DEV_PLACEHOLDER_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 const encryptionKeySchema = () =>
   Joi.string()
     .base64()
-    .custom((value: unknown, helpers) => {
-      if (typeof value !== 'string') {
-        return helpers.error('any.invalid');
-      }
-      return Buffer.from(value, 'base64').length === 32
+    .custom((value: string, helpers) =>
+      Buffer.from(value, 'base64').length === ENCRYPTION_KEY_BYTES
         ? value
-        : helpers.error('any.invalid');
-    })
-    .messages({ 'any.invalid': 'must decode to exactly 32 bytes' });
+        : helpers.error('key.length'),
+    )
+    .messages({
+      'key.length': `{{#label}} must decode to exactly ${ENCRYPTION_KEY_BYTES} bytes`,
+      'key.placeholder':
+        '{{#label}} must not be the placeholder key committed in .env.example',
+    });
 
-const base64KeyRequiredInProduction = (devDefault: string) =>
-  encryptionKeySchema().when(EnvNames.NODE_ENV, {
+// The placeholder is rejected by its decoded bytes, and against the dev default
+// this schema was actually given. A base64 string comparison would catch one
+// spelling of four: the last base64 character of a 32-byte value carries two
+// unconstrained padding bits, so `A...A=`, `A...B=`, `A...C=` and `A...D=` all
+// decode to the same all-zero key.
+const base64KeyRequiredInProduction = (devDefault: string) => {
+  const devDefaultBytes = Buffer.from(devDefault, 'base64');
+  return encryptionKeySchema().when(EnvNames.NODE_ENV, {
     is: 'production',
-    then: encryptionKeySchema()
+    then: Joi.string()
       .required()
-      .invalid(DEV_PLACEHOLDER_KEY)
-      .messages({
-        'any.invalid':
-          'must decode to exactly 32 bytes and must not be the placeholder key from .env.example',
-      }),
-    otherwise: encryptionKeySchema().default(devDefault),
+      .custom((value: string, helpers) =>
+        Buffer.from(value, 'base64').equals(devDefaultBytes)
+          ? helpers.error('key.placeholder')
+          : value,
+      ),
+    otherwise: Joi.string().default(devDefault),
   });
+};
 
 export const envValidationSchema = Joi.object({
   [EnvNames.NODE_ENV]: Joi.string()
@@ -57,9 +83,9 @@ export const envValidationSchema = Joi.object({
   ),
   [EnvNames.LOG_LEVEL]: Joi.string().default('info'),
 
-  [EnvNames.JWT_SECRET]: stringRequiredInProduction('change-me'),
+  [EnvNames.JWT_SECRET]: secretRequiredInProduction('change-me'),
   [EnvNames.JWT_EXPIRES_IN]: Joi.string().default('15m'),
-  [EnvNames.JWT_REFRESH_SECRET]: stringRequiredInProduction('change-me-too'),
+  [EnvNames.JWT_REFRESH_SECRET]: secretRequiredInProduction('change-me-too'),
   [EnvNames.JWT_REFRESH_EXPIRES_IN]: Joi.string().default('7d'),
   [EnvNames.ADMIN_EMAIL]: Joi.string()
     .email({ tlds: { allow: false } })
@@ -73,7 +99,7 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().default('change-me'),
   }),
 
-  [EnvNames.DATABASE_URL]: stringRequiredInProduction(
+  [EnvNames.DATABASE_URL]: secretRequiredInProduction(
     'mysql://USER:PASSWORD@127.0.0.1:3306/tu-seguridad',
   ),
   [EnvNames.DATABASE_URL_TEST]: Joi.string().default(
@@ -86,8 +112,8 @@ export const envValidationSchema = Joi.object({
   [EnvNames.FACE_AUTH_API_URL]: stringRequiredInProduction(
     'https://api.face-auth.me',
   ),
-  [EnvNames.FACE_AUTH_DOMAIN]: stringRequiredInProduction('change-me'),
-  [EnvNames.FACE_AUTH_TOKEN]: stringRequiredInProduction('change-me'),
+  [EnvNames.FACE_AUTH_DOMAIN]: secretRequiredInProduction('change-me'),
+  [EnvNames.FACE_AUTH_TOKEN]: secretRequiredInProduction('change-me'),
   [EnvNames.DETECT_TIMEOUT_MS]: Joi.number().default(10000),
 
   [EnvNames.DVR_TIMEOUT_MS]: Joi.number().default(5000),
