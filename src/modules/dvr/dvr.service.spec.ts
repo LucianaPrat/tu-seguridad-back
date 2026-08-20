@@ -3,6 +3,7 @@ import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
 import { DvrDetails } from '../../data/accessors/dvr.accessor';
 import { ConfigureDvrDto } from './dto/configure-dvr.dto';
+import { TestDvrConnectionDto } from './dto/test-dvr-connection.dto';
 import { DiscoveredChannel } from './dvr-client.port';
 import { DvrService } from './dvr.service';
 
@@ -239,6 +240,60 @@ describe('DvrService', () => {
       if (result.ok) {
         expect(result.data.cameraCount).toBe(cameras.length);
       }
+    });
+  });
+
+  describe('testConnection', () => {
+    const PROBE_DTO: TestDvrConnectionDto = {
+      url: 'http://192.168.1.10:8000',
+      username: 'admin',
+      password: 'super-secret',
+    };
+
+    it('rejects a URL with embedded credentials before reaching the recorder', async () => {
+      const result = await service.testConnection({
+        ...PROBE_DTO,
+        url: 'http://user:password@192.168.1.10:8000',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(dvrClient.discoverChannels).not.toHaveBeenCalled();
+    });
+
+    it('returns the client error without recording a failed test', async () => {
+      dvrClient.discoverChannels.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR timed out'),
+      );
+
+      const result = await service.testConnection(PROBE_DTO);
+
+      expect(result).toEqual({
+        ok: false,
+        code: ErrorCode.UPSTREAM_TIMEOUT,
+        message: 'DVR timed out',
+      });
+      expect(dvrAccessor.recordTestResult).not.toHaveBeenCalled();
+      expect(dvrAccessor.upsertConfiguration).not.toHaveBeenCalled();
+    });
+
+    it('reports the channel count and stores nothing on success', async () => {
+      dvrClient.discoverChannels.mockResolvedValue(
+        buildData(DISCOVERED_CHANNELS),
+      );
+
+      const result = await service.testConnection(PROBE_DTO);
+
+      expect(dvrClient.discoverChannels).toHaveBeenCalledWith(PROBE_DTO);
+      expect(result).toEqual({
+        ok: true,
+        data: { channelCount: DISCOVERED_CHANNELS.length },
+      });
+      expect(dvrAccessor.upsertConfiguration).not.toHaveBeenCalled();
+      expect(dvrAccessor.reconcileDiscovery).not.toHaveBeenCalled();
+      expect(dvrAccessor.recordTestResult).not.toHaveBeenCalled();
     });
   });
 });

@@ -16,7 +16,9 @@ import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { ConfigureDvrDto } from './dto/configure-dvr.dto';
+import { DvrConnectionResultDto } from './dto/dvr-connection-result.dto';
 import { DvrDto } from './dto/dvr.dto';
+import { TestDvrConnectionDto } from './dto/test-dvr-connection.dto';
 import { DvrService } from './dvr.service';
 
 @ApiTags('dvr')
@@ -78,6 +80,39 @@ export class DvrController {
     @Body() dto: ConfigureDvrDto,
   ): Promise<Either<DvrDto>> {
     return this.dvrService.configure(user.spaceId, dto);
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @Post('connection-test')
+  @ApiOperation({
+    summary: 'Test recorder credentials without storing them',
+    description:
+      'Admin only. Answers whether the recorder carried in the body is reachable and ' +
+      'accepts the credentials, and writes nothing at all: no configuration, no ' +
+      'cameras, not even `lastTestAt`, so a failed probe cannot make the recorder the ' +
+      'space already polls look broken. This is the "test connection" button that ' +
+      'precedes `PUT /dvr`. The body carries credentials only — a time zone is not part ' +
+      'of a connectivity probe and is rejected.',
+  })
+  @ApiOkResponse({
+    type: DvrConnectionResultDto,
+    description: 'The recorder answered and accepted the credentials.',
+  })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, or a recorder URL that is not usable.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.UPSTREAM_ERROR]:
+      'The recorder refused the credentials or answered an error.',
+    [ErrorCode.UPSTREAM_TIMEOUT]: 'The recorder did not answer in time.',
+  })
+  testConnection(
+    @Body() dto: TestDvrConnectionDto,
+  ): Promise<Either<DvrConnectionResultDto>> {
+    return this.dvrService.testConnection(dto);
   }
 
   @Roles(SpaceMemberRole.admin)

@@ -8,7 +8,9 @@ import {
 } from '../../data/accessors/dvr.accessor';
 import { DvrClientPort } from './dvr-client.port';
 import { ConfigureDvrDto } from './dto/configure-dvr.dto';
+import { DvrConnectionResultDto } from './dto/dvr-connection-result.dto';
 import { DvrDto } from './dto/dvr.dto';
+import { TestDvrConnectionDto } from './dto/test-dvr-connection.dto';
 import { toDvrDto } from './dvr.mapper';
 
 const NO_DVR_MESSAGE = 'This space has no DVR configured yet';
@@ -112,6 +114,32 @@ export class DvrService {
     }
 
     return buildData(toDvrDto(dvr, cameras.length));
+  }
+
+  /**
+   * Probe credentials the operator has typed but not stored yet — the UI's
+   * "test connection" button. Deliberately writes nothing: no configuration
+   * row and no `lastTestAt`, so probing a typo cannot mark the recorder the
+   * space is already polling as broken.
+   */
+  async testConnection(
+    dto: TestDvrConnectionDto,
+  ): Promise<Either<DvrConnectionResultDto>> {
+    const urlError = validateDvrUrl(dto.url);
+    if (urlError) {
+      return buildError(ErrorCode.VALIDATION_ERROR, urlError);
+    }
+
+    const discovery = await this.dvrClient.discoverChannels({
+      url: dto.url,
+      username: dto.username,
+      password: dto.password,
+    });
+    if (!discovery.ok) {
+      return discovery;
+    }
+
+    return buildData({ channelCount: discovery.data.length });
   }
 }
 
