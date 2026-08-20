@@ -134,9 +134,9 @@ Suffixes, guards, and harness rules: [`.standards/stacks/NESTJS.md`](.standards/
 `npm run test:all`. Integration specs live beside the accessor they test, e2e under `test/`.
 Truncation order is FK-safe and owned by one place — `test/utils/truncate-all.ts`. It runs leaves
 first: deliveries and alert events, then snapshots, monitor zones, cameras and the DVR, then the
-per-space rows (routing, tokens, face identities, invitations, memberships), then spaces, and users
-last. A new table joins that list in the commit that adds it; a spec that truncates on its own will
-pass alone and fail in suite order.
+per-space rows (routing, tokens, face identities, invitations, memberships), then spaces, then the
+setup-era `hits` rows, and users last. A new table joins that list in the commit that adds it; a
+spec that truncates on its own will pass alone and fail in suite order.
 
 ## Agent output style
 
