@@ -99,9 +99,9 @@ export class FakeCredentialDeliveryService extends CredentialDeliveryPort {
   }
 
   lastTokenFor(purpose: DeliveredCredentialPurpose): string {
-    const match = [...this.deliveries]
-      .reverse()
-      .find((delivery) => delivery.purpose === purpose);
+    const match = this.deliveries.findLast(
+      (delivery) => delivery.purpose === purpose,
+    );
     if (!match) {
       throw new Error(`no credential delivered for purpose "${purpose}"`);
     }

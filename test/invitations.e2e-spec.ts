@@ -6,7 +6,8 @@ import {
   ensureAdminSeeded,
   SeededAdmin,
 } from './utils/bootstrap-e2e-app';
-import { seedMember } from './utils/seed-tenant';
+import { refreshCookie } from './utils/refresh-cookie';
+import { E2E_PASSWORD, seedMember } from './utils/seed-tenant';
 import { truncateAll } from './utils/truncate-all';
 import { typedBody } from './utils/typed-body';
 
@@ -72,12 +73,6 @@ describe('Invitations (e2e)', () => {
       .send({ token: inviteToken });
   }
 
-  function refreshCookie(res: request.Response): string | undefined {
-    const cookies = res.headers['set-cookie'] as unknown as
-      string[] | undefined;
-    return cookies?.find((entry) => entry.startsWith('refresh_token='));
-  }
-
   it('creates an invitation and delivers the raw token out of band, never in the body', async () => {
     const res = await invite('new-member@example.com');
 
@@ -95,7 +90,7 @@ describe('Invitations (e2e)', () => {
     const memberToken = await loginAs(
       ctx.httpServer,
       'member@example.com',
-      'e2e-password-1234',
+      E2E_PASSWORD,
     );
 
     const res = await invite('another@example.com', memberToken);

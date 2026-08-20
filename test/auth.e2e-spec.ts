@@ -4,6 +4,7 @@ import {
   E2eContext,
   ensureAdminSeeded,
 } from './utils/bootstrap-e2e-app';
+import { refreshCookie } from './utils/refresh-cookie';
 import { typedBody } from './utils/typed-body';
 
 interface AccessTokenBody {
@@ -52,16 +53,6 @@ describe('Auth (e2e)', () => {
       email: process.env.ADMIN_EMAIL,
       password: process.env.ADMIN_PASSWORD,
     });
-  }
-
-  function refreshCookie(res: request.Response): string {
-    const cookies = res.headers['set-cookie'] as unknown as
-      string[] | undefined;
-    const cookie = cookies?.find((entry) => entry.startsWith('refresh_token='));
-    if (!cookie) {
-      throw new Error('no refresh_token cookie on the response');
-    }
-    return cookie;
   }
 
   it('logs in with the seeded admin and returns only the access token', async () => {

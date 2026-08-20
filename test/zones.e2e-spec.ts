@@ -6,7 +6,7 @@ import {
   ensureAdminSeeded,
   SeededAdmin,
 } from './utils/bootstrap-e2e-app';
-import { seedMember, seedTenant } from './utils/seed-tenant';
+import { E2E_PASSWORD, seedMember, seedTenant } from './utils/seed-tenant';
 import { truncateAll } from './utils/truncate-all';
 import { typedBody } from './utils/typed-body';
 
@@ -188,7 +188,7 @@ describe('Monitor zones (e2e)', () => {
     const memberToken = await loginAs(
       ctx.httpServer,
       'zones-member@example.com',
-      'e2e-password-1234',
+      E2E_PASSWORD,
     );
 
     const list = await request(ctx.httpServer)
