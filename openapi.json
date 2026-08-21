@@ -2193,7 +2193,7 @@
     },
     "/api/v1/snapshots/{id}": {
       "get": {
-        "description": "Answers the raw image bytes of one stored frame. This is the only route that serves them: snapshots live in the database and are resolved inside the caller space, so another space's id answers 404 rather than the image. Cached `private, max-age=60` — the bytes are per-space and must not be shared.",
+        "description": "Answers the raw image bytes of one stored frame. This is the only route that serves them: snapshots live in the database and are resolved inside the caller space, so another space's id answers 404 rather than the image. Cached `private, no-cache` with the frame sha256 as `ETag`: the live row is rewritten in place, so the same id answers different bytes and the browser has to revalidate. An unchanged frame answers 304.",
         "operationId": "SnapshotsController_read_v1",
         "parameters": [
           {
@@ -2217,6 +2217,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "The caller already holds this frame (`If-None-Match` matched)."
           },
           "401": {
             "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",

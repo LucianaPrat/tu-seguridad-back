@@ -1,13 +1,14 @@
-import { Controller, Get, Param, Res } from '@nestjs/common';
+import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 // `import type` is required: these appear in decorated parameter positions and
 // TS1272 rejects value imports there under isolatedModules.
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { ErrorCode } from '../../cross/common/constants';
@@ -15,9 +16,12 @@ import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { buildGuardException } from '../../cross/errors/guard-exception';
 import { SnapshotService } from './snapshot.service';
 
-// Bytes that belong to one space and change every capture: private, briefly
-// cacheable so a re-rendered grid does not re-read the BLOB, never shared.
-const CACHE_CONTROL = 'private, max-age=60';
+// A camera's live row is rewritten in place, so these bytes change while the
+// id in the URL stays the same: any positive `max-age` makes the browser answer
+// a refresh from its own disk cache with the previous frame. `no-cache` keeps
+// the copy but revalidates every read, and the stored sha256 is the validator,
+// so an unchanged frame still costs a 304 instead of the BLOB.
+const CACHE_CONTROL = 'private, no-cache';
 
 @ApiTags('snapshots')
 @Controller('snapshots')
@@ -36,7 +40,9 @@ export class SnapshotsController {
       'Answers the raw image bytes of one stored frame. This is the only route that ' +
       'serves them: snapshots live in the database and are resolved inside the caller ' +
       "space, so another space's id answers 404 rather than the image. Cached " +
-      '`private, max-age=60` — the bytes are per-space and must not be shared.',
+      '`private, no-cache` with the frame sha256 as `ETag`: the live row is rewritten ' +
+      'in place, so the same id answers different bytes and the browser has to ' +
+      'revalidate. An unchanged frame answers 304.',
   })
   @ApiParam({
     name: 'id',
@@ -51,6 +57,11 @@ export class SnapshotsController {
       'image/jpeg': { schema: { type: 'string', format: 'binary' } },
     },
   })
+  @ApiResponse({
+    status: 304,
+    description:
+      'The caller already holds this frame (`If-None-Match` matched).',
+  })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
@@ -59,6 +70,7 @@ export class SnapshotsController {
   async read(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     const result = await this.snapshotService.read(user.spaceId, id);
@@ -69,9 +81,17 @@ export class SnapshotsController {
       );
     }
 
+    res.setHeader('Cache-Control', CACHE_CONTROL);
+    res.setHeader('ETag', `"${result.data.sha256}"`);
+    // `req.fresh` is Express' own `If-None-Match` comparison against the ETag
+    // just written, so the 304 path needs no hand-rolled header parsing.
+    if (req.fresh) {
+      res.status(304).end();
+      return;
+    }
+
     res.setHeader('Content-Type', result.data.mimeType);
     res.setHeader('Content-Length', result.data.byteSize);
-    res.setHeader('Cache-Control', CACHE_CONTROL);
     res.end(result.data.data);
   }
 }

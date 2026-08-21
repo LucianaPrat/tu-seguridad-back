@@ -232,7 +232,17 @@ describe('DVR, cameras and snapshots (e2e)', () => {
       .buffer(true);
     expect(bytes.status).toBe(200);
     expect(bytes.headers['content-type']).toBe('image/jpeg');
-    expect(bytes.headers['cache-control']).toBe('private, max-age=60');
+    expect(bytes.headers['cache-control']).toBe('private, no-cache');
+    expect(bytes.headers['etag']).toBeDefined();
+
+    // Same id, new bytes on every capture: the browser must revalidate instead
+    // of answering a refresh from its own cache.
+    const revalidated = await request(ctx.httpServer)
+      .get(snapshot.url)
+      .set(auth())
+      .set('If-None-Match', bytes.headers['etag'])
+      .buffer(true);
+    expect(revalidated.status).toBe(304);
 
     const listed = await listCameras();
     expect(listed[0].latestSnapshotUrl).toBe(snapshot.url);
