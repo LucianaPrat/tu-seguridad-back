@@ -116,31 +116,70 @@ describe('Monitor zones (e2e)', () => {
     ]);
   });
 
+  const triangle = [
+    { x: 30, y: 10 },
+    { x: 10, y: 40 },
+    { x: 50, y: 25 },
+  ];
+
   it('stores a free-hand outline and derives the rectangle from it', async () => {
+    // No box is sent: the outline is the shape, and the box is its bounds.
+    const res = await createZone({
+      alertType: 'intruder',
+      points: triangle,
+    });
+
+    expect(res.status).toBe(201);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      x: 10,
+      y: 10,
+      width: 40,
+      height: 30,
+      points: triangle,
+    });
+  });
+
+  it('ignores a box sent alongside an outline', async () => {
     const res = await createZone({
       ...validZone,
       x: 0,
       y: 0,
       width: 100,
       height: 100,
-      points: [
-        { x: 30, y: 10 },
-        { x: 10, y: 40 },
-        { x: 50, y: 25 },
-      ],
+      points: triangle,
     });
 
     expect(res.status).toBe(201);
-    // The sent box is ignored: the outline is the shape, the box is its bounds.
     expect(typedBody<ZoneBody>(res)).toMatchObject({
       x: 10,
       y: 10,
       width: 40,
       height: 30,
+    });
+  });
+
+  it('turns a free-hand zone back into a rectangle on explicit null', async () => {
+    const zone = typedBody<ZoneBody>(
+      await createZone({ alertType: 'intruder', points: triangle }),
+    );
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/zones/${zone.id}`)
+      .set(auth())
+      .send({ points: null, x: 10, y: 20, width: 30, height: 40 });
+
+    expect(res.status).toBe(200);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      // Outline gone, so the zone answers the corners of its rectangle.
       points: [
-        { x: 30, y: 10 },
-        { x: 10, y: 40 },
-        { x: 50, y: 25 },
+        { x: 10, y: 20 },
+        { x: 40, y: 20 },
+        { x: 40, y: 60 },
+        { x: 10, y: 60 },
       ],
     });
   });

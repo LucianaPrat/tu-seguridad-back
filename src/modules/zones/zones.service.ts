@@ -17,7 +17,7 @@ import {
 import { toMonitorZoneDto, toZoneArea } from './zone.mapper';
 
 function toJsonOutline(
-  outline: Point[] | undefined,
+  outline: Point[] | null | undefined,
 ): Prisma.InputJsonValue | Prisma.NullTypes.DbNull {
   return outline
     ? outline.map((point) => ({ x: point.x, y: point.y }))
@@ -51,7 +51,7 @@ export class ZonesService {
     // An outline is the shape of the zone, so the stored rectangle is derived
     // from it and whatever box the client also sent is ignored: two records of
     // one shape is how the two drift apart.
-    const outline = dto.points;
+    const outline = dto.points ?? undefined;
     const rectangle: Rectangle = outline
       ? boundsOf(outline)
       : { x: dto.x, y: dto.y, width: dto.width, height: dto.height };
@@ -107,15 +107,19 @@ export class ZonesService {
     // Outline and rectangle describe one shape. A new outline re-derives the
     // box; moving the box of a zone that has an outline would leave the two
     // describing different areas, so that request is refused rather than
-    // quietly discarding what the operator drew.
-    if (!dto.points && movesBox && current.points) {
+    // quietly discarding what the operator drew. Explicit `points: null` is
+    // the operator switching back to the rectangle tool, which is a different
+    // request from omitting the field: it drops the outline on purpose and
+    // lets the merged box stand as the shape.
+    if (dto.points === undefined && movesBox && current.points) {
       return buildError(
         ErrorCode.INVALID_ZONE,
         'send points to reshape a free-hand zone',
       );
     }
 
-    const outline = dto.points ?? current.points;
+    const outline =
+      dto.points === null ? undefined : (dto.points ?? current.points);
     const merged: Rectangle = dto.points
       ? boundsOf(dto.points)
       : {
@@ -131,7 +135,9 @@ export class ZonesService {
 
     const updated = await this.zoneAccessor.update(spaceId, id, {
       ...merged,
-      ...(dto.points ? { points: toJsonOutline(dto.points) } : {}),
+      ...(dto.points !== undefined
+        ? { points: toJsonOutline(dto.points) }
+        : {}),
       alertType: dto.alertType ?? zone.alertType,
     });
     if (!updated) {

@@ -291,6 +291,23 @@ describe('ZonesService', () => {
       });
     });
 
+    it('clears the outline and keeps the merged box on explicit null', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
+      zoneAccessor.update.mockResolvedValue(buildZone());
+
+      const result = await service.update(spaceId, 'zone-uuid', {
+        points: null,
+        ...validRectangle,
+      });
+
+      expect(result).toMatchObject({ ok: true });
+      expect(zoneAccessor.update).toHaveBeenCalledWith(spaceId, 'zone-uuid', {
+        ...validRectangle,
+        points: Prisma.DbNull,
+        alertType: 'intruder',
+      });
+    });
+
     it('changes the alert level of a free-hand zone without touching its shape', async () => {
       zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
       zoneAccessor.update.mockResolvedValue(buildZone({ points: outline }));
