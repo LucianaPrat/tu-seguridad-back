@@ -158,6 +158,23 @@ describe('PollingScheduler', () => {
       );
     });
 
+    it('records a failed live write and still runs detection', async () => {
+      snapshotService.store.mockResolvedValue(
+        buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'Snapshot is larger than the 1 byte limit',
+        ),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(1);
+      expect(statusRegistry.record).toHaveBeenCalledWith(
+        'camera-a1',
+        expect.objectContaining({ lastErrorCode: ErrorCode.VALIDATION_ERROR }),
+      );
+    });
+
     it('records the capture failure and does not store or run detection', async () => {
       snapshotService.capture.mockResolvedValue(
         buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
