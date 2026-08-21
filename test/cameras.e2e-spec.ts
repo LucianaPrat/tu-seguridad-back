@@ -60,6 +60,8 @@ describe('DVR, cameras and snapshots (e2e)', () => {
     admin = await ensureAdminSeeded(ctx.prisma);
     token = await authAs(ctx.httpServer);
     ctx.fakeDvrClient.reachable = true;
+    ctx.fakeStreamPublisher.reachable = true;
+    ctx.fakeStreamPublisher.published = [];
     ctx.fakeDvrClient.channels = [
       {
         externalId: 'ch1',
@@ -278,6 +280,201 @@ describe('DVR, cameras and snapshots (e2e)', () => {
     expect(captured.status).toBe(504);
     const [refreshed] = await listCameras();
     expect(refreshed.status).toBe('offline');
+  });
+
+  describe('live streaming', () => {
+    interface LiveStreamBody {
+      protocol: string;
+      url: string;
+    }
+
+    function authorize(body: Record<string, unknown>) {
+      return request(ctx.httpServer)
+        .post('/api/v1/streaming/authorize')
+        .send(body);
+    }
+
+    async function liveUrlFor(cameraId: string, bearer = token) {
+      const res = await request(ctx.httpServer)
+        .get(`/api/v1/cameras/${cameraId}/live`)
+        .set(auth(bearer));
+      return res;
+    }
+
+    it('hands the browser a playable url and keeps the recorder password out of it', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await liveUrlFor(camera.id);
+
+      expect(res.status).toBe(200);
+      const body = typedBody<LiveStreamBody>(res);
+      expect(body.protocol).toBe('hls');
+      expect(body.url).toContain(camera.id);
+      expect(JSON.stringify(body)).not.toContain('dvr-password');
+
+      // The credential did reach the media server — it is the only thing that
+      // can open the RTSP connection — it just never reached the response.
+      const published = ctx.fakeStreamPublisher.published;
+      expect(published).toHaveLength(1);
+      expect(published[0].pathName).toBe(camera.id);
+      expect(published[0].sourceUrl).toContain('dvr-admin');
+    });
+
+    it('streams a camera that has no monitor configuration yet', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+      expect(camera.isConfigured).toBe(false);
+
+      const res = await liveUrlFor(camera.id);
+
+      expect(res.status).toBe(200);
+    });
+
+    it('refuses a disabled camera', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+      const disabled = await request(ctx.httpServer)
+        .put(`/api/v1/cameras/${camera.id}`)
+        .set(auth())
+        // `alertType` rides along because a full-frame camera cannot be saved
+        // without one, and a discovered channel arrives full-frame with none.
+        .send({ isEnabled: false, alertType: 'intruder' });
+      expect(disabled.status).toBe(200);
+
+      const res = await liveUrlFor(camera.id);
+
+      expect(res.status).toBe(409);
+      expect(typedBody<ErrorBody>(res).code).toBe('CONFLICT');
+    });
+
+    it('rejects a live url request without a token', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await request(ctx.httpServer).get(
+        `/api/v1/cameras/${camera.id}/live`,
+      );
+
+      expect(res.status).toBe(401);
+    });
+
+    it('answers 404 for a camera in another space', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+      const other = await seedTenant(
+        ctx.prisma,
+        'stream-thief@example.com',
+        'Other space',
+      );
+      const otherToken = await loginAs(
+        ctx.httpServer,
+        other.email,
+        other.password,
+      );
+
+      const res = await liveUrlFor(camera.id, otherToken);
+
+      expect(res.status).toBe(404);
+    });
+
+    it('reports a media server that refuses the registration', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+      ctx.fakeStreamPublisher.reachable = false;
+
+      const res = await liveUrlFor(camera.id);
+
+      expect(res.status).toBe(502);
+    });
+
+    it('admits a reader whose token names the camera space', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await authorize({
+        action: 'read',
+        path: camera.id,
+        protocol: 'hls',
+        token,
+      });
+
+      expect(res.status).toBe(200);
+      expect(typedBody<{ authorized: boolean }>(res).authorized).toBe(true);
+    });
+
+    // A granted publish would let a caller push their own video into a camera
+    // path, and the dashboard would render it as that camera's feed.
+    it('refuses publish on a camera path', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await authorize({
+        action: 'publish',
+        path: camera.id,
+        protocol: 'rtsp',
+        token,
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('refuses a reader with no token', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await authorize({ action: 'read', path: camera.id });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('refuses a reader whose token belongs to another space', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+      const other = await seedTenant(
+        ctx.prisma,
+        'segment-thief@example.com',
+        'Other space',
+      );
+      const otherToken = await loginAs(
+        ctx.httpServer,
+        other.email,
+        other.password,
+      );
+
+      const res = await authorize({
+        action: 'read',
+        path: camera.id,
+        protocol: 'hls',
+        token: otherToken,
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    // The hook's pipe runs `whitelist` without `forbidNonWhitelisted`, so an
+    // undeclared field is stripped rather than refused: a 400 here would make
+    // the media server deny every viewer at once.
+    it('accepts every field the media server sends, declared or not', async () => {
+      await configureDvr();
+      const [camera] = await listCameras();
+
+      const res = await authorize({
+        action: 'read',
+        path: camera.id,
+        protocol: 'hls',
+        token,
+        user: '',
+        password: '',
+        ip: '127.0.0.1',
+        id: 'session-id',
+        query: '',
+        userAgent: 'hls.js',
+        aFieldFromALaterRelease: 'stripped, not refused',
+      });
+
+      expect(res.status).toBe(200);
+    });
   });
 
   it('hides a deleted camera from reads while its alert history keeps its label', async () => {

@@ -19,7 +19,9 @@ URL, BLOB data in JSON, or a storage-provider URL.
   operational budget for one.
 - Proxying a DVR image without persistence: rejected because alert history requires durable
   snapshots and would keep DVR credentials on the request path.
-- Live-stream URLs: out of scope until streaming protocol and authorization are decided.
+- Live-stream URLs: out of scope here, and decided separately in
+  [`002-hls-live-streaming.md`](002-hls-live-streaming.md) — RTSP into MediaMTX, HLS out, authorized
+  per segment. Snapshots stayed exactly as this record describes them.
 
 ## Consequences
 

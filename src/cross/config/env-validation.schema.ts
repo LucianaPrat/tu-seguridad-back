@@ -117,6 +117,14 @@ export const envValidationSchema = Joi.object({
   [EnvNames.DETECT_TIMEOUT_MS]: Joi.number().default(10000),
 
   [EnvNames.DVR_TIMEOUT_MS]: Joi.number().default(5000),
+  // RTSP is a different service on a different port from the ISAPI base URL, and
+  // the recorder row stores only the HTTP one. A knob rather than a column
+  // because a space owns exactly one recorder today and none of them moves 554.
+  [EnvNames.DVR_RTSP_PORT]: Joi.number().port().default(554),
+  // The sub-stream by default: the dashboard plays this in a hover-sized box,
+  // and the recorder's uplink carries every viewer. `main` is there for the day
+  // a full-frame view needs the native resolution.
+  [EnvNames.DVR_RTSP_STREAM]: Joi.string().valid('main', 'sub').default('sub'),
 
   [EnvNames.POLLING_ENABLED]: Joi.boolean().default(false),
   [EnvNames.POLLING_INTERVAL_SECONDS]: Joi.number()
@@ -143,6 +151,24 @@ export const envValidationSchema = Joi.object({
   [EnvNames.OTEL_SERVICE_NAME]: Joi.string().default('tu-seguridad-back'),
 
   [EnvNames.SENTRY_DSN]: Joi.string().optional(),
+
+  // Live streaming is opt-in and a clean refusal when off, same posture as
+  // OTEL_ENABLED and MAIL_ENABLED: no media server on the network means
+  // `GET /cameras/:id/live` answers CONFLICT, and nothing else changes.
+  // Defaults describe a MediaMTX on the same host with its stock ports, so a
+  // developer who flips the switch needs no other variable.
+  [EnvNames.MEDIAMTX_ENABLED]: Joi.boolean().default(false),
+  // The Control API. Private by definition — it takes recorder credentials and
+  // it authenticates nobody, so it must never be bound to a public interface.
+  [EnvNames.MEDIAMTX_API_URL]: Joi.string()
+    .uri()
+    .default('http://127.0.0.1:9997'),
+  // The HLS base the browser reaches, which is not the address above: one is
+  // reached by this process, the other by the operator's laptop.
+  [EnvNames.MEDIAMTX_PUBLIC_URL]: Joi.string()
+    .uri()
+    .default('http://127.0.0.1:8888'),
+  [EnvNames.MEDIAMTX_TIMEOUT_MS]: Joi.number().default(5000),
 
   // Mail is opt-in: unset means credentials are only logged, exactly as before a
   // transport existed. Defaults describe the local mailpit container, so a

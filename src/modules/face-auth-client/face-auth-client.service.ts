@@ -1,12 +1,12 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import FormData from 'form-data';
 import CircuitBreaker from 'opossum';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
+import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import { withSpan } from '../../observability/tracing.helpers';
 import { DetectPersonsResponse } from './detect-persons-response';
 
@@ -102,6 +102,8 @@ export class FaceAuthClientService {
       return buildError(ErrorCode.UPSTREAM_ERROR, 'face-auth circuit open');
     }
 
+    // The circuit breaker's own timeout is not an axios error, so the shared
+    // mapper never sees it.
     if (this.isCode(error, 'ETIMEDOUT')) {
       return buildError(
         ErrorCode.UPSTREAM_TIMEOUT,
@@ -109,25 +111,7 @@ export class FaceAuthClientService {
       );
     }
 
-    if (!axios.isAxiosError(error)) {
-      return buildError(
-        ErrorCode.UPSTREAM_ERROR,
-        'face-auth request failed unexpectedly',
-      );
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      return buildError(
-        ErrorCode.UPSTREAM_TIMEOUT,
-        'face-auth detect request timed out',
-      );
-    }
-
-    const status = error.response?.status;
-    return buildError(
-      ErrorCode.UPSTREAM_ERROR,
-      `face-auth upstream error (status ${status ?? 'unknown'})`,
-    );
+    return mapUpstreamError(error, 'face-auth detect');
   }
 
   private isCode(error: unknown, code: string): boolean {

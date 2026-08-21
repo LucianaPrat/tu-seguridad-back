@@ -19,6 +19,7 @@ describe('CamerasController', () => {
     capture: jest.Mock;
     analyze: jest.Mock;
   };
+  let liveStreamService: { start: jest.Mock };
   let controller: CamerasController;
 
   beforeEach(() => {
@@ -31,7 +32,11 @@ describe('CamerasController', () => {
       capture: jest.fn(),
       analyze: jest.fn(),
     };
-    controller = new CamerasController(camerasService as never);
+    liveStreamService = { start: jest.fn() };
+    controller = new CamerasController(
+      camerasService as never,
+      liveStreamService as never,
+    );
   });
 
   it('delegates findAll with the caller space', async () => {
@@ -68,6 +73,14 @@ describe('CamerasController', () => {
   it('delegates status', async () => {
     await controller.status(user, 'camera-uuid');
     expect(camerasService.getStatus).toHaveBeenCalledWith(
+      'space-uuid',
+      'camera-uuid',
+    );
+  });
+
+  it('delegates live to the stream service with the caller space', async () => {
+    await controller.live(user, 'camera-uuid');
+    expect(liveStreamService.start).toHaveBeenCalledWith(
       'space-uuid',
       'camera-uuid',
     );

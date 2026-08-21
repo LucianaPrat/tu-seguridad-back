@@ -10,7 +10,13 @@ import { Observable } from 'rxjs';
 import { HitAccessorService } from '../../data/accessors/hit.accessor';
 import { RequestWithUser } from '../guards/jwt-auth.guard';
 
-const SKIPPED_PATH_PREFIXES = ['/health', '/docs'];
+/**
+ * `/api/v1/streaming` is the media-server authorization hook: MediaMTX calls
+ * it for the playlist and for every segment, so a row per call would be
+ * analytics about segments rather than about operators — and an INSERT on the
+ * hot path the video reader blocks on.
+ */
+const SKIPPED_PATH_PREFIXES = ['/health', '/docs', '/api/v1/streaming'];
 
 @Injectable()
 export class HitInterceptor implements NestInterceptor {

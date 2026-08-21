@@ -31,6 +31,8 @@ import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { AnalysisResult } from '../pipeline/analysis-result';
 import { SnapshotDto } from '../snapshots/dto/snapshot.dto';
+import { LiveStreamDto } from '../streaming/dto/live-stream.dto';
+import { LiveStreamService } from '../streaming/live-stream.service';
 import { CameraPipelineStatus } from './camera-status.registry';
 import { CamerasService } from './cameras.service';
 import { CameraDto } from './dto/camera.dto';
@@ -39,7 +41,10 @@ import { UpdateCameraDto } from './dto/update-camera.dto';
 @ApiTags('cameras')
 @Controller('cameras')
 export class CamerasController {
-  constructor(private readonly camerasService: CamerasService) {}
+  constructor(
+    private readonly camerasService: CamerasService,
+    private readonly liveStreamService: LiveStreamService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -172,6 +177,46 @@ export class CamerasController {
     @Param('id') id: string,
   ): Promise<Either<CameraPipelineStatus>> {
     return this.camerasService.getStatus(user.spaceId, id);
+  }
+
+  @Get(':id/live')
+  @ApiOperation({
+    summary: 'Get the live stream of a camera',
+    description:
+      'Registers the camera with the media server if it is not registered yet and ' +
+      'answers where to play it. The media server pulls RTSP from the recorder only ' +
+      'while somebody is watching, and repackages it as HLS without transcoding. ' +
+      'The recorder credentials never appear in the answer: the returned URL is not ' +
+      'a secret, and the media server asks this API to authorize the playlist and ' +
+      'every segment, so each request has to carry the caller bearer token. Play it ' +
+      'with `hls.js`, attaching the token through `xhrSetup`. Off by default: ' +
+      'without `MEDIAMTX_ENABLED` this answers `CONFLICT`.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiOkResponse({
+    type: LiveStreamDto,
+    description: 'Where and how to play the camera.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.NOT_FOUND]:
+      'No camera with that id in the caller space, or the space has no recorder.',
+    [ErrorCode.CONFLICT]:
+      'The camera is disabled, or live streaming is not configured on this deployment.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'The stored channel or recorder URL cannot be turned into a stream address.',
+    [ErrorCode.UPSTREAM_ERROR]: 'The media server refused the registration.',
+    [ErrorCode.UPSTREAM_TIMEOUT]: 'The media server did not answer in time.',
+  })
+  live(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<LiveStreamDto>> {
+    return this.liveStreamService.start(user.spaceId, id);
   }
 
   @HttpCode(HttpStatus.CREATED)

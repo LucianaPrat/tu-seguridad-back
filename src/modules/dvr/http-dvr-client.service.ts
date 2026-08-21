@@ -7,6 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
+import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import {
   CapturedImage,
   DiscoveredChannel,
@@ -26,8 +27,18 @@ import {
  */
 const CHANNELS_PATH = '/ISAPI/System/Video/inputs/channels';
 const MAIN_STREAM = '01';
+const SUB_STREAM = '02';
 const snapshotPath = (port: string) =>
   `/ISAPI/Streaming/channels/${port}${MAIN_STREAM}/picture?snapShotImageType=JPEG`;
+
+/**
+ * RTSP takes the same two-part channel id as the snapshot path, but not the
+ * `/ISAPI` prefix and not the base URL's port: it is a separate service. A base
+ * URL carrying its own path prefix is therefore irrelevant here, unlike on the
+ * signed HTTP request line.
+ */
+const rtspPath = (port: string, stream: string) =>
+  `/Streaming/Channels/${port}${stream}`;
 
 /** A BNC port number, and the only shape allowed to reach a request path. */
 const CHANNEL_PORT = /^\d{1,2}$/;
@@ -152,6 +163,41 @@ export class HttpDvrClientService extends DvrClientPort {
     }
   }
 
+  streamUrl(connection: DvrConnection, externalId: string): Either<string> {
+    if (!CHANNEL_PORT.test(externalId)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR channel is not a video input number',
+      );
+    }
+
+    let host: string;
+    try {
+      // `hostname` keeps the brackets an IPv6 literal needs in front of `:port`,
+      // and drops the base URL's own port, which is the HTTP one.
+      host = new URL(connection.url).hostname;
+    } catch {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR base URL cannot be parsed',
+      );
+    }
+
+    const port = this.configService.get<number>(EnvNames.DVR_RTSP_PORT);
+    const stream =
+      this.configService.get<string>(EnvNames.DVR_RTSP_STREAM) === 'main'
+        ? MAIN_STREAM
+        : SUB_STREAM;
+    // Encoded rather than interpolated raw: a password holding `@`, `:` or `/`
+    // would otherwise move the host or the path.
+    const user = encodeURIComponent(connection.username);
+    const secret = encodeURIComponent(connection.password);
+
+    return buildData(
+      `rtsp://${user}:${secret}@${host}:${port}${rtspPath(externalId, stream)}`,
+    );
+  }
+
   /**
    * ISAPI answers only to HTTP digest, so every call is the 401 challenge
    * followed by the signed retry. The nonce is deliberately not cached:
@@ -209,36 +255,27 @@ export class HttpDvrClientService extends DvrClientPort {
   }
 
   private mapError<T>(error: unknown, operation: string): Either<T> {
-    if (!axios.isAxiosError(error)) {
-      return buildError(ErrorCode.UPSTREAM_ERROR, `${operation} failed`);
+    if (axios.isAxiosError(error)) {
+      if (error.code === DIGEST_UNSUPPORTED) {
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: DVR offered no supported authentication scheme`,
+        );
+      }
+
+      const status = error.response?.status;
+      // A recorder that answers 401/403 to the signed request is reachable: what
+      // is wrong is the configuration the operator just submitted, so this is
+      // their 400, not a 502 about somebody else's outage.
+      if (status === 401 || status === 403) {
+        return buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'DVR rejected the supplied credentials',
+        );
+      }
     }
 
-    if (error.code === DIGEST_UNSUPPORTED) {
-      return buildError(
-        ErrorCode.UPSTREAM_ERROR,
-        `${operation} failed: DVR offered no supported authentication scheme`,
-      );
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      return buildError(ErrorCode.UPSTREAM_TIMEOUT, `${operation} timed out`);
-    }
-
-    const status = error.response?.status;
-    // A recorder that answers 401/403 to the signed request is reachable: what
-    // is wrong is the configuration the operator just submitted, so this is
-    // their 400, not a 502 about somebody else's outage.
-    if (status === 401 || status === 403) {
-      return buildError(
-        ErrorCode.VALIDATION_ERROR,
-        'DVR rejected the supplied credentials',
-      );
-    }
-
-    return buildError(
-      ErrorCode.UPSTREAM_ERROR,
-      `${operation} failed (status ${status ?? 'unreachable'})`,
-    );
+    return mapUpstreamError(error, operation);
   }
 }
 

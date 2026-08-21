@@ -20,6 +20,7 @@ import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-clien
 import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
 import { SnapshotsModule } from './modules/snapshots/snapshots.module';
+import { StreamingModule } from './modules/streaming/streaming.module';
 import { ZonesModule } from './modules/zones/zones.module';
 
 @Module({
@@ -46,6 +47,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     DvrModule,
     SnapshotsModule,
     CamerasModule,
+    StreamingModule,
     ZonesModule,
     EventsModule,
     FaceAuthClientModule,

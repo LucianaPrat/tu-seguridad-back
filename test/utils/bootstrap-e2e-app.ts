@@ -28,9 +28,14 @@ import {
   CapturedImage,
   DiscoveredChannel,
   DvrClientPort,
+  DvrConnection,
 } from '../../src/modules/dvr/dvr-client.port';
 import { DetectPersonsResponse } from '../../src/modules/face-auth-client/detect-persons-response';
 import { FaceAuthClientService } from '../../src/modules/face-auth-client/face-auth-client.service';
+import {
+  LiveStream,
+  StreamPublisherPort,
+} from '../../src/modules/streaming/stream-publisher.port';
 
 const BCRYPT_COST = 10;
 
@@ -83,6 +88,39 @@ export class FakeDvrClientService extends DvrClientPort {
       }),
     );
   }
+
+  // Reachability does not apply: the real one builds a string and issues no
+  // request, so a recorder being down cannot change its answer.
+  streamUrl(connection: DvrConnection, externalId: string): Either<string> {
+    return buildData(
+      `rtsp://fake/${encodeURIComponent(connection.username)}/${externalId}`,
+    );
+  }
+}
+
+/**
+ * Stands in for the media server. Records what it was asked to publish so a
+ * spec can assert the recorder password never reached a response, and keeps the
+ * e2e suite free of a MediaMTX on the network.
+ */
+export class FakeStreamPublisherService extends StreamPublisherPort {
+  published: { pathName: string; sourceUrl: string }[] = [];
+  reachable = true;
+
+  publish(pathName: string, sourceUrl: string): Promise<Either<LiveStream>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'Stream publish failed'),
+      );
+    }
+    this.published.push({ pathName, sourceUrl });
+    return Promise.resolve(
+      buildData({
+        protocol: 'hls' as const,
+        url: `http://media.fake/${pathName}/index.m3u8`,
+      }),
+    );
+  }
 }
 
 /**
@@ -125,6 +163,7 @@ export interface E2eContext {
   fakeFaceAuthClient: FakeFaceAuthClientService;
   fakeDvrClient: FakeDvrClientService;
   fakeCredentialDelivery: FakeCredentialDeliveryService;
+  fakeStreamPublisher: FakeStreamPublisherService;
 }
 
 /**
@@ -138,6 +177,7 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
   const fakeFaceAuthClient = new FakeFaceAuthClientService();
   const fakeDvrClient = new FakeDvrClientService();
   const fakeCredentialDelivery = new FakeCredentialDeliveryService();
+  const fakeStreamPublisher = new FakeStreamPublisherService();
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -148,6 +188,8 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     .useValue(fakeDvrClient)
     .overrideProvider(CredentialDeliveryPort)
     .useValue(fakeCredentialDelivery)
+    .overrideProvider(StreamPublisherPort)
+    .useValue(fakeStreamPublisher)
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -185,6 +227,7 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     fakeFaceAuthClient,
     fakeDvrClient,
     fakeCredentialDelivery,
+    fakeStreamPublisher,
   };
 }
 
