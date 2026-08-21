@@ -19,6 +19,7 @@ import { EventsModule } from './modules/events/events.module';
 import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-client.module';
 import { HealthModule } from './modules/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
+import { MembersModule } from './modules/members/members.module';
 import { SnapshotsModule } from './modules/snapshots/snapshots.module';
 import { StreamingModule } from './modules/streaming/streaming.module';
 import { ZonesModule } from './modules/zones/zones.module';
@@ -49,6 +50,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     CamerasModule,
     StreamingModule,
     ZonesModule,
+    MembersModule,
     EventsModule,
     FaceAuthClientModule,
   ],

@@ -32,6 +32,7 @@ describe('InvitationsService', () => {
   let invitationAccessor: {
     create: jest.Mock;
     findPendingBySpaceAndEmail: jest.Mock;
+    findPendingBySpace: jest.Mock;
     findUsableByToken: jest.Mock;
     acceptWithNewUser: jest.Mock;
     acceptWithExistingUser: jest.Mock;
@@ -49,6 +50,7 @@ describe('InvitationsService', () => {
     invitationAccessor = {
       create: jest.fn().mockResolvedValue(invitation),
       findPendingBySpaceAndEmail: jest.fn().mockResolvedValue(null),
+      findPendingBySpace: jest.fn().mockResolvedValue([]),
       findUsableByToken: jest.fn().mockResolvedValue(invitation),
       acceptWithNewUser: jest
         .fn()
@@ -134,6 +136,60 @@ describe('InvitationsService', () => {
 
       expect(result).toMatchObject({ code: ErrorCode.CONFLICT });
       expect(invitationAccessor.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findPending', () => {
+    const second = {
+      ...invitation,
+      id: 'invitation-2',
+      email: 'other@example.com',
+    };
+
+    it('maps the accessor rows to DTOs in order', async () => {
+      invitationAccessor.findPendingBySpace.mockResolvedValue([
+        invitation,
+        second,
+      ]);
+
+      const result = await service.findPending('space-1');
+
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          items: [
+            {
+              id: invitation.id,
+              email: invitation.email,
+              expiresAt: invitation.expiresAt,
+              createdAt: invitation.createdAt,
+            },
+            {
+              id: second.id,
+              email: second.email,
+              expiresAt: second.expiresAt,
+              createdAt: second.createdAt,
+            },
+          ],
+          total: 2,
+        },
+      });
+    });
+
+    it('returns an empty list for a space with no pending invitations', async () => {
+      invitationAccessor.findPendingBySpace.mockResolvedValue([]);
+
+      const result = await service.findPending('space-1');
+
+      expect(result).toEqual({ ok: true, data: { items: [], total: 0 } });
+    });
+
+    it('never carries the token hash', async () => {
+      invitationAccessor.findPendingBySpace.mockResolvedValue([invitation]);
+
+      const result = await service.findPending('space-1');
+
+      expect(JSON.stringify(result)).not.toContain('tokenHash');
     });
   });
 

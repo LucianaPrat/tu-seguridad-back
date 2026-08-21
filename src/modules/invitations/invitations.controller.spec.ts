@@ -7,7 +7,11 @@ const TOKEN_PAIR = { accessToken: 'atoken', refreshToken: 'rtoken' };
 const CONTEXT = { userAgent: 'jest', ip: '127.0.0.1' };
 
 describe('InvitationsController', () => {
-  let invitationsService: { create: jest.Mock; accept: jest.Mock };
+  let invitationsService: {
+    create: jest.Mock;
+    findPending: jest.Mock;
+    accept: jest.Mock;
+  };
   let refreshCookie: { issueSession: jest.Mock };
   let res: Response;
   let controller: InvitationsController;
@@ -23,6 +27,9 @@ describe('InvitationsController', () => {
   beforeEach(() => {
     invitationsService = {
       create: jest.fn().mockResolvedValue(buildData({ id: 'invitation-1' })),
+      findPending: jest
+        .fn()
+        .mockResolvedValue(buildData({ items: [], total: 0 })),
       accept: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
     };
     refreshCookie = {
@@ -50,6 +57,12 @@ describe('InvitationsController', () => {
       1,
       'member@example.com',
     );
+  });
+
+  it('lists the pending invitations of the caller space', async () => {
+    await controller.findPending(admin);
+
+    expect(invitationsService.findPending).toHaveBeenCalledWith('space-1');
   });
 
   it('accepts a token and returns only the access token', async () => {

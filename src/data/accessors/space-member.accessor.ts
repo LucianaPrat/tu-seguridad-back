@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, SpaceMember } from '@prisma/client';
+import { Prisma, SpaceMember, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -27,6 +27,16 @@ export class SpaceMemberAccessorService {
     return this.prisma.spaceMember.findMany({
       where: { spaceId, receiveAlerts: true, user: { isActive: true } },
       orderBy: { userId: 'asc' },
+    });
+  }
+
+  // Unlike findActiveRecipients, this list feeds the Members screen, whose
+  // whole point is the active/inactive badge — inactive users must stay in.
+  listBySpace(spaceId: string): Promise<(SpaceMember & { user: User })[]> {
+    return this.prisma.spaceMember.findMany({
+      where: { spaceId },
+      include: { user: true },
+      orderBy: { joinedAt: 'asc' },
     });
   }
 }

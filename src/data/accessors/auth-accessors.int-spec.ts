@@ -225,6 +225,57 @@ describe('auth and membership accessors (int)', () => {
       expect(pending).not.toBeNull();
       expect(Object.keys(pending!)).not.toContain('tokenHash');
     });
+
+    it('lists only the pending invitations of the given space', async () => {
+      const owned = await spaceAccessor.createWithOwner(
+        ownerInput('owner@example.com'),
+      );
+      const otherOwned = await spaceAccessor.createWithOwner(
+        ownerInput('other-owner@example.com'),
+      );
+
+      const pending = await invitationAccessor.create({
+        spaceId: owned.space.id,
+        email: 'pending@example.com',
+        token: 'pending-token',
+        invitedByUserId: owned.user.id,
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      });
+      const accepted = await invitationAccessor.create({
+        spaceId: owned.space.id,
+        email: 'accepted@example.com',
+        token: 'accepted-token',
+        invitedByUserId: owned.user.id,
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      });
+      await invitationAccessor.acceptWithNewUser({
+        token: 'accepted-token',
+        email: 'accepted@example.com',
+        passwordHash: 'placeholder-hash',
+      });
+      await invitationAccessor.create({
+        spaceId: owned.space.id,
+        email: 'expired@example.com',
+        token: 'expired-token',
+        invitedByUserId: owned.user.id,
+        expiresAt: new Date(Date.now() - HOUR_MS),
+      });
+      await invitationAccessor.create({
+        spaceId: otherOwned.space.id,
+        email: 'other-pending@example.com',
+        token: 'other-pending-token',
+        invitedByUserId: otherOwned.user.id,
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      });
+
+      const result = await invitationAccessor.findPendingBySpace(
+        owned.space.id,
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(pending.id);
+      expect(result.map((row) => row.id)).not.toContain(accepted.id);
+    });
   });
 
   describe('refresh rotation', () => {

@@ -101,7 +101,9 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `POST /api/v1/auth/face/identities` | Bearer. Enrolls a face-provider identity, storing only its hash. Re-enrolling revokes the previous active identity rather than overwriting it. 201. |
 | `POST /api/v1/auth/face/login` | Public. Looks the presented provider token up by hash; only an active identity authenticates. |
 | `POST /api/v1/invitations` | Space admin. Invites an email to the space; the single-use token is delivered out of band and is never in the response. 201. |
+| `GET /api/v1/invitations` | Space admin. The invitations that are neither accepted nor expired, newest first. Same shape as the creation response, so the token is absent here too. |
 | `POST /api/v1/invitations/accept` | Public — the invitee has no session, the token is the credential. Creates/links exactly one user and one membership, then opens a profile-completion session. Replay answers 401. |
+| `GET /api/v1/members` | Bearer. The roster of the caller's space as `{items,total}`, oldest membership first. Deactivated members stay in the list — the state is a field, not an omission. Carries no role and no alert preference. |
 | `GET /api/v1/dvr` | Bearer. The space's recorder without its password. |
 | `PUT /api/v1/dvr` | Space admin. Initialize or re-point the recorder: connectivity is tested first, and a configuration that cannot be reached is not stored. Discovers and reconciles the camera channels. |
 | `POST /api/v1/dvr/discovery` | Space admin. Re-runs discovery against the stored credentials. Matching channels keep their configuration; channels that stopped answering become `isConfigured: false`. |
