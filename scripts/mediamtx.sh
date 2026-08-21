@@ -30,6 +30,8 @@ FRONT_ORIGIN="http://localhost:8443"
 # Throwaway MediaMTX path the wiring check registers and deletes. Named so it
 # cannot collide with a camera id, which is what a real path is called.
 PROBE_PATH="mediamtx-sh-probe"
+# What docker/mediamtx.yml is supposed to have put into the running container.
+EXPECTED_HOOK="http://host.docker.internal:3000/api/v1/streaming/authorize"
 
 # The keys the API reads. Absent from .env means Joi's default takes over, and
 # MEDIAMTX_ENABLED defaults to false — which is the 409 everybody hits first.
@@ -246,13 +248,35 @@ check_round_trip() {
   played=$(curl -sL -o /dev/null -m 8 -w '%{http_code}' "$HLS_URL/$PROBE_PATH/index.m3u8" 2>/dev/null) || true
 
   case "$played" in
-  401) pass "MediaMTX called the hook and honoured its refusal (401)" ;;
+  401) pass "the playlist refuses a tokenless reader (401)" ;;
   200) fail "playlist served without a token — authMethod is not http" ;;
   000) fail "no answer from the HLS endpoint" ;;
-  *) fail "playlist answered $played, expected 401 — MediaMTX likely cannot reach $API_URL from the container" ;;
+  *) fail "playlist answered $played, expected 401" ;;
   esac
 
   curl -s -o /dev/null -m 3 -X DELETE "$CONTROL_URL/v3/config/paths/delete/$PROBE_PATH" 2>/dev/null || true
+
+  # That 401 is necessary and not sufficient. MediaMTX reads an unreachable hook
+  # as "deny", so a hook pointed at nothing produces the same status code as one
+  # that answered properly, and v1.20.1 logs nothing about it at `info`. What
+  # separates them is which address MediaMTX actually loaded — asked of the
+  # running process, never read off the file.
+  #
+  # This is the check that catches config drift, which is a live hazard here:
+  # `docker compose restart` leaves the old config running, so the file says one
+  # thing and the container does another. `up -d --force-recreate` is why the
+  # commands above use it.
+  local loaded
+  loaded=$(curl -s -m 3 "$CONTROL_URL/v3/config/global/get" 2>/dev/null |
+    sed -n 's/.*"authHTTPAddress":"\([^"]*\)".*/\1/p')
+
+  if [ "$loaded" = "$EXPECTED_HOOK" ]; then
+    pass "the running container is calling $loaded"
+  elif [ -z "$loaded" ]; then
+    fail "could not read authHTTPAddress from the Control API"
+  else
+    fail "container is calling '$loaded', docker/mediamtx.yml says '$EXPECTED_HOOK' — stale config, run: scripts/mediamtx.sh restart"
+  fi
 }
 
 cmd_check() {
@@ -297,7 +321,7 @@ cmd_env() {
 }
 
 cmd_up() {
-  compose up -d
+  compose up -d --force-recreate
   # The container reports running before the HLS muxer binds its port.
   for _ in $(seq 20); do
     curl -fsS -m 1 "$CONTROL_URL/v3/config/global/get" >/dev/null 2>&1 && break
@@ -310,7 +334,10 @@ case "${1:-check}" in
 up) cmd_up ;;
 down) compose down ;;
 restart)
-  compose restart
+  # Not `compose restart`: that restarts the process without picking up an
+  # edited docker/mediamtx.yml, so the container keeps running the previous
+  # config while every check reports on the file you just changed.
+  compose up -d --force-recreate >/dev/null
   cmd_up
   ;;
 logs) compose logs -f mediamtx ;;

@@ -58,6 +58,12 @@ authHTTPExclude:
 ###############################################################################
 hls: yes
 hlsAddress: :8888
+
+# fmp4, not the mpegts default: the recorder's sub-stream is H.265, and the
+# MPEG-TS muxer cannot carry it — it refuses the track outright. fMP4 accepts
+# it. Verified on this bench, and it settles the "codec verification" item left
+# open in docs/decisions/002-hls-live-streaming.md.
+hlsVariant: fmp4
 hlsAllowOrigins:
   - 'http://localhost:8443'
 
