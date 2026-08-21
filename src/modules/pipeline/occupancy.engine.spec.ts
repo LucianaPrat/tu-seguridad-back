@@ -10,17 +10,17 @@ describe('OccupancyEngine', () => {
   const zoneA: ZoneInput = {
     zoneId: 'zone-a',
     alertType: AlertType.intruder,
-    rectangle: { x: 0, y: 0, width: 50, height: 50 },
+    area: { x: 0, y: 0, width: 50, height: 50 },
   };
   const zoneB: ZoneInput = {
     zoneId: 'zone-b',
     alertType: AlertType.suspicious,
-    rectangle: { x: 50, y: 50, width: 50, height: 50 },
+    area: { x: 50, y: 50, width: 50, height: 50 },
   };
   const fullFrameZone: ZoneInput = {
     zoneId: null,
     alertType: AlertType.suspicious,
-    rectangle: FULL_FRAME,
+    area: FULL_FRAME,
   };
 
   const insideA: AnchorWithScore = { anchor: { x: 10, y: 10 }, detScore: 0.9 };

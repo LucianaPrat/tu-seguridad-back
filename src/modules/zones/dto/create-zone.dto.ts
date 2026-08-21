@@ -1,21 +1,20 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AlertType } from '@prisma/client';
-import { Transform } from 'class-transformer';
-import { IsEnum, IsNumber, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { ZoneGeometry } from '../../../cross/common/constants';
-
-/**
- * A percentage arrives from a pixel drag divided by the frame size, so its
- * precision is whatever that division produced. The column is DECIMAL(5,2):
- * round here, before validation, so the rectangle checked is the rectangle
- * stored — rounding after the frame-bounds check could push `x + width` past
- * 100 and turn a valid request into a driver error.
- */
-function toStoredPrecision({ value }: { value: unknown }): unknown {
-  return typeof value === 'number'
-    ? Number(value.toFixed(ZoneGeometry.DECIMAL_PLACES))
-    : value;
-}
+import { toStoredPrecision } from '../stored-precision';
+import { PointDto } from './point.dto';
 
 export class CreateZoneDto {
   @ApiProperty({ example: 12.5 })
@@ -45,6 +44,19 @@ export class CreateZoneDto {
   @Min(ZoneGeometry.MIN_PERCENT)
   @Max(ZoneGeometry.MAX_PERCENT)
   height!: number;
+
+  @ApiPropertyOptional({
+    type: [PointDto],
+    description:
+      'Free-hand outline, percent of frame. When present it is the shape of the zone, and x/y/width/height are re-derived from it as its bounding box.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(ZoneGeometry.MIN_OUTLINE_POINTS)
+  @ArrayMaxSize(ZoneGeometry.MAX_OUTLINE_POINTS)
+  @ValidateNested({ each: true })
+  @Type(() => PointDto)
+  points?: PointDto[];
 
   @ApiProperty({ enum: AlertType, description: 'Alert level this zone raises' })
   @IsEnum(AlertType)

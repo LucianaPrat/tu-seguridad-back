@@ -37,6 +37,7 @@ function buildZone(
     y: new Prisma.Decimal(rectangle.y),
     width: new Prisma.Decimal(rectangle.width),
     height: new Prisma.Decimal(rectangle.height),
+    points: null,
     alertType,
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),

@@ -9,7 +9,7 @@ import { CapturedImage } from '../dvr/dvr-client.port';
 import { AlertEventsService } from '../events/alert-events.service';
 import { FaceAuthClientService } from '../face-auth-client/face-auth-client.service';
 import { SnapshotService } from '../snapshots/snapshot.service';
-import { toRectangle } from '../zones/zone.mapper';
+import { toZoneArea } from '../zones/zone.mapper';
 import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
 import { AlertCandidate } from './alert-candidate';
 import { AnalysisResult, ZoneResult } from './analysis-result';
@@ -104,7 +104,7 @@ export class PipelineService {
       zoneId: zone.zoneId,
       alertType: zone.alertType,
       occupied: anchors.some((candidate) =>
-        containsPoint(zone.rectangle, candidate.anchor),
+        containsPoint(zone.area, candidate.anchor),
       ),
     }));
 
@@ -140,7 +140,7 @@ export class PipelineService {
             {
               zoneId: null,
               alertType: camera.alertType,
-              rectangle: FULL_FRAME,
+              area: FULL_FRAME,
             },
           ]
         : [];
@@ -150,7 +150,7 @@ export class PipelineService {
     return zones.map((zone) => ({
       zoneId: zone.id,
       alertType: zone.alertType,
-      rectangle: toRectangle(zone),
+      area: toZoneArea(zone),
     }));
   }
 

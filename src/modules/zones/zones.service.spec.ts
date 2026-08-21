@@ -10,6 +10,7 @@ function buildZone(overrides: Partial<MonitorZone> = {}): MonitorZone {
     y: new Prisma.Decimal(20),
     width: new Prisma.Decimal(30),
     height: new Prisma.Decimal(40),
+    points: null,
     alertType: 'intruder',
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -21,6 +22,12 @@ function buildZone(overrides: Partial<MonitorZone> = {}): MonitorZone {
 describe('ZonesService', () => {
   const spaceId = 'space-uuid';
   const validRectangle = { x: 10, y: 10, width: 20, height: 20 };
+  /** A triangle: bounding box x 10, y 10, width 40, height 30. */
+  const outline = [
+    { x: 30, y: 10 },
+    { x: 10, y: 40 },
+    { x: 50, y: 25 },
+  ];
 
   let zoneAccessor: {
     findByCamera: jest.Mock;
@@ -73,6 +80,81 @@ describe('ZonesService', () => {
       const result = await service.create(spaceId, 'camera-uuid', {
         ...validRectangle,
         width: 0,
+        alertType: 'intruder',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
+      });
+    });
+
+    it('derives the stored rectangle from the outline and ignores the sent box', async () => {
+      zoneAccessor.create.mockResolvedValue(buildZone());
+      cameraAccessor.findById.mockResolvedValue(null);
+
+      await service.create(spaceId, 'camera-uuid', {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        points: outline,
+        alertType: 'intruder',
+      });
+
+      expect(zoneAccessor.create).toHaveBeenCalledWith(spaceId, {
+        cameraId: 'camera-uuid',
+        x: 10,
+        y: 10,
+        width: 40,
+        height: 30,
+        points: outline,
+        alertType: 'intruder',
+      });
+    });
+
+    it('stores no outline when the request carries none', async () => {
+      zoneAccessor.create.mockResolvedValue(buildZone());
+      cameraAccessor.findById.mockResolvedValue(null);
+
+      await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        alertType: 'intruder',
+      });
+
+      expect(zoneAccessor.create).toHaveBeenCalledWith(spaceId, {
+        cameraId: 'camera-uuid',
+        ...validRectangle,
+        points: Prisma.DbNull,
+        alertType: 'intruder',
+      });
+    });
+
+    it('rejects an outline that leaves the frame', async () => {
+      const result = await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        points: [
+          { x: 10, y: 10 },
+          { x: 120, y: 10 },
+          { x: 10, y: 40 },
+        ],
+        alertType: 'intruder',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
+      });
+      expect(zoneAccessor.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an outline of two points, which encloses nothing', async () => {
+      const result = await service.create(spaceId, 'camera-uuid', {
+        ...validRectangle,
+        points: [
+          { x: 10, y: 10 },
+          { x: 20, y: 20 },
+        ],
         alertType: 'intruder',
       });
 
@@ -178,6 +260,49 @@ describe('ZonesService', () => {
         width: 30,
         height: 40,
         alertType: 'intruder',
+      });
+    });
+
+    it('refuses to move the box of a free-hand zone without its outline', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
+
+      const result = await service.update(spaceId, 'zone-uuid', { x: 5 });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.INVALID_ZONE,
+      });
+      expect(zoneAccessor.update).not.toHaveBeenCalled();
+    });
+
+    it('re-derives the box from a new outline', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone());
+      zoneAccessor.update.mockResolvedValue(buildZone());
+
+      await service.update(spaceId, 'zone-uuid', { points: outline });
+
+      expect(zoneAccessor.update).toHaveBeenCalledWith(spaceId, 'zone-uuid', {
+        x: 10,
+        y: 10,
+        width: 40,
+        height: 30,
+        points: outline,
+        alertType: 'intruder',
+      });
+    });
+
+    it('changes the alert level of a free-hand zone without touching its shape', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
+      zoneAccessor.update.mockResolvedValue(buildZone({ points: outline }));
+
+      await service.update(spaceId, 'zone-uuid', { alertType: 'suspicious' });
+
+      expect(zoneAccessor.update).toHaveBeenCalledWith(spaceId, 'zone-uuid', {
+        x: 10,
+        y: 20,
+        width: 30,
+        height: 40,
+        alertType: 'suspicious',
       });
     });
   });

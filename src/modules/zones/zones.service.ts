@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MonitorMode } from '@prisma/client';
+import { MonitorMode, Prisma } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
@@ -7,8 +7,22 @@ import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { MonitorZoneDto } from './dto/zone.dto';
-import { Rectangle, validateRectangle } from './rectangle';
-import { toMonitorZoneDto, toRectangle } from './zone.mapper';
+import {
+  boundsOf,
+  Point,
+  Rectangle,
+  validatePolygon,
+  validateRectangle,
+} from './rectangle';
+import { toMonitorZoneDto, toZoneArea } from './zone.mapper';
+
+function toJsonOutline(
+  outline: Point[] | undefined,
+): Prisma.InputJsonValue | Prisma.NullTypes.DbNull {
+  return outline
+    ? outline.map((point) => ({ x: point.x, y: point.y }))
+    : Prisma.DbNull;
+}
 
 @Injectable()
 export class ZonesService {
@@ -34,17 +48,23 @@ export class ZonesService {
     cameraId: string,
     dto: CreateZoneDto,
   ): Promise<Either<MonitorZoneDto>> {
-    const invalid = this.rejectInvalidRectangle<MonitorZoneDto>(dto);
+    // An outline is the shape of the zone, so the stored rectangle is derived
+    // from it and whatever box the client also sent is ignored: two records of
+    // one shape is how the two drift apart.
+    const outline = dto.points;
+    const rectangle: Rectangle = outline
+      ? boundsOf(outline)
+      : { x: dto.x, y: dto.y, width: dto.width, height: dto.height };
+
+    const invalid = this.rejectInvalidShape<MonitorZoneDto>(rectangle, outline);
     if (invalid) {
       return invalid;
     }
 
     const zone = await this.zoneAccessor.create(spaceId, {
       cameraId,
-      x: dto.x,
-      y: dto.y,
-      width: dto.width,
-      height: dto.height,
+      ...rectangle,
+      points: toJsonOutline(outline),
       alertType: dto.alertType,
     });
     if (!zone) {
@@ -64,8 +84,8 @@ export class ZonesService {
   }
 
   /**
-   * A partial update still validates the whole rectangle: moving `x` alone can
-   * push an otherwise valid zone past the right edge of the frame.
+   * A partial update still validates the whole shape: moving `x` alone can push
+   * an otherwise valid zone past the right edge of the frame.
    */
   async update(
     spaceId: string,
@@ -77,20 +97,41 @@ export class ZonesService {
       return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
     }
 
-    const current = toRectangle(zone);
-    const merged: Rectangle = {
-      x: dto.x ?? current.x,
-      y: dto.y ?? current.y,
-      width: dto.width ?? current.width,
-      height: dto.height ?? current.height,
-    };
-    const invalid = this.rejectInvalidRectangle<MonitorZoneDto>(merged);
+    const current = toZoneArea(zone);
+    const movesBox =
+      dto.x !== undefined ||
+      dto.y !== undefined ||
+      dto.width !== undefined ||
+      dto.height !== undefined;
+
+    // Outline and rectangle describe one shape. A new outline re-derives the
+    // box; moving the box of a zone that has an outline would leave the two
+    // describing different areas, so that request is refused rather than
+    // quietly discarding what the operator drew.
+    if (!dto.points && movesBox && current.points) {
+      return buildError(
+        ErrorCode.INVALID_ZONE,
+        'send points to reshape a free-hand zone',
+      );
+    }
+
+    const outline = dto.points ?? current.points;
+    const merged: Rectangle = dto.points
+      ? boundsOf(dto.points)
+      : {
+          x: dto.x ?? current.x,
+          y: dto.y ?? current.y,
+          width: dto.width ?? current.width,
+          height: dto.height ?? current.height,
+        };
+    const invalid = this.rejectInvalidShape<MonitorZoneDto>(merged, outline);
     if (invalid) {
       return invalid;
     }
 
     const updated = await this.zoneAccessor.update(spaceId, id, {
       ...merged,
+      ...(dto.points ? { points: toJsonOutline(dto.points) } : {}),
       alertType: dto.alertType ?? zone.alertType,
     });
     if (!updated) {
@@ -115,10 +156,14 @@ export class ZonesService {
     return buildData(null);
   }
 
-  private rejectInvalidRectangle<T>(
+  private rejectInvalidShape<T>(
     rectangle: Rectangle,
+    outline?: Point[],
   ): Either<T> | undefined {
-    const violations = validateRectangle(rectangle);
+    const violations = [
+      ...(outline ? validatePolygon(outline) : []),
+      ...validateRectangle(rectangle),
+    ];
     if (violations.length === 0) {
       return undefined;
     }

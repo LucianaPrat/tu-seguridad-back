@@ -217,6 +217,10 @@ model MonitorZone {
   y         Decimal   @db.Decimal(5, 2)
   width     Decimal   @db.Decimal(5, 2)
   height    Decimal   @db.Decimal(5, 2)
+  /// Free-hand outline as `[{ "x": 12.5, "y": 20 }, ...]`, percent of frame.
+  /// The rectangle columns above are its bounding box. Null on a zone drawn
+  /// before outlines existed, and then the rectangle itself is the shape.
+  points    Json?
   alertType AlertType @map("alert_type")
   deletedAt DateTime? @map("deleted_at")
   createdAt DateTime  @default(now()) @map("created_at")
