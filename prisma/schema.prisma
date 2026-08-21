@@ -239,10 +239,16 @@ model Snapshot {
   capturedAt DateTime @map("captured_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
+  /// The camera's current frame, overwritten by every successful poll. At most
+  /// one per camera, and never referenced by an alert event: evidence rows are
+  /// immutable, so the live frame cannot be one of them.
+  isLive Boolean @default(false) @map("is_live")
+
   camera      Camera       @relation(fields: [cameraId], references: [id], onDelete: Restrict)
   alertEvents AlertEvent[]
 
   @@index([cameraId, capturedAt])
+  @@index([cameraId, isLive])
   @@map("snapshots")
 }
 

@@ -166,6 +166,48 @@ describe('tenant-scoped accessors (int)', () => {
     });
   });
 
+  it('keeps one live snapshot row per camera and refuses another space', async () => {
+    const tenantA = await createTenant('live-frame');
+    const tenantB = await createTenant('live-frame-other');
+    const row = (bytes: string, capturedAt: string) => ({
+      cameraId: tenantA.camera.id,
+      data: Buffer.from(bytes),
+      mimeType: 'image/jpeg',
+      byteSize: bytes.length,
+      sha256: 'e'.repeat(64),
+      capturedAt: new Date(capturedAt),
+    });
+
+    const first = await snapshotAccessor.upsertLive(
+      tenantA.space.id,
+      row('first-frame', '2026-01-01T00:00:00Z'),
+    );
+    const second = await snapshotAccessor.upsertLive(
+      tenantA.space.id,
+      row('second-frame', '2026-01-01T00:01:00Z'),
+    );
+    if (!first || !second) {
+      throw new Error('live snapshot upsert unexpectedly failed');
+    }
+
+    // Same row, new bytes: the live frame refreshes without growing the table.
+    expect(second.id).toBe(first.id);
+    expect(second.isLive).toBe(true);
+    expect(
+      await prisma.snapshot.count({ where: { cameraId: tenantA.camera.id } }),
+    ).toBe(1);
+    expect(
+      await snapshotAccessor.findById(tenantA.space.id, first.id),
+    ).toMatchObject({ byteSize: 'second-frame'.length });
+
+    // Another space's camera id is not writable through this path either.
+    expect(
+      await snapshotAccessor.upsertLive(tenantB.space.id, {
+        ...row('cross-tenant', '2026-01-01T00:02:00Z'),
+      }),
+    ).toBeNull();
+  });
+
   it('resolves the latest snapshot per camera and records capture outcomes', async () => {
     const tenantA = await createTenant('freshness');
     const tenantB = await createTenant('freshness-other');

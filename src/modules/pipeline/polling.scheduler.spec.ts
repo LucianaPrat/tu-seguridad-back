@@ -35,7 +35,7 @@ describe('PollingScheduler', () => {
   let configService: { get: jest.Mock; getOrThrow: jest.Mock };
   let dvrAccessor: { findSpaceIdsWithDvr: jest.Mock };
   let cameraAccessor: { findPollableBySpace: jest.Mock };
-  let snapshotService: { capture: jest.Mock };
+  let snapshotService: { capture: jest.Mock; store: jest.Mock };
   let pipelineService: { processImage: jest.Mock };
   let statusRegistry: { record: jest.Mock; incrementSkipped: jest.Mock };
   let schedulerRegistry: { addInterval: jest.Mock; deleteInterval: jest.Mock };
@@ -54,6 +54,7 @@ describe('PollingScheduler', () => {
     cameraAccessor = { findPollableBySpace: jest.fn().mockResolvedValue([]) };
     snapshotService = {
       capture: jest.fn().mockResolvedValue(buildData(capturedImage)),
+      store: jest.fn().mockResolvedValue(buildData({ id: 'snapshot-uuid' })),
     };
     pipelineService = {
       processImage: jest
@@ -146,7 +147,35 @@ describe('PollingScheduler', () => {
       await inFlight;
     });
 
-    it('records the capture failure and does not run detection', async () => {
+    it('refreshes the live frame on every successful poll, alert or not', async () => {
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.store).toHaveBeenCalledWith(
+        'space-a',
+        'camera-a1',
+        capturedImage,
+        true,
+      );
+    });
+
+    it('records a failed live write and still runs detection', async () => {
+      snapshotService.store.mockResolvedValue(
+        buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'Snapshot is larger than the 1 byte limit',
+        ),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(1);
+      expect(statusRegistry.record).toHaveBeenCalledWith(
+        'camera-a1',
+        expect.objectContaining({ lastErrorCode: ErrorCode.VALIDATION_ERROR }),
+      );
+    });
+
+    it('records the capture failure and does not store or run detection', async () => {
       snapshotService.capture.mockResolvedValue(
         buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
       );
@@ -157,6 +186,7 @@ describe('PollingScheduler', () => {
         'camera-a1',
         expect.objectContaining({ lastErrorCode: ErrorCode.UPSTREAM_TIMEOUT }),
       );
+      expect(snapshotService.store).not.toHaveBeenCalled();
       expect(pipelineService.processImage).not.toHaveBeenCalled();
     });
 

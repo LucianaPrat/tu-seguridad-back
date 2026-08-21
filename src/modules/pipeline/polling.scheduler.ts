@@ -104,6 +104,27 @@ export class PollingScheduler
       }
 
       await this.pipelineService.processImage(spaceId, camera, captured.data);
+
+      // Every successful poll refreshes the camera's live frame, so the grid
+      // has a thumbnail and the zone editor a backdrop for a camera that never
+      // alerted. One row per camera, overwritten in place: the alternative was
+      // a BLOB per tick with no retention to clean it up.
+      //
+      // Written after detection, and its failure only recorded: a thumbnail
+      // write must never suppress an alert, and a silent failure would show up
+      // as a thumbnail that stops refreshing with nothing pointing at why.
+      const live = await this.snapshotService.store(
+        spaceId,
+        camera.id,
+        captured.data,
+        true,
+      );
+      if (!live.ok) {
+        this.statusRegistry.record(camera.id, {
+          lastErrorAt: new Date(),
+          lastErrorCode: live.code,
+        });
+      }
     } finally {
       this.inFlight.delete(camera.id);
     }

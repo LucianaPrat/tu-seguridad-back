@@ -79,11 +79,15 @@ export class SnapshotService {
    * Writes the bytes to MySQL. The size ceiling is checked here as well as in
    * the DVR client because this path also takes uploads, and `MEDIUMBLOB`
    * rejects an oversized row with a driver error rather than a usable one.
+   *
+   * `isLive` picks which row is written: the camera's single live frame,
+   * overwritten every poll, or a new immutable row an alert can point at.
    */
   async store(
     spaceId: string,
     cameraId: string,
     image: CapturedImage,
+    isLive = false,
   ): Promise<Either<Snapshot>> {
     const maxBytes = this.configService.getOrThrow<number>(
       EnvNames.SNAPSHOT_MAX_BYTES,
@@ -101,7 +105,7 @@ export class SnapshotService {
       );
     }
 
-    const snapshot = await this.snapshotAccessor.create(spaceId, {
+    const row = {
       cameraId,
       // Prisma's `Bytes` input is a plain `Uint8Array`; a `Buffer` is one too,
       // but carries a wider `ArrayBufferLike` and is rejected by the types.
@@ -110,13 +114,22 @@ export class SnapshotService {
       byteSize: image.byteSize,
       sha256: image.sha256,
       capturedAt: image.capturedAt,
-    });
+    };
+    const snapshot = isLive
+      ? await this.snapshotAccessor.upsertLive(spaceId, row)
+      : await this.snapshotAccessor.create(spaceId, row);
     if (!snapshot) {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${cameraId} not found`);
     }
     return buildData(snapshot);
   }
 
+  /**
+   * The on-demand capture behind `POST /cameras/:id/snapshots`. It writes the
+   * live row rather than a new one: what the operator asked for is this
+   * camera's current frame, and a row per button press is growth nothing
+   * prunes. Only an alert keeps a frame of its own.
+   */
   async captureAndStore(
     spaceId: string,
     camera: Camera,
@@ -125,7 +138,7 @@ export class SnapshotService {
     if (!captured.ok) {
       return captured;
     }
-    return this.store(spaceId, camera.id, captured.data);
+    return this.store(spaceId, camera.id, captured.data, true);
   }
 
   async read(spaceId: string, snapshotId: string): Promise<Either<Snapshot>> {
