@@ -4963,6 +4963,25 @@
           "createdAt"
         ]
       },
+      "PointDto": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "example": 12.5,
+            "description": "Percent of frame width"
+          },
+          "y": {
+            "type": "number",
+            "example": 20,
+            "description": "Percent of frame height"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      },
       "MonitorZoneDto": {
         "type": "object",
         "properties": {
@@ -4990,6 +5009,13 @@
             "type": "number",
             "example": 40
           },
+          "points": {
+            "description": "Outline of the zone. A rectangular zone answers the four corners of its rectangle, so a client only ever draws one shape.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PointDto"
+            }
+          },
           "alertType": {
             "type": "string",
             "enum": [
@@ -5013,6 +5039,7 @@
           "y",
           "width",
           "height",
+          "points",
           "alertType",
           "createdAt",
           "updatedAt"
@@ -5023,19 +5050,31 @@
         "properties": {
           "x": {
             "type": "number",
-            "example": 12.5
+            "example": 12.5,
+            "description": "Percent of frame width. Required unless `points` is sent."
           },
           "y": {
             "type": "number",
-            "example": 20
+            "example": 20,
+            "description": "Percent of frame height. Required unless `points` is sent."
           },
           "width": {
             "type": "number",
-            "example": 30
+            "example": 30,
+            "description": "Required unless `points` is sent."
           },
           "height": {
             "type": "number",
-            "example": 40
+            "example": 40,
+            "description": "Required unless `points` is sent."
+          },
+          "points": {
+            "nullable": true,
+            "description": "Free-hand outline, percent of frame. When present it is the shape of the zone, and x/y/width/height are re-derived from it as its bounding box. Explicit `null` on an update clears the outline and leaves the rectangle as the shape.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PointDto"
+            }
           },
           "alertType": {
             "type": "string",
@@ -5047,10 +5086,6 @@
           }
         },
         "required": [
-          "x",
-          "y",
-          "width",
-          "height",
           "alertType"
         ]
       },
@@ -5059,19 +5094,31 @@
         "properties": {
           "x": {
             "type": "number",
-            "example": 12.5
+            "example": 12.5,
+            "description": "Percent of frame width. Required unless `points` is sent."
           },
           "y": {
             "type": "number",
-            "example": 20
+            "example": 20,
+            "description": "Percent of frame height. Required unless `points` is sent."
           },
           "width": {
             "type": "number",
-            "example": 30
+            "example": 30,
+            "description": "Required unless `points` is sent."
           },
           "height": {
             "type": "number",
-            "example": 40
+            "example": 40,
+            "description": "Required unless `points` is sent."
+          },
+          "points": {
+            "nullable": true,
+            "description": "Free-hand outline, percent of frame. When present it is the shape of the zone, and x/y/width/height are re-derived from it as its bounding box. Explicit `null` on an update clears the outline and leaves the rectangle as the shape.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PointDto"
+            }
           },
           "alertType": {
             "type": "string",

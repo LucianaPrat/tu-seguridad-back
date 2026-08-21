@@ -29,6 +29,7 @@ function buildZone(
   id: string,
   rectangle: { x: number; y: number; width: number; height: number },
   alertType: 'intruder' | 'suspicious',
+  points: MonitorZone['points'] = null,
 ): MonitorZone {
   return {
     id,
@@ -37,6 +38,7 @@ function buildZone(
     y: new Prisma.Decimal(rectangle.y),
     width: new Prisma.Decimal(rectangle.width),
     height: new Prisma.Decimal(rectangle.height),
+    points,
     alertType,
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -188,6 +190,45 @@ describe('PipelineService', () => {
         { zoneId: 'zone-left', alertType: 'intruder', occupied: false },
         { zoneId: 'zone-middle', alertType: 'suspicious', occupied: true },
       ]);
+    }
+  });
+
+  /**
+   * The notch of an L sits inside the bounding box the columns store. If the
+   * outline were lost between the JSON column and the engine, the box would
+   * answer for the shape and this anchor would raise an alert.
+   */
+  it('tests the anchor against the stored outline, not its bounding box', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
+    zoneAccessor.findByCamera.mockResolvedValue([
+      buildZone(
+        'zone-l',
+        { x: 40, y: 40, width: 20, height: 20 },
+        'intruder',
+        // An L open at the top right; the anchor at 50,50 lands in the notch.
+        [
+          { x: 40, y: 40 },
+          { x: 45, y: 40 },
+          { x: 45, y: 55 },
+          { x: 60, y: 55 },
+          { x: 60, y: 60 },
+          { x: 40, y: 60 },
+        ],
+      ),
+    ]);
+
+    const result = await service.processImage(
+      spaceId,
+      buildCamera({ monitorMode: 'partial', alertType: 'intruder' }),
+      image,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.zoneResults).toEqual([
+        { zoneId: 'zone-l', alertType: 'intruder', occupied: false },
+      ]);
+      expect(result.data.alerts).toHaveLength(0);
     }
   });
 

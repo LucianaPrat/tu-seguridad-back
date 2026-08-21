@@ -1,6 +1,6 @@
 import { AlertType } from '@prisma/client';
 import { PipelineDefaults } from '../../cross/common/constants';
-import { containsPoint, Point, Rectangle } from '../zones/rectangle';
+import { containsPoint, Point, ZoneArea } from '../zones/rectangle';
 
 type OccupancyStateName =
   'Outside' | 'CandidateInside' | 'Inside' | 'CandidateOutside';
@@ -14,7 +14,7 @@ export interface ZoneInput {
   /** `null` for the implicit full-frame area of a `monitorMode = full` camera. */
   zoneId: string | null;
   alertType: AlertType;
-  rectangle: Rectangle;
+  area: ZoneArea;
 }
 
 export interface AnchorWithScore {
@@ -60,7 +60,7 @@ export class OccupancyEngine {
       const key = this.key(cameraId, zone.zoneId);
       const current = this.states.get(key) ?? OUTSIDE;
       const anchorsInside = anchors.filter((candidate) =>
-        containsPoint(zone.rectangle, candidate.anchor),
+        containsPoint(zone.area, candidate.anchor),
       );
 
       const { state: next, transition } = this.nextState(

@@ -24,6 +24,7 @@ interface ZoneBody {
   y: number;
   width: number;
   height: number;
+  points: { x: number; y: number }[];
   alertType: string;
 }
 
@@ -102,6 +103,112 @@ describe('Monitor zones (e2e)', () => {
       height: 40,
       alertType: 'intruder',
     });
+  });
+
+  it('answers the corners of the rectangle when no outline was drawn', async () => {
+    const res = await createZone(validZone);
+
+    expect(typedBody<ZoneBody>(res).points).toEqual([
+      { x: 10.5, y: 20 },
+      { x: 40.5, y: 20 },
+      { x: 40.5, y: 60 },
+      { x: 10.5, y: 60 },
+    ]);
+  });
+
+  const triangle = [
+    { x: 30, y: 10 },
+    { x: 10, y: 40 },
+    { x: 50, y: 25 },
+  ];
+
+  it('stores a free-hand outline and derives the rectangle from it', async () => {
+    // No box is sent: the outline is the shape, and the box is its bounds.
+    const res = await createZone({
+      alertType: 'intruder',
+      points: triangle,
+    });
+
+    expect(res.status).toBe(201);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      x: 10,
+      y: 10,
+      width: 40,
+      height: 30,
+      points: triangle,
+    });
+  });
+
+  it('ignores a box sent alongside an outline', async () => {
+    const res = await createZone({
+      ...validZone,
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      points: triangle,
+    });
+
+    expect(res.status).toBe(201);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      x: 10,
+      y: 10,
+      width: 40,
+      height: 30,
+    });
+  });
+
+  it('turns a free-hand zone back into a rectangle on explicit null', async () => {
+    const zone = typedBody<ZoneBody>(
+      await createZone({ alertType: 'intruder', points: triangle }),
+    );
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/zones/${zone.id}`)
+      .set(auth())
+      .send({ points: null, x: 10, y: 20, width: 30, height: 40 });
+
+    expect(res.status).toBe(200);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      // Outline gone, so the zone answers the corners of its rectangle.
+      points: [
+        { x: 10, y: 20 },
+        { x: 40, y: 20 },
+        { x: 40, y: 60 },
+        { x: 10, y: 60 },
+      ],
+    });
+  });
+
+  it('rejects an outline of two points', async () => {
+    const res = await createZone({
+      ...validZone,
+      points: [
+        { x: 10, y: 10 },
+        { x: 20, y: 20 },
+      ],
+    });
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects an outline point outside 0..100', async () => {
+    const res = await createZone({
+      ...validZone,
+      points: [
+        { x: 10, y: 10 },
+        { x: 120, y: 10 },
+        { x: 10, y: 40 },
+      ],
+    });
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
   });
 
   it('rejects a rectangle that leaves the frame', async () => {

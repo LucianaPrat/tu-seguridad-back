@@ -29,7 +29,7 @@ Two accessors carry a transaction because the invariant spans tables and the dat
 
 ## Domain model
 
-`prisma/schema.prisma` is the source of truth for exact fields; [`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md) §3 is the source of truth for why each relation looks the way it does. The shape in one line: a `Space` is the tenant root, a user belongs to exactly one space through `SpaceMember` (unique on `userId`, so the database enforces it), a space has exactly one `Dvr` (unique on `spaceId`), a DVR owns its discovered `Camera` rows (unique on `(dvrId, externalId)`), and a camera owns percentage-rectangle `MonitorZone` rows. History hangs off the space directly: `AlertEvent` keeps the camera label and alert type copied at detection time and lets its camera/zone/snapshot FKs go `SET NULL`, so a future physical purge cannot erase what happened.
+`prisma/schema.prisma` is the source of truth for exact fields; [`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md) §3 is the source of truth for why each relation looks the way it does. The shape in one line: a `Space` is the tenant root, a user belongs to exactly one space through `SpaceMember` (unique on `userId`, so the database enforces it), a space has exactly one `Dvr` (unique on `spaceId`), a DVR owns its discovered `Camera` rows (unique on `(dvrId, externalId)`), and a camera owns `MonitorZone` rows, each a percentage outline with its bounding box. History hangs off the space directly: `AlertEvent` keeps the camera label and alert type copied at detection time and lets its camera/zone/snapshot FKs go `SET NULL`, so a future physical purge cannot erase what happened.
 
 Deviations worth knowing:
 

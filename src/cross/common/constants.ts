@@ -154,4 +154,12 @@ export const ZoneGeometry = {
   MIN_PERCENT: 0,
   MAX_PERCENT: 100,
   DECIMAL_PLACES: 2,
+  /** Fewer than three points enclose no area, so they are not an outline. */
+  MIN_OUTLINE_POINTS: 3,
+  /**
+   * A hand-drawn outline is sampled every percent or so of the frame, which
+   * lands well under this. The cap is what keeps a crafted request from
+   * writing an unbounded JSON document per zone.
+   */
+  MAX_OUTLINE_POINTS: 500,
 } as const;
