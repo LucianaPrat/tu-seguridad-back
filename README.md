@@ -197,10 +197,38 @@ video. Why this shape and what was rejected:
 Hikvision DVR  --RTSP/H.264-->  MediaMTX  --HLS-->  hls.js  -->  <video>
 ```
 
-The backend never touches a media packet. `GET /cameras/:id/live` authorizes the camera, registers
-its path with MediaMTX's Control API, and answers `{ protocol: 'hls', url }`. MediaMTX pulls the
-recorder only while somebody is watching (`sourceOnDemand`) and repackages without transcoding while
-the channel is H.264.
+**MediaMTX is a separate process, not a library in this API.** The backend never touches a media
+packet: `GET /cameras/:id/live` authorizes the camera, registers its path with MediaMTX's Control
+API, and answers `{ protocol: 'hls', url }`. From there the browser talks to the media server
+directly. MediaMTX pulls the recorder only while somebody is watching (`sourceOnDemand`) and
+repackages without transcoding while the channel is H.264.
+
+### Running it locally
+
+The media server ships here as a container. Nothing in the API needs it to boot —
+`MEDIAMTX_ENABLED=false` is the default and makes `GET /cameras/:id/live` answer `CONFLICT` without
+contacting anything.
+
+```bash
+scripts/mediamtx.sh env      # add the four MEDIAMTX_* keys to .env (idempotent)
+scripts/mediamtx.sh up       # start the container, then verify every leg
+```
+
+`scripts/mediamtx.sh check` is the thing to run when a live view will not play. It exercises the
+real path rather than reading configuration: it registers a throwaway path over the Control API, asks
+for its playlist without a token, and expects the `401` that proves MediaMTX reached
+`POST /api/v1/streaming/authorize` and honoured its answer. It also preflights the HLS endpoint from
+the frontend's origin, which is where a working setup usually fails — hls.js sends the token as a
+header, so every request is preflighted, and a mismatched `hlsAllowOrigins` kills playback with
+nothing logged on either side.
+
+Config lives in [`docker/mediamtx.yml`](docker/mediamtx.yml) and is mounted, not baked, so there is
+no Dockerfile and no rebuild to change a port. Two settings there are load-bearing and easy to break:
+`authHTTPExclude` must keep `action: api` or MediaMTX denies this API's own path registrations, and
+the container reaches the API over `host.docker.internal` because loopback inside a container is the
+container. `docker-compose.yml` publishes ports rather than using `network_mode: host`: host
+networking is a no-op on any VM-backed engine, Docker Desktop for Linux included, and it fails
+silently with MediaMTX logging that it is listening.
 
 **The URL is not a credential.** The path name is the camera id, and MediaMTX asks
 `POST /api/v1/streaming/authorize` to authorize the playlist and every segment. The frontend
