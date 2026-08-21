@@ -111,14 +111,22 @@ describe('Monitor zones (e2e)', () => {
     expect(typedBody<ErrorBody>(res).code).toBe('INVALID_ZONE');
   });
 
-  it('rejects coordinates outside 0..100 and finer than two decimals', async () => {
+  it('rejects coordinates outside 0..100', async () => {
     const outOfRange = await createZone({ ...validZone, y: 120 });
+
     expect(outOfRange.status).toBe(400);
     expect(typedBody<ErrorBody>(outOfRange).code).toBe('VALIDATION_ERROR');
+  });
 
-    const tooPrecise = await createZone({ ...validZone, x: 10.555 });
-    expect(tooPrecise.status).toBe(400);
-    expect(typedBody<ErrorBody>(tooPrecise).code).toBe('VALIDATION_ERROR');
+  it('rounds coordinates finer than two decimals instead of rejecting them', async () => {
+    const res = await createZone({
+      ...validZone,
+      x: 10.5678,
+      width: 30.004,
+    });
+
+    expect(res.status).toBe(201);
+    expect(typedBody<ZoneBody>(res)).toMatchObject({ x: 10.57, width: 30 });
   });
 
   it('arms the camera with its first zone and disarms it with the last', async () => {

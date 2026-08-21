@@ -112,7 +112,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `POST /api/v1/cameras/:id/snapshots` | Pulls a frame from the recorder now, stores it, answers with its authenticated URL. |
 | `POST /api/v1/cameras/:id/analyze` | Multipart `file` upload (image, max `SNAPSHOT_MAX_BYTES`): runs the detection pipeline synchronously — manual path when the DVR is unreachable. |
 | `GET /api/v1/snapshots/:id` | The stored image bytes, space-scoped. The only route that serves them. |
-| `GET/POST /api/v1/cameras/:id/zones` | List / create percentage-rectangle monitor zones. Creating is admin-only. |
+| `GET/POST /api/v1/cameras/:id/zones` | List / create percentage-rectangle monitor zones. Coordinates are rounded to two decimals — the stored precision — before the frame-bounds check. Creating is admin-only. |
 | `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` validates the merged rectangle; `DELETE` is logical. Both admin-only. |
 | `GET /api/v1/events` | Alert history of the caller's space, newest first. Filters: `alertType`, `from` (ISO 8601 lower bound). Keyset pagination: `limit` (default 25, max 100) plus the opaque `cursor` echoed back as `nextCursor`. |
 | `GET /api/v1/events/:id` | One alert event. Carries the camera label copied at detection time, so a renamed or deleted camera does not rewrite it. |
