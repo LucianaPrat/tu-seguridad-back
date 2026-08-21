@@ -41,4 +41,22 @@ export abstract class DvrClientPort {
     connection: DvrConnection,
     externalId: string,
   ): Promise<Either<CapturedImage>>;
+
+  /**
+   * The RTSP URL of one channel's live stream, credentials included.
+   *
+   * Pure string building — nothing here can tell whether the recorder answers,
+   * so a URL coming back is not a claim that the stream plays. It returns
+   * `Either` for one reason: a stored `externalId` is still external input and
+   * has to be refused before it lands in a URL.
+   *
+   * Third method on a port that justified having only two, because the channel
+   * numbering it encodes is the same vendor dialect `captureSnapshot` already
+   * speaks. A media server that only knows "some RTSP URL" is the alternative,
+   * and that puts the recorder's dialect in the media server's configuration.
+   */
+  abstract streamUrl(
+    connection: DvrConnection,
+    externalId: string,
+  ): Either<string>;
 }

@@ -85,6 +85,7 @@ describe('HttpDvrClientService', () => {
 
   let httpService: { get: jest.Mock };
   let configService: { get: jest.Mock; getOrThrow: jest.Mock };
+  let envValues: Record<string, number | string>;
   let client: HttpDvrClientService;
 
   /** Answers the challenge on the first call and the payload on the retry. */
@@ -110,14 +111,16 @@ describe('HttpDvrClientService', () => {
 
   beforeEach(() => {
     httpService = { get: jest.fn() };
-    const values: Record<string, number> = {
+    envValues = {
       [EnvNames.DVR_TIMEOUT_MS]: 5000,
       [EnvNames.SNAPSHOT_TIMEOUT_MS]: 5000,
       [EnvNames.SNAPSHOT_MAX_BYTES]: maxBytes,
+      [EnvNames.DVR_RTSP_PORT]: 554,
+      [EnvNames.DVR_RTSP_STREAM]: 'sub',
     };
     configService = {
-      get: jest.fn((key: string) => values[key]),
-      getOrThrow: jest.fn((key: string) => values[key]),
+      get: jest.fn((key: string) => envValues[key]),
+      getOrThrow: jest.fn((key: string) => envValues[key]),
     };
     client = new HttpDvrClientService(
       httpService as never,
@@ -401,6 +404,81 @@ describe('HttpDvrClientService', () => {
       );
 
       expect(httpService.get).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+    });
+  });
+
+  describe('streamUrl', () => {
+    it('builds the sub-stream channel on the RTSP port, not the ISAPI one', () => {
+      const result = client.streamUrl(connection, '3');
+
+      expect(result).toEqual({
+        ok: true,
+        data: 'rtsp://admin:dvr-password@192.168.1.250:554/Streaming/Channels/302',
+      });
+    });
+
+    it('builds the main stream when configured to', () => {
+      envValues[EnvNames.DVR_RTSP_STREAM] = 'main';
+
+      const result = client.streamUrl(connection, '3');
+
+      expect(result).toMatchObject({
+        data: 'rtsp://admin:dvr-password@192.168.1.250:554/Streaming/Channels/301',
+      });
+    });
+
+    it('honours a non-default RTSP port', () => {
+      envValues[EnvNames.DVR_RTSP_PORT] = 10554;
+
+      const result = client.streamUrl(connection, '3');
+
+      expect(result).toMatchObject({
+        data: 'rtsp://admin:dvr-password@192.168.1.250:10554/Streaming/Channels/302',
+      });
+    });
+
+    // A raw `@` would move the host, a raw `/` the path.
+    it('encodes credentials that would otherwise re-point the url', () => {
+      const result = client.streamUrl(
+        { url: 'http://dvr.local', username: 'ad min', password: 'p@ss/w:rd' },
+        '4',
+      );
+
+      expect(result).toMatchObject({
+        data: 'rtsp://ad%20min:p%40ss%2Fw%3Ard@dvr.local:554/Streaming/Channels/402',
+      });
+    });
+
+    // `URL.hostname` keeps the brackets an IPv6 literal needs in front of the
+    // port, so the host goes through untouched.
+    it('keeps an IPv6 host bracketed', () => {
+      const result = client.streamUrl(
+        { ...connection, url: 'http://[fd00::1]/' },
+        '1',
+      );
+
+      expect(result).toMatchObject({
+        data: 'rtsp://admin:dvr-password@[fd00::1]:554/Streaming/Channels/102',
+      });
+    });
+
+    /** Same rule as the snapshot path: a stored id is still external input. */
+    it('refuses a channel identifier that is not a video input number', () => {
+      const result = client.streamUrl(connection, '4/../../System/deviceInfo');
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+    });
+
+    it('refuses a stored base url that cannot be parsed', () => {
+      const result = client.streamUrl({ ...connection, url: 'not a url' }, '3');
+
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.VALIDATION_ERROR,

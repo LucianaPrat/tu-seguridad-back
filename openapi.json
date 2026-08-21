@@ -2810,6 +2810,207 @@
         ]
       }
     },
+    "/api/v1/cameras/{id}/live": {
+      "get": {
+        "description": "Registers the camera with the media server if it is not registered yet and answers where to play it. The media server pulls RTSP from the recorder only while somebody is watching, and repackages it as HLS without transcoding. The recorder credentials never appear in the answer: the returned URL is not a secret, and the media server asks this API to authorize the playlist and every segment, so each request has to carry the caller bearer token. Play it with `hls.js`, attaching the token through `xhrSetup`. Off by default: without `MEDIAMTX_ENABLED` this answers `CONFLICT`.",
+        "operationId": "CamerasController_live_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Camera id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where and how to play the camera.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveStreamDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — The stored channel or recorder URL cannot be turned into a stream address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No camera with that id in the caller space, or the space has no recorder.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The camera is disabled, or live streaming is not configured on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The media server refused the registration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The media server did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get the live stream of a camera",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
     "/api/v1/cameras/{id}/snapshots": {
       "post": {
         "description": "Pulls a frame from the recorder immediately instead of waiting for the next poll, stores it, and answers its metadata including the authenticated URL to read the bytes from `GET /snapshots/{id}`. Runs no detection — use `POST /cameras/{id}/analyze` for that.",
@@ -3605,6 +3806,162 @@
         "summary": "List the delivery attempts of an alert",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/api/v1/streaming/authorize": {
+      "post": {
+        "description": "The hook MediaMTX calls for a playlist and for every segment. Public: the media server has no session, and it forwards the reader bearer token in the body instead of the header, so this route validates the token itself with the same verifier the bearer guard uses. Only `read` over `hls` is ever authorized, and only for a camera inside the space the token names. MediaMTX reads the status code: 200 admits the reader, anything else refuses it.",
+        "operationId": "StreamingController_authorize_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamAuthorizationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reader admitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamAuthorizationResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — The media server sent a field this API does not declare.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — No token, an expired or invalid one, a refresh token, or one carrying no space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — A action other than `read`, a protocol other than `hls`, or an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The path names no camera in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The camera is disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "summary": "Authorize one media-server request",
+        "tags": [
+          "streaming"
         ]
       }
     },
@@ -4785,6 +5142,27 @@
           }
         }
       },
+      "LiveStreamDto": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "hls"
+            ],
+            "description": "How to play `url`. Present from the first version so a second transport is a new value here rather than a second endpoint."
+          },
+          "url": {
+            "type": "string",
+            "example": "http://127.0.0.1:8888/6f1c.../index.m3u8",
+            "description": "The HLS playlist, served by the media server and not by this API. Every request for it and for each segment must carry the caller bearer token — the media server asks this API to authorize each one, so nothing about the URL itself grants access."
+          }
+        },
+        "required": [
+          "protocol",
+          "url"
+        ]
+      },
       "SnapshotDto": {
         "type": "object",
         "properties": {
@@ -4964,6 +5342,61 @@
           "recipientUserId",
           "status",
           "createdAt"
+        ]
+      },
+      "StreamAuthorizationDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "What the caller is trying to do. Only `read` is ever authorized: a granted `publish` would let someone push their own video into a camera path and the dashboard would render it as that camera's feed."
+          },
+          "path": {
+            "type": "string",
+            "description": "The media-server path being requested. This is a camera id."
+          },
+          "token": {
+            "type": "string",
+            "description": "The bearer token hls.js attached to the request. Validated as a normal access token — the same secret, the same claims, the same refusal of a refresh token."
+          },
+          "protocol": {
+            "type": "string",
+            "description": "Transport the reader used. Only `hls` is handed out."
+          },
+          "user": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "path"
+        ]
+      },
+      "StreamAuthorizationResultDto": {
+        "type": "object",
+        "properties": {
+          "authorized": {
+            "type": "boolean",
+            "description": "Always `true` when the call succeeds. MediaMTX reads the status code, not the body; the body exists so a human debugging the hook sees an answer."
+          }
+        },
+        "required": [
+          "authorized"
         ]
       },
       "PointDto": {

@@ -26,8 +26,18 @@ import {
  */
 const CHANNELS_PATH = '/ISAPI/System/Video/inputs/channels';
 const MAIN_STREAM = '01';
+const SUB_STREAM = '02';
 const snapshotPath = (port: string) =>
   `/ISAPI/Streaming/channels/${port}${MAIN_STREAM}/picture?snapShotImageType=JPEG`;
+
+/**
+ * RTSP takes the same two-part channel id as the snapshot path, but not the
+ * `/ISAPI` prefix and not the base URL's port: it is a separate service. A base
+ * URL carrying its own path prefix is therefore irrelevant here, unlike on the
+ * signed HTTP request line.
+ */
+const rtspPath = (port: string, stream: string) =>
+  `/Streaming/Channels/${port}${stream}`;
 
 /** A BNC port number, and the only shape allowed to reach a request path. */
 const CHANNEL_PORT = /^\d{1,2}$/;
@@ -150,6 +160,41 @@ export class HttpDvrClientService extends DvrClientPort {
     } catch (error) {
       return this.mapError(error, 'DVR snapshot fetch');
     }
+  }
+
+  streamUrl(connection: DvrConnection, externalId: string): Either<string> {
+    if (!CHANNEL_PORT.test(externalId)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR channel is not a video input number',
+      );
+    }
+
+    let host: string;
+    try {
+      // `hostname` keeps the brackets an IPv6 literal needs in front of `:port`,
+      // and drops the base URL's own port, which is the HTTP one.
+      host = new URL(connection.url).hostname;
+    } catch {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR base URL cannot be parsed',
+      );
+    }
+
+    const port = this.configService.get<number>(EnvNames.DVR_RTSP_PORT);
+    const stream =
+      this.configService.get<string>(EnvNames.DVR_RTSP_STREAM) === 'main'
+        ? MAIN_STREAM
+        : SUB_STREAM;
+    // Encoded rather than interpolated raw: a password holding `@`, `:` or `/`
+    // would otherwise move the host or the path.
+    const user = encodeURIComponent(connection.username);
+    const secret = encodeURIComponent(connection.password);
+
+    return buildData(
+      `rtsp://${user}:${secret}@${host}:${port}${rtspPath(externalId, stream)}`,
+    );
   }
 
   /**

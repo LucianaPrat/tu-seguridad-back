@@ -27,6 +27,7 @@ Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md),
 | Logging | `nestjs-pino`, structured JSON, request id, redaction |
 | Tracing | OpenTelemetry, opt-in via `OTEL_ENABLED`, `withSpan` helper |
 | Error tracking | `@sentry/node`, opt-in via `SENTRY_DSN`, unexpected 500s only, secrets scrubbed |
+| Live video | MediaMTX sidecar restreams the recorder RTSP as HLS, on demand, no transcoding — opt-in via `MEDIAMTX_ENABLED` |
 | Resilience | `opossum` circuit breaker around face-auth upstream (in-memory, no infra) |
 | API contract | committed `openapi.json`, exported by `scripts/export-openapi.ts`, diff-checked in CI |
 | Supply chain | `npm audit` gate (prod deps, critical) + Dependabot (weekly, targets `develop`) |
@@ -109,6 +110,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `PUT /api/v1/cameras/:id` | Space admin. Operator-editable fields only — `externalId` and `status` are rejected. Full-frame monitoring requires an `alertType`. |
 | `DELETE /api/v1/cameras/:id` | Space admin. Logical delete: the camera leaves every read and the poll list, its alert history stays. |
 | `GET /api/v1/cameras/:id/status` | Pipeline status: last poll/success/error, latency, occupancy per monitored area. |
+| `GET /api/v1/cameras/:id/live` | Where to play the camera: `{protocol: 'hls', url}`. Registers the channel with the media server, which pulls RTSP only while somebody watches. Carries no recorder credential, and the URL is not a secret — every playlist and segment is authorized separately. Answers `CONFLICT` when `MEDIAMTX_ENABLED` is off. |
 | `POST /api/v1/cameras/:id/snapshots` | Pulls a frame from the recorder now, stores it, answers with its authenticated URL. |
 | `POST /api/v1/cameras/:id/analyze` | Multipart `file` upload (image, max `SNAPSHOT_MAX_BYTES`): runs the detection pipeline synchronously — manual path when the DVR is unreachable. |
 | `GET /api/v1/snapshots/:id` | The stored image bytes, space-scoped. The only route that serves them. |
@@ -118,6 +120,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `GET /api/v1/events/:id` | One alert event. Carries the camera label copied at detection time, so a renamed or deleted camera does not rewrite it. |
 | `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. |
 | `POST /api/v1/events/acknowledgements` | Public provider webhook. Body `{ correlationId }`. Answers `202 { accepted: true }` for a match, a repeat and an unknown id alike, so it reveals no event. Idempotent: the first callback acknowledges the event, later ones change nothing. |
+| `POST /api/v1/streaming/authorize` | Public media-server hook, called for the HLS playlist and **every** segment. The reader bearer token arrives in the body, validated by the same verifier the bearer guard uses. Only `read` over `hls`, only a camera inside the space the token names — a granted `publish` would let someone feed fake video to the dashboard. |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
 | `GET /health/dependencies` | Public. Separate from `ready`: short-timeout reachability check against face-auth upstream. Degraded upstream reports here **without** marking whole app not-ready (camera/zone CRUD still works). |
 | WS namespace `/events` | JWT in handshake `auth.token`; the socket joins a room for the `spaceId` in its own claims, so an alert is fanned out only to its space. Emits `alert-event` with the same shape as `GET /api/v1/events/:id`. A token carrying no space is rejected. Clients are disconnected cleanly on graceful shutdown. |
@@ -183,6 +186,44 @@ What that means operationally:
 
 Moving to object storage later touches the snapshot accessor, the snapshot service and the URL mapper — the rest of the domain refers to snapshots by id and does not care where the bytes are.
 
+## Live streaming
+
+Still frames and live video are two different paths on purpose. The configuration screens and the
+zone editor read the stored snapshot ([Snapshot storage](#snapshot-storage)); the dashboard plays
+video. Why this shape and what was rejected:
+[`docs/decisions/002-hls-live-streaming.md`](docs/decisions/002-hls-live-streaming.md).
+
+```
+Hikvision DVR  --RTSP/H.264-->  MediaMTX  --HLS-->  hls.js  -->  <video>
+```
+
+The backend never touches a media packet. `GET /cameras/:id/live` authorizes the camera, registers
+its path with MediaMTX's Control API, and answers `{ protocol: 'hls', url }`. MediaMTX pulls the
+recorder only while somebody is watching (`sourceOnDemand`) and repackages without transcoding while
+the channel is H.264.
+
+**The URL is not a credential.** The path name is the camera id, and MediaMTX asks
+`POST /api/v1/streaming/authorize` to authorize the playlist and every segment. The frontend
+attaches its ordinary access token as a header — nothing new is minted, no token in a query string:
+
+```js
+const hls = new Hls({
+  xhrSetup: (xhr) => xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`),
+})
+hls.loadSource(url) // the `url` from GET /cameras/:id/live
+hls.attachMedia(videoElement)
+```
+
+Only `read` over `hls` is ever authorized. A granted `publish` would let a caller push their own
+video into a camera's path and the dashboard would render it as that camera's feed.
+
+**Off by default.** Without `MEDIAMTX_ENABLED` the route answers `CONFLICT` and nothing is
+contacted, so local dev and CI need no media server. The recorder password reaches MediaMTX — nothing
+else can open the RTSP connection — and never reaches the browser.
+
+**Not solved yet:** the recorder sits on a LAN behind NAT, so a MediaMTX outside that network cannot
+see it. Today both run on the same LAN. Opening port 554 to the internet is not the fix; a tunnel is.
+
 ## Observability, resilience & supply chain
 
 Infra concerns handled by frameworks below. **Every external integration is opt-in and no-ops cleanly when its env var is unset** — same posture as `OTEL_ENABLED`. Local dev never depends on running external service; production turns each on via env.
@@ -193,6 +234,7 @@ Infra concerns handled by frameworks below. **Every external integration is opt-
 | Tracing | OpenTelemetry SDK | `src/observability/tracing.ts`, `tracing.helpers.ts` | Opt-in via `OTEL_ENABLED`. Loaded **before** `ConfigModule` (reads `dotenv` itself). `withSpan(name, attrs, fn)` wraps spans; no-op when disabled. |
 | Error tracking | `@sentry/node` | `src/observability/sentry.ts`, `main.ts`, `either.interceptor.ts` | Opt-in via `SENTRY_DSN`. `initSentry()` runs before `NestFactory.create`. `Sentry.captureException` fires **only** on interceptor's unexpected-500 branch — never for `Either` failures or mapped `HttpException` (no routine 4xx noise). `beforeSend`/`beforeBreadcrumb` both run `scrubSensitive`, which redacts every name in `SENSITIVE_FIELD_NAMES` — the same list the logging row above reads — at any depth in the event or breadcrumb, so a new secret-bearing field is added in one place. Unset DSN = zero network activity. |
 | Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
+| Live video | MediaMTX (external) | `src/modules/streaming/` | Opt-in via `MEDIAMTX_ENABLED`. Off = one `CONFLICT`, nothing contacted. On = the path is registered through the Control API with `sourceOnDemand`, so the recorder RTSP is pulled only while somebody watches and dropped when the last reader leaves. This process never touches a media packet. See [`docs/decisions/002-hls-live-streaming.md`](docs/decisions/002-hls-live-streaming.md). |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
 | Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
@@ -209,7 +251,7 @@ Three levels, matching plan's convention:
 |---|---|---|---|
 | Unit | `*.spec.ts` | `npm test` | Nothing — no DB, no network. |
 | Integration | `*.int-spec.ts` | `npm run test:int` | Real local MySQL, `DATABASE_URL_TEST`. Truncates tables — **never** point it at the dev database. |
-| E2E | `*.e2e-spec.ts` | `npm run test:e2e` | Same test DB; boots the real app (HTTP + WebSocket). Three ports are faked in `test/utils/bootstrap-e2e-app.ts` — face-auth detection, the DVR client, and credential delivery — so the whole tenant flow runs with no upstream, no recorder on the network and no relay, and a test can read the one-time token a real invitee would get by mail. |
+| E2E | `*.e2e-spec.ts` | `npm run test:e2e` | Same test DB; boots the real app (HTTP + WebSocket). Four ports are faked in `test/utils/bootstrap-e2e-app.ts` — face-auth detection, the DVR client, credential delivery and the stream publisher — so the whole tenant flow runs with no upstream, no recorder on the network, no relay and no media server, and a test can read the one-time token a real invitee would get by mail. |
 
 `npm run test:all` runs all three in sequence (what CI does). `npm run test:cov` runs unit coverage with enforced 80%-lines floor (`*.module.ts`/`*.dto.ts`/test files themselves excluded from coverage denominator — boilerplate, no branching logic).
 
@@ -250,6 +292,12 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `POLLING_ENABLED` | `false` | Master switch for DVR polling scheduler. |
 | `POLLING_INTERVAL_SECONDS` | `5` | Seconds between poll ticks, `1`–`3600`. One interval for the whole process, not one per camera. |
 | `DVR_TIMEOUT_MS` | `5000` | Recorder channel-discovery timeout. |
+| `DVR_RTSP_PORT` | `554` | RTSP is a separate service from the stored ISAPI base URL, which carries only the HTTP port. A knob and not a `dvrs` column because a space owns one recorder and none of them moves 554. |
+| `DVR_RTSP_STREAM` | `sub` | `sub \| main`. The sub-stream by default: the dashboard plays this in a hover-sized box, and the recorder uplink carries every viewer — roughly 0.5–1 Mbps against 2–4 for the main stream. |
+| `MEDIAMTX_ENABLED` | `false` | Master switch for live streaming. Off = `GET /cameras/:id/live` answers `CONFLICT` and no media server is contacted. |
+| `MEDIAMTX_API_URL` | `http://127.0.0.1:9997` | MediaMTX Control API. **Private by definition** — it accepts recorder credentials and authenticates nobody, so it must never be bound to a public interface. |
+| `MEDIAMTX_PUBLIC_URL` | `http://127.0.0.1:8888` | HLS base the browser reaches. Not the same address as above: one is reached by this process, the other by the operator's laptop. |
+| `MEDIAMTX_TIMEOUT_MS` | `5000` | Control API request timeout. |
 | `SNAPSHOT_TIMEOUT_MS` | `5000` | DVR snapshot fetch timeout. |
 | `SNAPSHOT_MAX_BYTES` | `2000000` | Largest frame accepted for storage or analysis, `1024`–`16777215`. The ceiling is MySQL's `MEDIUMBLOB` limit: a frame the column cannot hold is refused up front rather than after the recorder round trip and the detection call are already paid for. See [Snapshot storage](#snapshot-storage). |
 | `ENTER_CONSECUTIVE_POLLS` / `EXIT_CONSECUTIVE_POLLS` | `2` / `3` | Occupancy hysteresis thresholds. |
@@ -275,7 +323,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | [`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md) | The tenant/alert data-model plan: target relational model, cross-cutting scoping rules, T01–T08 with per-task DoD. |
 | [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md) | Live status per task, the design decisions taken along the way, verification evidence, and what was deliberately deferred. |
 | [`plans/DATA_MODEL_REQUIREMENTS.md`](plans/DATA_MODEL_REQUIREMENTS.md) | The UI-derived input for plan 03: what the frontend screens need, kept distinct from the backend decisions. |
-| [`docs/decisions/`](docs/decisions/) | Decision records. `001` — why snapshot bytes live in MySQL and what replacing that touches. |
+| [`docs/decisions/`](docs/decisions/) | Decision records. `001` — why snapshot bytes live in MySQL and what replacing that touches. `002` — why live video is RTSP into MediaMTX and HLS out, and how a segment request is authorized. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Decisions behind the layering: accessor conventions, resilience/observability choices, deviations from plan. |
 | [`AGENTS.md`](AGENTS.md) | Project facts, git identity, `Applicable standards` map, check commands, repo-specific rules, declared overrides. Read this before the central standards. |
 | [`.standards/`](.standards/README.md) | Central engineering standards, consumed as a submodule. Read order, precedence, per-stack rules. Never edited from here. |

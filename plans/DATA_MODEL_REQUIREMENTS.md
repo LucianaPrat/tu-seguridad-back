@@ -183,7 +183,9 @@ These are not style preferences.
 2. DVR rediscovery re-matches cameras by `external_id` and retains matching configuration. A
    channel missing from the DVR becomes not configured; it is not removed.
 3. Snapshot thumbnails are stored as database BLOBs. The API derives an authenticated resource URL
-   from the snapshot id. Live streaming remains undecided.
+   from the snapshot id. Live streaming was undecided when this was written; it is now RTSP into
+   MediaMTX and HLS out (`docs/decisions/002-hls-live-streaming.md`), and it did not change the
+   snapshot contract.
 4. An inbound email reply or WhatsApp reply acknowledges the corresponding event through a unique
    correlation id sent with the outbound delivery.
 5. Event deduplication/cooldown remains undecided.

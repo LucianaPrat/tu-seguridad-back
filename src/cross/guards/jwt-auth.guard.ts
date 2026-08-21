@@ -3,8 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { EnvNames, ErrorCode } from '../common/constants';
-import { JwtPayload, RefreshJwtPayload } from '../common/jwt-payload.type';
+import { verifyAccessToken } from '../common/access-token';
+import { JwtPayload } from '../common/jwt-payload.type';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { buildGuardException } from '../errors/guard-exception';
 
@@ -30,40 +30,16 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const token = this.extractToken(request);
-    if (!token) {
-      throw this.unauthorized('Missing bearer token');
+    const verified = verifyAccessToken(
+      this.jwtService,
+      this.configService,
+      this.extractToken(request),
+    );
+    if (!verified.ok) {
+      throw buildGuardException(verified.code, verified.message);
     }
 
-    let payload: JwtPayload & Partial<RefreshJwtPayload>;
-    try {
-      payload = this.jwtService.verify(token, {
-        secret: this.configService.get<string>(EnvNames.JWT_SECRET),
-      });
-    } catch {
-      throw this.unauthorized('Invalid or expired token');
-    }
-
-    if (payload.type === 'refresh') {
-      throw this.unauthorized(
-        'Refresh token cannot be used to access this resource',
-      );
-    }
-
-    // A token signed before the tenant claims existed carries no space, and a
-    // request with no space cannot be scoped to one. Reject it instead of
-    // letting a downstream accessor receive `undefined` as a spaceId.
-    if (!payload.spaceId || !payload.role) {
-      throw this.unauthorized('Token carries no space membership');
-    }
-
-    request.user = {
-      sub: payload.sub,
-      email: payload.email,
-      spaceId: payload.spaceId,
-      role: payload.role,
-      profileCompleted: payload.profileCompleted === true,
-    };
+    request.user = verified.data;
     return true;
   }
 
@@ -74,9 +50,5 @@ export class JwtAuthGuard implements CanActivate {
     }
     const [scheme, token] = header.split(' ');
     return scheme === 'Bearer' ? token : undefined;
-  }
-
-  private unauthorized(message: string) {
-    return buildGuardException(ErrorCode.UNAUTHORIZED, message);
   }
 }
