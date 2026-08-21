@@ -56,6 +56,7 @@ function buildSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     sha256: 'stored-hash',
     capturedAt: new Date('2026-01-01T00:00:00Z'),
     createdAt: new Date('2026-01-01T00:00:00Z'),
+    isLive: false,
     ...overrides,
   };
 }
@@ -73,7 +74,11 @@ const IMAGE: CapturedImage = {
 describe('SnapshotService', () => {
   const spaceId = 'space-uuid';
 
-  let snapshotAccessor: { create: jest.Mock; findById: jest.Mock };
+  let snapshotAccessor: {
+    create: jest.Mock;
+    upsertLive: jest.Mock;
+    findById: jest.Mock;
+  };
   let cameraAccessor: { recordCaptureOutcome: jest.Mock };
   let dvrAccessor: { findCredentialsBySpaceId: jest.Mock };
   let dvrClient: { captureSnapshot: jest.Mock };
@@ -81,7 +86,11 @@ describe('SnapshotService', () => {
   let service: SnapshotService;
 
   beforeEach(() => {
-    snapshotAccessor = { create: jest.fn(), findById: jest.fn() };
+    snapshotAccessor = {
+      create: jest.fn(),
+      upsertLive: jest.fn(),
+      findById: jest.fn(),
+    };
     cameraAccessor = { recordCaptureOutcome: jest.fn() };
     dvrAccessor = { findCredentialsBySpaceId: jest.fn() };
     dvrClient = { captureSnapshot: jest.fn() };
@@ -203,6 +212,40 @@ describe('SnapshotService', () => {
         }),
       );
       expect(result).toEqual({ ok: true, data: stored });
+      expect(snapshotAccessor.upsertLive).not.toHaveBeenCalled();
+    });
+
+    it('overwrites the live row instead of creating one when isLive is set', async () => {
+      const live = buildSnapshot({ isLive: true });
+      snapshotAccessor.upsertLive.mockResolvedValue(live);
+
+      const result = await service.store(spaceId, 'camera-uuid', IMAGE, true);
+
+      expect(snapshotAccessor.upsertLive).toHaveBeenCalledWith(
+        spaceId,
+        expect.objectContaining({ cameraId: 'camera-uuid' }),
+      );
+      expect(snapshotAccessor.create).not.toHaveBeenCalled();
+      expect(result).toEqual({ ok: true, data: live });
+    });
+  });
+
+  describe('captureAndStore', () => {
+    it('writes the live row, so a button press cannot grow the table', async () => {
+      const camera = buildCamera();
+      dvrAccessor.findCredentialsBySpaceId.mockResolvedValue(
+        buildCredentials(),
+      );
+      dvrClient.captureSnapshot.mockResolvedValue(buildData(IMAGE));
+      snapshotAccessor.upsertLive.mockResolvedValue(
+        buildSnapshot({ isLive: true }),
+      );
+
+      const result = await service.captureAndStore(spaceId, camera);
+
+      expect(result.ok).toBe(true);
+      expect(snapshotAccessor.upsertLive).toHaveBeenCalledTimes(1);
+      expect(snapshotAccessor.create).not.toHaveBeenCalled();
     });
   });
 

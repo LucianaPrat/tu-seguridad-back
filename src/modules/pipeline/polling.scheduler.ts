@@ -103,6 +103,12 @@ export class PollingScheduler
         return;
       }
 
+      // Every successful poll refreshes the camera's live frame, so the grid
+      // has a thumbnail and the zone editor a backdrop for a camera that never
+      // alerted. One row per camera, overwritten in place: the alternative was
+      // a BLOB per tick with no retention to clean it up.
+      await this.snapshotService.store(spaceId, camera.id, captured.data, true);
+
       await this.pipelineService.processImage(spaceId, camera, captured.data);
     } finally {
       this.inFlight.delete(camera.id);

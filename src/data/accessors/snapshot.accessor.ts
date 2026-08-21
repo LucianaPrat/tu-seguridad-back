@@ -20,6 +20,33 @@ export class SnapshotAccessorService {
     return this.prisma.snapshot.create({ data });
   }
 
+  /**
+   * The camera's live frame: one row per camera, rewritten in place on every
+   * successful poll. In place rather than a fresh row per tick because nothing
+   * prunes snapshots yet, and separate from evidence rows because an alert's
+   * frame must still show what the alert saw a week later.
+   */
+  async upsertLive(
+    spaceId: string,
+    data: Prisma.SnapshotUncheckedCreateInput,
+  ): Promise<Snapshot | null> {
+    const live = await this.prisma.snapshot.findFirst({
+      where: {
+        cameraId: data.cameraId,
+        isLive: true,
+        camera: { deletedAt: null, dvr: { spaceId } },
+      },
+      select: { id: true },
+    });
+    if (!live) {
+      return this.create(spaceId, { ...data, isLive: true });
+    }
+    return this.prisma.snapshot.update({
+      where: { id: live.id },
+      data: { ...data, isLive: true },
+    });
+  }
+
   findLatestByCamera(
     spaceId: string,
     cameraId: string,
