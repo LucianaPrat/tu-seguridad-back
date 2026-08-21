@@ -1,5 +1,5 @@
 import { HttpException } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
 import { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { buildData, buildError } from '../../cross/errors/either';
@@ -15,26 +15,42 @@ describe('SnapshotsController', () => {
   };
 
   let snapshotService: { read: jest.Mock };
-  let response: { setHeader: jest.Mock; end: jest.Mock };
+  let request: { fresh: boolean };
+  let response: { setHeader: jest.Mock; end: jest.Mock; status: jest.Mock };
   let controller: SnapshotsController;
 
   beforeEach(() => {
     snapshotService = { read: jest.fn() };
-    response = { setHeader: jest.fn(), end: jest.fn() };
+    request = { fresh: false };
+    response = {
+      setHeader: jest.fn(),
+      end: jest.fn(),
+      status: jest.fn(),
+    };
+    response.status.mockReturnValue(response);
     controller = new SnapshotsController(snapshotService as never);
   });
+
+  const read = () =>
+    controller.read(
+      user,
+      'snapshot-uuid',
+      request as unknown as Request,
+      response as unknown as Response,
+    );
 
   it('writes the stored bytes with their own mime type', async () => {
     const data = Buffer.from('image-bytes');
     snapshotService.read.mockResolvedValue(
-      buildData({ mimeType: 'image/png', byteSize: data.byteLength, data }),
+      buildData({
+        mimeType: 'image/png',
+        byteSize: data.byteLength,
+        sha256: 'abc123',
+        data,
+      }),
     );
 
-    await controller.read(
-      user,
-      'snapshot-uuid',
-      response as unknown as Response,
-    );
+    await read();
 
     expect(snapshotService.read).toHaveBeenCalledWith(
       'space-uuid',
@@ -46,9 +62,36 @@ describe('SnapshotsController', () => {
     );
     expect(response.setHeader).toHaveBeenCalledWith(
       'Cache-Control',
-      'private, max-age=60',
+      'private, no-cache',
     );
+    expect(response.setHeader).toHaveBeenCalledWith('ETag', '"abc123"');
     expect(response.end).toHaveBeenCalledWith(data);
+  });
+
+  /**
+   * The live row keeps its id when a new capture overwrites it, so a positive
+   * `max-age` would let the browser answer a refresh with the previous frame.
+   * The bytes are only skipped when the caller's `If-None-Match` still matches.
+   */
+  it('answers 304 without bytes when the caller already holds the frame', async () => {
+    request.fresh = true;
+    snapshotService.read.mockResolvedValue(
+      buildData({
+        mimeType: 'image/png',
+        byteSize: 11,
+        sha256: 'abc123',
+        data: Buffer.from('image-bytes'),
+      }),
+    );
+
+    await read();
+
+    expect(response.status).toHaveBeenCalledWith(304);
+    expect(response.end).toHaveBeenCalledWith();
+    expect(response.setHeader).not.toHaveBeenCalledWith(
+      'Content-Length',
+      expect.anything(),
+    );
   });
 
   /**
@@ -61,9 +104,7 @@ describe('SnapshotsController', () => {
       buildError(ErrorCode.NOT_FOUND, 'Snapshot snapshot-uuid not found'),
     );
 
-    await expect(
-      controller.read(user, 'snapshot-uuid', response as unknown as Response),
-    ).rejects.toBeInstanceOf(HttpException);
+    await expect(read()).rejects.toBeInstanceOf(HttpException);
     expect(response.end).not.toHaveBeenCalled();
   });
 });
