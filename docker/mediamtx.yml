@@ -1,0 +1,79 @@
+###############################################################################
+# MediaMTX — media server for the live camera view.
+#
+# It is a separate process, not part of this API: the API registers a path here
+# and answers a URL, and from then on the browser talks to this server directly.
+# No media packet ever crosses NestJS.
+#
+#   Hikvision DVR --RTSP/H.264--> MediaMTX --HLS--> hls.js --> <video>
+#
+# Rationale, alternatives and the whole authorization argument:
+# docs/decisions/002-hls-live-streaming.md
+###############################################################################
+
+logLevel: info
+
+###############################################################################
+# Control API. This is what `MediaMtxStreamPublisherService` calls to register a
+# camera path — POST /v3/config/paths/replace/<cameraId>.
+#
+# It takes the recorder's RTSP URL, password included, and it authenticates
+# nobody. It binds every interface *inside the container*, which is what lets
+# the published port reach it at all; the restriction that matters is on the
+# host side, where docker-compose.yml publishes it as 127.0.0.1:9997 only.
+###############################################################################
+api: yes
+apiAddress: :9997
+
+###############################################################################
+# Authorization. Every playlist request and every segment request is asked
+# about, one HTTP call each, against this API's public hook. hls.js attaches the
+# operator's ordinary access token as a bearer header; MediaMTX forwards it in
+# the `token` field of the hook payload.
+#
+# `authHTTPExclude` is load-bearing, not tidiness. With `authMethod: http`
+# MediaMTX routes *every* internal action through the hook, its own Control API
+# included, and the hook authorizes nothing but `read`. Empty this list and the
+# path registration above is denied: no path is created, no stream ever starts,
+# and the failure surfaces as an upstream error with nothing pointing back here.
+###############################################################################
+authMethod: http
+# host.docker.internal, not 127.0.0.1: loopback inside the container is the
+# container itself. docker-compose.yml maps the name on both Docker Desktop and
+# native Linux Docker.
+authHTTPAddress: http://host.docker.internal:3000/api/v1/streaming/authorize
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+###############################################################################
+# HLS — the only thing the browser touches.
+#
+# `hlsAllowOrigin` is the Vite dev server. A bearer header makes each request
+# non-simple, so the browser preflights it; an origin that does not match here
+# fails CORS and the dashboard card silently falls back to its stored snapshot.
+# Reaching the app over a LAN address instead of localhost means adding that
+# origin, or '*' for a throwaway dev box.
+###############################################################################
+hls: yes
+hlsAddress: :8888
+
+# fmp4, not the mpegts default: the recorder's sub-stream is H.265, and the
+# MPEG-TS muxer cannot carry it — it refuses the track outright. fMP4 accepts
+# it. Verified on this bench, and it settles the "codec verification" item left
+# open in docs/decisions/002-hls-live-streaming.md.
+hlsVariant: fmp4
+hlsAllowOrigins:
+  - 'http://localhost:8443'
+
+###############################################################################
+# Nothing publishes to this server and nothing reads it over anything but HLS.
+# These switches are the *servers*; disabling them does not affect MediaMTX
+# pulling RTSP from the recorder, which it does as a client.
+###############################################################################
+rtsp: no
+rtmp: no
+webrtc: no
+srt: no
+moq: no  # otherwise it generates a self-signed cert on every fresh container

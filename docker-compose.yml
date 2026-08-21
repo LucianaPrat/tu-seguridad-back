@@ -1,0 +1,44 @@
+# MediaMTX, the media server behind the dashboard's live camera view.
+#
+# A sidecar, not a dependency of the API process: this API registers paths with
+# it over its Control API and answers a URL, and the browser plays from it
+# directly. See docs/decisions/002-hls-live-streaming.md.
+#
+# There is no Dockerfile on purpose. The upstream image needs nothing added, and
+# baking docker/mediamtx.yml into a layer would mean a rebuild to change a port.
+#
+#   scripts/mediamtx.sh up      # start it and verify the wiring
+#   scripts/mediamtx.sh check   # diagnose a live view that will not play
+#
+# MySQL is deliberately absent: this dev setup runs it as the standalone
+# `mysql-local` container, and adopting it here would fight that.
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.1
+    container_name: mediamtx
+    restart: unless-stopped
+
+    # Published ports rather than `network_mode: host`. Host networking looks
+    # like the obvious fit — three legs on the same machine — but it is a lie on
+    # any VM-backed engine: under Docker Desktop, including its Linux build, the
+    # container joins the *VM's* host network and nothing binds on this machine.
+    # It fails silently, with MediaMTX cheerfully logging that it is listening.
+    ports:
+      # HLS. What the browser plays; must be reachable from wherever the app is
+      # opened, so this one is not restricted to loopback.
+      - "8888:8888"
+      # Control API. It takes the recorder's RTSP URL, password included, and
+      # authenticates nobody, so it is bound to loopback on the host side and
+      # must stay that way. MEDIAMTX_API_URL points here.
+      - "127.0.0.1:9997:9997"
+
+    # The container's route back to this API for the authorization hook, called
+    # once per playlist and once per segment. Docker Desktop supplies this name
+    # on its own; `host-gateway` is what makes native Linux Docker supply it too,
+    # so one compose file covers both.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - ./docker/mediamtx.yml:/mediamtx.yml:ro
