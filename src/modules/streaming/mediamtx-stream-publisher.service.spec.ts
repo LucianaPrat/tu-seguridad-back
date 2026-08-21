@@ -60,13 +60,15 @@ describe('MediaMtxStreamPublisherService', () => {
     expect(urls[1]).toBe(urls[0]);
   });
 
-  it('refuses without ever calling the media server when streaming is off', async () => {
-    config[EnvNames.MEDIAMTX_ENABLED] = false;
+  it('normalises a public url that carries a trailing slash', async () => {
+    config[EnvNames.MEDIAMTX_PUBLIC_URL] = 'http://media.local:8888/';
 
     const result = await service.publish('camera-uuid', SOURCE);
 
-    expect(result).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
-    expect(httpService.post).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      data: { url: 'http://media.local:8888/camera-uuid/index.m3u8' },
+    });
   });
 
   it('maps a timeout to UPSTREAM_TIMEOUT', async () => {

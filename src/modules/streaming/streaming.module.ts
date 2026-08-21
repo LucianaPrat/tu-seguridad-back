@@ -12,10 +12,11 @@ import { StreamingController } from './streaming.controller';
  * alone: the authorization hook has to verify a token that arrives in a body,
  * where no guard can reach it.
  *
- * There is one publisher and it checks `MEDIAMTX_ENABLED` itself rather than a
- * second "disabled" class behind a factory, the way mail does. Mail off has a
- * meaningful fallback — log the credential. Streaming off has none: there is no
- * stream, so the honest answer is one refusal inside the one implementation.
+ * There is one publisher and no "disabled" second class behind a factory, the
+ * way mail does it. Mail off has a meaningful fallback — log the credential.
+ * Streaming off has none: there is no stream, so the honest answer is one
+ * refusal, and `LiveStreamService.start` gives it before any work happens rather
+ * than after the recorder password has been decrypted.
  */
 @Module({
   imports: [HttpModule, AuthModule, DvrModule],

@@ -103,6 +103,21 @@ describe('HitInterceptor', () => {
     expect(hitAccessor.create).not.toHaveBeenCalled();
   });
 
+  it('skips /api/v1/streaming paths entirely', async () => {
+    const request: Partial<RequestWithUser> = {
+      method: 'GET',
+      path: '/api/v1/streaming/authorize',
+    };
+    const response = fakeResponse(200);
+    const handler = { handle: () => of('ok') };
+
+    interceptor.intercept(contextFor(request, response), handler).subscribe();
+    response.emit('finish');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(hitAccessor.create).not.toHaveBeenCalled();
+  });
+
   it('does not break the response when the sink fails', async () => {
     hitAccessor.create.mockRejectedValue(new Error('db down'));
     const request: Partial<RequestWithUser> = {

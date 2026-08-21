@@ -64,6 +64,26 @@ Three consequences worth stating:
   own video into a camera's path and the dashboard would render it as that camera's feed. The action
   is checked before the token is even looked at.
 
+**MediaMTX's own Control API has to be excluded from the hook.** With `authMethod: http`,
+MediaMTX routes every internal action through `authHTTPAddress` — its Control API included. This
+hook authorizes nothing but `read`, so `action: api` comes back `FORBIDDEN`, and the
+`POST /v3/config/paths/replace/{name}` this API makes is the call that gets denied: no path is ever
+registered and no stream ever starts. Stock MediaMTX excludes `api`, `metrics` and `pprof` by
+default and so gets this right by accident; nothing in this repo holds that invariant, because no
+MediaMTX configuration ships here. The operator requirement is therefore explicit:
+
+```yaml
+authMethod: http
+authHTTPAddress: http://<api-host>:3000/api/v1/streaming/authorize
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+```
+
+Tightening `authHTTPExclude` to `[]` bricks the feature, and it surfaces as a refused registration
+with nothing pointing back at this decision.
+
 The hook is `@Public()`, because the media server holds no session of ours and the token arrives in
 a body where no guard can reach it. That makes it an authorization oracle, so: a `200` means "this
 token is valid and names a camera in its own space", which is exactly what `GET /cameras/:id`
@@ -96,19 +116,34 @@ there for the day a full-frame view needs the native resolution.
 
 ## Consequences
 
-- **Off by default.** `MEDIAMTX_ENABLED=false` makes `GET /cameras/:id/live` answer `CONFLICT` and
-  contacts nothing, the same posture as `OTEL_ENABLED` and `MAIL_ENABLED`. Local dev and CI need no
-  media server.
+- **Off by default.** `MEDIAMTX_ENABLED=false` makes `GET /cameras/:id/live` answer `CONFLICT`
+  before any database work — checked in the service rather than in the publisher, so nothing is read
+  and no recorder password is decrypted for a request that cannot succeed — and contacts nothing,
+  the same posture as `OTEL_ENABLED` and `MAIL_ENABLED`. Local dev and CI need no media server.
 - **MediaMTX's Control API takes recorder credentials and authenticates nobody.** It must never be
   bound to a public interface. `MEDIAMTX_API_URL` defaults to loopback for that reason.
 - **`source` is in `SENSITIVE_FIELD_NAMES`.** MediaMTX names a path's upstream `source`, and for us
   that upstream holds the recorder password. The publish call is outbound so `pino-http` never sees
   it, but an axios error carries the request body it was sent with — hence the entry, and hence
   `publish` returning `Either` rather than letting anything throw with that body attached.
-- **The authorization hook must declare every field MediaMTX sends.** The global pipe runs with
-  `forbidNonWhitelisted`, so one undeclared field turns the hook into a `400` and MediaMTX, seeing
-  anything but `200`, denies every viewer. A field added by a future MediaMTX release lands in
-  `StreamAuthorizationDto` in the same change that upgrades it. There is an e2e canary for this.
+- **An undeclared field on the hook is stripped, not refused.** MediaMTX reads anything but `200`
+  as "deny", so a `400` on a field a future release adds would black out every viewer at once.
+  Declaring today's ten fields only postpones that, so the route validates its own body instead:
+  Nest applies global pipes before scoped ones and a scoped pipe cannot loosen the global
+  `forbidNonWhitelisted`, so the handler declares the body as `object` — nothing the global pipe
+  validates — and its own `ValidationPipe` points at `StreamAuthorizationDto` through
+  `expectedType`, with `whitelist` on and `forbidNonWhitelisted` off. The DTO declares the four
+  fields this API reads and everything else is dropped before the service sees it. The e2e canary
+  posts an undeclared field and expects `200`.
+- **The hook is exempt from the throttler and from hit recording.** It is called for the playlist
+  and for every segment, all of it from the media server's single IP, so the global
+  ten-per-second bucket would refuse it — and one refusal is one blacked-out viewer — while
+  `HitInterceptor` would write a row per segment on the very call the reader is blocked on.
+  `@SkipThrottle()` on the route, `/api/v1/streaming` in the interceptor's skip list.
+- **The camera lookup is memoised for a few seconds**, keyed by `(space, path)`. Same arithmetic:
+  otherwise every segment of every viewer is a database read. The token is verified on every call
+  before the memo is consulted, so nothing the hook checks is weakened — only the lookup is skipped,
+  and disabling a camera takes effect within the TTL.
 - **Latency is HLS latency** — several seconds with stock segment sizes. Accepted deliberately;
   MediaMTX's Low-Latency HLS brings it to roughly 2–3s and is a flag, not code.
 

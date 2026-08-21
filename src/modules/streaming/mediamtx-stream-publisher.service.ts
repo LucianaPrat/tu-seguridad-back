@@ -1,10 +1,10 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import { firstValueFrom } from 'rxjs';
-import { EnvNames, ErrorCode } from '../../cross/common/constants';
-import { buildData, buildError, Either } from '../../cross/errors/either';
+import { EnvNames } from '../../cross/common/constants';
+import { buildData, Either } from '../../cross/errors/either';
+import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import { LiveStream, StreamPublisherPort } from './stream-publisher.port';
 
 /**
@@ -42,17 +42,13 @@ export class MediaMtxStreamPublisherService extends StreamPublisherPort {
     pathName: string,
     sourceUrl: string,
   ): Promise<Either<LiveStream>> {
-    if (!this.configService.get<boolean>(EnvNames.MEDIAMTX_ENABLED)) {
-      return buildError(
-        ErrorCode.CONFLICT,
-        'Live streaming is not configured on this deployment',
-      );
-    }
-
     const apiUrl = this.configService.get<string>(EnvNames.MEDIAMTX_API_URL);
-    const publicUrl = this.configService.get<string>(
-      EnvNames.MEDIAMTX_PUBLIC_URL,
-    );
+    // Joi's `.uri()` accepts a trailing slash, and one would give the browser
+    // `http://host:8888//<id>/index.m3u8`. Same normalisation the recorder base
+    // URL already gets in `http-dvr-client.service.ts`.
+    const publicUrl = (
+      this.configService.get<string>(EnvNames.MEDIAMTX_PUBLIC_URL) ?? ''
+    ).replace(/\/+$/, '');
 
     try {
       await firstValueFrom(
@@ -71,31 +67,16 @@ export class MediaMtxStreamPublisherService extends StreamPublisherPort {
         ),
       );
     } catch (error) {
-      return this.mapError(error);
+      // Never logged, never rethrown: an axios error carries the request body it
+      // was sent with, and that body holds the recorder password in `source`, so
+      // only a status reaches the message. `source` is in
+      // `SENSITIVE_FIELD_NAMES` as the second line of defence, not the first.
+      return mapUpstreamError(error, 'Stream publish');
     }
 
     return buildData({
       protocol: 'hls',
-      url: `${publicUrl}/${pathName}/index.m3u8`,
+      url: `${publicUrl}/${encodeURIComponent(pathName)}/index.m3u8`,
     });
-  }
-
-  /**
-   * The thrown value is never logged and never rethrown. An axios error carries
-   * the request body it was sent with, and that body holds the recorder
-   * password in `source` — so only a status reaches the message. `source` is in
-   * `SENSITIVE_FIELD_NAMES` as the second line of defence, not the first.
-   */
-  private mapError<T>(error: unknown): Either<T> {
-    if (!axios.isAxiosError(error)) {
-      return buildError(ErrorCode.UPSTREAM_ERROR, 'Stream publish failed');
-    }
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      return buildError(ErrorCode.UPSTREAM_TIMEOUT, 'Stream publish timed out');
-    }
-    return buildError(
-      ErrorCode.UPSTREAM_ERROR,
-      `Stream publish failed (status ${error.response?.status ?? 'unreachable'})`,
-    );
   }
 }

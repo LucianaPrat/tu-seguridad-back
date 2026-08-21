@@ -3836,7 +3836,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_ERROR` — The media server sent a field this API does not declare.",
+            "description": "`VALIDATION_ERROR` — A declared field is missing or is not a string. A field the media server sends and this API does not declare is stripped, never refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5362,24 +5362,6 @@
           "protocol": {
             "type": "string",
             "description": "Transport the reader used. Only `hls` is handed out."
-          },
-          "user": {
-            "type": "string"
-          },
-          "password": {
-            "type": "string"
-          },
-          "ip": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "query": {
-            "type": "string"
-          },
-          "userAgent": {
-            "type": "string"
           }
         },
         "required": [

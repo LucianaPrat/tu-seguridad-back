@@ -15,3 +15,7 @@ process.env.OTEL_ENABLED = 'false';
 // delivery adapter from this switch and the e2e harness does not override the
 // port, so leaving it on would send real mail from the suite.
 process.env.MAIL_ENABLED = 'false';
+// `GET /cameras/:id/live` now checks this switch before any database work, and
+// the harness overrides the publisher port with a fake, so the suite needs the
+// switch on to reach the live routes at all. No media server is contacted.
+process.env.MEDIAMTX_ENABLED = 'true';

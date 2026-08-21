@@ -7,6 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
+import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import {
   CapturedImage,
   DiscoveredChannel,
@@ -254,36 +255,27 @@ export class HttpDvrClientService extends DvrClientPort {
   }
 
   private mapError<T>(error: unknown, operation: string): Either<T> {
-    if (!axios.isAxiosError(error)) {
-      return buildError(ErrorCode.UPSTREAM_ERROR, `${operation} failed`);
+    if (axios.isAxiosError(error)) {
+      if (error.code === DIGEST_UNSUPPORTED) {
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: DVR offered no supported authentication scheme`,
+        );
+      }
+
+      const status = error.response?.status;
+      // A recorder that answers 401/403 to the signed request is reachable: what
+      // is wrong is the configuration the operator just submitted, so this is
+      // their 400, not a 502 about somebody else's outage.
+      if (status === 401 || status === 403) {
+        return buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'DVR rejected the supplied credentials',
+        );
+      }
     }
 
-    if (error.code === DIGEST_UNSUPPORTED) {
-      return buildError(
-        ErrorCode.UPSTREAM_ERROR,
-        `${operation} failed: DVR offered no supported authentication scheme`,
-      );
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      return buildError(ErrorCode.UPSTREAM_TIMEOUT, `${operation} timed out`);
-    }
-
-    const status = error.response?.status;
-    // A recorder that answers 401/403 to the signed request is reachable: what
-    // is wrong is the configuration the operator just submitted, so this is
-    // their 400, not a 502 about somebody else's outage.
-    if (status === 401 || status === 403) {
-      return buildError(
-        ErrorCode.VALIDATION_ERROR,
-        'DVR rejected the supplied credentials',
-      );
-    }
-
-    return buildError(
-      ErrorCode.UPSTREAM_ERROR,
-      `${operation} failed (status ${status ?? 'unreachable'})`,
-    );
+    return mapUpstreamError(error, operation);
   }
 }
 

@@ -1,5 +1,5 @@
 import { Camera } from '@prisma/client';
-import { ErrorCode } from '../../cross/common/constants';
+import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { buildData, buildError } from '../../cross/errors/either';
 import { LiveStreamService } from './live-stream.service';
@@ -77,6 +77,18 @@ describe('LiveStreamService', () => {
   });
 
   describe('start', () => {
+    it('refuses before touching the database when streaming is off', async () => {
+      configService.get.mockImplementation((name: string) =>
+        name === EnvNames.MEDIAMTX_ENABLED ? false : 'jwt-secret',
+      );
+
+      const result = await service.start('space-uuid', 'camera-uuid');
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
+      expect(dvrAccessor.findCredentialsBySpaceId).not.toHaveBeenCalled();
+    });
+
     it('publishes the camera under its own id and answers the playback url', async () => {
       const result = await service.start('space-uuid', 'camera-uuid');
 
@@ -287,6 +299,14 @@ describe('LiveStreamService', () => {
       });
 
       expect(result).toEqual(buildData({ authorized: true }));
+    });
+
+    // The token is still verified on every call; only the camera lookup is memoised.
+    it('reads the camera once for a viewer segment storm', async () => {
+      await service.authorize(request);
+      await service.authorize(request);
+
+      expect(cameraAccessor.findById).toHaveBeenCalledTimes(1);
     });
   });
 });

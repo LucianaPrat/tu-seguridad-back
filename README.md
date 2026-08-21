@@ -217,8 +217,23 @@ hls.attachMedia(videoElement)
 Only `read` over `hls` is ever authorized. A granted `publish` would let a caller push their own
 video into a camera's path and the dashboard would render it as that camera's feed.
 
-**Off by default.** Without `MEDIAMTX_ENABLED` the route answers `CONFLICT` and nothing is
-contacted, so local dev and CI need no media server. The recorder password reaches MediaMTX — nothing
+**The media server needs its own API excluded from the hook.** `authMethod: http` sends *every*
+MediaMTX action to `authHTTPAddress`, Control API calls included, and this hook grants nothing but
+`read` — so an unexcluded `action: api` denies the very `paths/replace` call that registers a
+camera, and no stream ever starts. Stock MediaMTX excludes it by default; nothing here enforces
+that, so the operator config is explicit:
+
+```yaml
+authMethod: http
+authHTTPAddress: http://<api-host>:3000/api/v1/streaming/authorize
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+```
+
+**Off by default.** Without `MEDIAMTX_ENABLED` the route answers `CONFLICT` before it reads
+anything, so local dev and CI need no media server. The recorder password reaches MediaMTX — nothing
 else can open the RTSP connection — and never reaches the browser.
 
 **Not solved yet:** the recorder sits on a LAN behind NAT, so a MediaMTX outside that network cannot

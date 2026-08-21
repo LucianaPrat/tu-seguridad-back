@@ -2,14 +2,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 
 /**
- * The payload MediaMTX POSTs for every request it is asked to authorize — the
- * playlist and each segment alike.
+ * The part of the payload MediaMTX POSTs that this API reads — for the playlist
+ * and for each segment alike.
  *
- * **Every field the media server sends is declared here on purpose.** The
- * global pipe runs with `forbidNonWhitelisted`, so one undeclared field turns
- * the whole hook into a 400 and MediaMTX, seeing anything but 200, denies every
- * viewer. A field added by a future MediaMTX release has to land here in the
- * same change that upgrades it.
+ * MediaMTX sends more than this (`user`, `password`, `ip`, `id`, `query`,
+ * `user_agent`), and a future release will send more still. Everything not
+ * declared here is **stripped**, not refused: the route validates the body with
+ * `whitelist` and without `forbidNonWhitelisted`, because a 400 on an unknown
+ * field would make the media server deny every viewer at once. See the pipe on
+ * `StreamingController.authorize`.
  */
 export class StreamAuthorizationDto {
   @ApiProperty({
@@ -43,36 +44,6 @@ export class StreamAuthorizationDto {
   @IsOptional()
   @IsString()
   protocol?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  user?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  password?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  ip?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  id?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  query?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  userAgent?: string;
 }
 
 export class StreamAuthorizationResultDto {

@@ -452,10 +452,10 @@ describe('DVR, cameras and snapshots (e2e)', () => {
       expect(res.status).toBe(404);
     });
 
-    // The global pipe runs with `forbidNonWhitelisted`, so an undeclared field
-    // would turn the hook into a 400 and lock every viewer out. This is the
-    // canary for a MediaMTX release that adds one.
-    it('accepts every field the media server actually sends', async () => {
+    // The hook's pipe runs `whitelist` without `forbidNonWhitelisted`, so an
+    // undeclared field is stripped rather than refused: a 400 here would make
+    // the media server deny every viewer at once.
+    it('accepts every field the media server sends, declared or not', async () => {
       await configureDvr();
       const [camera] = await listCameras();
 
@@ -470,6 +470,7 @@ describe('DVR, cameras and snapshots (e2e)', () => {
         id: 'session-id',
         query: '',
         userAgent: 'hls.js',
+        aFieldFromALaterRelease: 'stripped, not refused',
       });
 
       expect(res.status).toBe(200);

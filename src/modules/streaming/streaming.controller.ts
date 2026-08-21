@@ -1,14 +1,45 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  ValidationPipe,
+} from '@nestjs/common';
+import { ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ErrorCode } from '../../cross/common/constants';
 import { Public } from '../../cross/decorators/public.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { validationExceptionFactory } from '../../cross/errors/validation-exception.factory';
 import {
   StreamAuthorizationDto,
   StreamAuthorizationResultDto,
 } from './dto/stream-authorization.dto';
 import { LiveStreamService } from './live-stream.service';
+
+/**
+ * The hook's own body pipe, and the reason the handler declares the body as
+ * `object` rather than as the DTO.
+ *
+ * Nest applies global pipes **before** scoped ones, so a route pipe cannot
+ * loosen the global `forbidNonWhitelisted`: the global pipe only skips a body
+ * whose declared type it has nothing to validate against. `object` is such a
+ * type, and `expectedType` then points this pipe at the real shape.
+ *
+ * The point is `whitelist` without `forbidNonWhitelisted`. A field a future
+ * MediaMTX release adds is stripped here instead of turning the hook into a 400
+ * — and MediaMTX reads anything but 200 as "deny", so that 400 would lock out
+ * every viewer of every camera at once. The declared fields stay the contract;
+ * a declared field that is missing or not a string is still a 400.
+ */
+const HOOK_BODY_PIPE = new ValidationPipe({
+  expectedType: StreamAuthorizationDto,
+  whitelist: true,
+  transform: true,
+  exceptionFactory: validationExceptionFactory,
+});
 
 @ApiTags('streaming')
 @Controller('streaming')
@@ -26,6 +57,7 @@ export class StreamingController {
    * same caller. It grants nothing a token holder did not already have.
    */
   @Public()
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('authorize')
   @ApiOperation({
@@ -51,11 +83,13 @@ export class StreamingController {
     [ErrorCode.NOT_FOUND]: 'The path names no camera in the caller space.',
     [ErrorCode.CONFLICT]: 'The camera is disabled.',
     [ErrorCode.VALIDATION_ERROR]:
-      'The media server sent a field this API does not declare.',
+      'A declared field is missing or is not a string. A field the media ' +
+      'server sends and this API does not declare is stripped, never refused.',
   })
+  @ApiBody({ type: StreamAuthorizationDto })
   authorize(
-    @Body() dto: StreamAuthorizationDto,
+    @Body(HOOK_BODY_PIPE) body: object,
   ): Promise<Either<StreamAuthorizationResultDto>> {
-    return this.liveStreamService.authorize(dto);
+    return this.liveStreamService.authorize(body as StreamAuthorizationDto);
   }
 }

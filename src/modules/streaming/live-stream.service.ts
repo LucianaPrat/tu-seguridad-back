@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Camera } from '@prisma/client';
 import { verifyAccessToken } from '../../cross/common/access-token';
-import { ErrorCode } from '../../cross/common/constants';
+import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
@@ -21,6 +21,24 @@ const READ_ACTION = 'read';
 /** The only transport this API hands out, so the only one it authorizes. */
 const HLS_PROTOCOL = 'hls';
 
+/**
+ * A reader's playlist and every one of its segments reach `authorize`, so the
+ * camera lookup would be one database round trip per segment per viewer. The
+ * space and the path together already decide the answer, so a few seconds of
+ * memo collapse a viewer's segment storm into a single read.
+ *
+ * It weakens nothing the hook checks: the token is verified on every call before
+ * the memo is consulted, so an expired or revoked credential is refused whatever
+ * the memo holds. Only the camera lookup is skipped, and `isEnabled` is a switch
+ * an operator flips, not a security boundary — it takes effect within the TTL.
+ *
+ * ponytail: a plain Map, dropped wholesale when it passes the cap. Entries are
+ * one per camera being watched, and refilling costs one read each, so an LRU can
+ * wait until that is measurable.
+ */
+const AUTHORIZATION_MEMO_TTL_MS = 3_000;
+const AUTHORIZATION_MEMO_MAX_ENTRIES = 1_000;
+
 @Injectable()
 export class LiveStreamService {
   constructor(
@@ -31,6 +49,9 @@ export class LiveStreamService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
+
+  /** `(space, path)` to the moment the pair was last authorized. */
+  private readonly recentAuthorizations = new Map<string, number>();
 
   /**
    * Registers the camera with the media server and answers where to play it.
@@ -45,6 +66,16 @@ export class LiveStreamService {
     spaceId: string,
     cameraId: string,
   ): Promise<Either<LiveStreamDto>> {
+    // Checked here rather than inside the publisher so that streaming being off
+    // costs no database round trip and never decrypts the recorder password for
+    // a request whose only possible answer is CONFLICT.
+    if (!this.configService.get<boolean>(EnvNames.MEDIAMTX_ENABLED)) {
+      return buildError(
+        ErrorCode.CONFLICT,
+        'Live streaming is not configured on this deployment',
+      );
+    }
+
     const camera = await this.cameraAccessor.findById(spaceId, cameraId);
     if (!camera) {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${cameraId} not found`);
@@ -122,6 +153,11 @@ export class LiveStreamService {
       );
     }
 
+    const memoKey = `${verified.data.spaceId}\u0000${request.path}`;
+    if (this.wasRecentlyAuthorized(memoKey)) {
+      return buildData({ authorized: true });
+    }
+
     const camera = await this.cameraAccessor.findById(
       verified.data.spaceId,
       request.path,
@@ -136,7 +172,27 @@ export class LiveStreamService {
       return unusable;
     }
 
+    this.rememberAuthorization(memoKey);
     return buildData({ authorized: true });
+  }
+
+  private wasRecentlyAuthorized(key: string): boolean {
+    const authorizedAt = this.recentAuthorizations.get(key);
+    if (authorizedAt === undefined) {
+      return false;
+    }
+    if (Date.now() - authorizedAt < AUTHORIZATION_MEMO_TTL_MS) {
+      return true;
+    }
+    this.recentAuthorizations.delete(key);
+    return false;
+  }
+
+  private rememberAuthorization(key: string): void {
+    if (this.recentAuthorizations.size >= AUTHORIZATION_MEMO_MAX_ENTRIES) {
+      this.recentAuthorizations.clear();
+    }
+    this.recentAuthorizations.set(key, Date.now());
   }
 
   /**
