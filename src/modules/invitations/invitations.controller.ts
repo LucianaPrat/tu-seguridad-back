@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -29,6 +30,7 @@ import { AccessTokenDto } from '../auth/dto/access-token.dto';
 import { CredentialTokenDto } from '../auth/dto/credential-token.dto';
 import { RefreshCookieService } from '../auth/refresh-cookie.service';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { InvitationListDto } from './dto/invitation-list.dto';
 import { InvitationDto } from './dto/invitation.dto';
 import { InvitationsService } from './invitations.service';
 
@@ -69,6 +71,27 @@ export class InvitationsController {
     @Body() dto: CreateInvitationDto,
   ): Promise<Either<InvitationDto>> {
     return this.invitationsService.create(user.spaceId, user.sub, dto.email);
+  }
+
+  /** Who was invited to the space is an administrator's business. */
+  @Roles(SpaceMemberRole.admin)
+  @Get()
+  @ApiOperation({
+    summary: 'List the pending invitations of the space',
+    description:
+      'Admin only. Invitations that are neither accepted nor expired, newest first, ' +
+      'never carrying the token.',
+  })
+  @ApiOkResponse({ type: InvitationListDto })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+  })
+  findPending(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<Either<InvitationListDto>> {
+    return this.invitationsService.findPending(user.spaceId);
   }
 
   /** Public: the invitee has no session yet — the token is the credential. */

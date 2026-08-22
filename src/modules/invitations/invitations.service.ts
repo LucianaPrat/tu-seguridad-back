@@ -11,7 +11,9 @@ import { UserAccessorService } from '../../data/accessors/user.accessor';
 import { CredentialDeliveryPort } from '../auth/credential-delivery.port';
 import { TokenPairDto } from '../auth/dto/token-pair.dto';
 import { SessionService } from '../auth/session.service';
+import { InvitationListDto } from './dto/invitation-list.dto';
 import { InvitationDto } from './dto/invitation.dto';
+import { toInvitationDto } from './invitation.mapper';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INVALID_INVITATION_MESSAGE = 'Invalid or expired invitation';
@@ -82,12 +84,18 @@ export class InvitationsService {
       expiresAt,
     });
 
-    return buildData({
-      id: invitation.id,
-      email: invitation.email,
-      expiresAt: invitation.expiresAt,
-      createdAt: invitation.createdAt,
-    });
+    return buildData(toInvitationDto(invitation));
+  }
+
+  /**
+   * An invitation that was accepted or has expired is not pending, so the list
+   * only carries the ones an admin can still expect somebody to use.
+   */
+  async findPending(spaceId: string): Promise<Either<InvitationListDto>> {
+    const invitations =
+      await this.invitationAccessor.findPendingBySpace(spaceId);
+    const items = invitations.map(toInvitationDto);
+    return buildData({ items, total: items.length });
   }
 
   /**

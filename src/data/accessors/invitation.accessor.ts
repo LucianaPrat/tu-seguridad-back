@@ -104,6 +104,21 @@ export class InvitationAccessorService {
   }
 
   /**
+   * Pending invitations of a space: unaccepted and unexpired, newest first. Reuses
+   * `PUBLIC_FIELDS` so the token hash never leaves the accessor.
+   */
+  findPendingBySpace(
+    spaceId: string,
+    now = new Date(),
+  ): Promise<InvitationRecord[]> {
+    return this.prisma.invitation.findMany({
+      where: { spaceId, acceptedAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+      select: PUBLIC_FIELDS,
+    });
+  }
+
+  /**
    * Acceptance for an address with no account yet: the user, its membership and
    * the invitation's consumption are one write. A user created without its
    * membership could not sign in, and a consumed invitation with no user would
