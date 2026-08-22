@@ -25,6 +25,12 @@ export class MemberDto {
   @ApiProperty()
   isActive!: boolean;
 
+  @ApiProperty({
+    description:
+      'False until an invited member completes name, phone and password. Its name and phone are empty strings until then.',
+  })
+  profileCompleted!: boolean;
+
   @ApiPropertyOptional({
     type: Date,
     nullable: true,

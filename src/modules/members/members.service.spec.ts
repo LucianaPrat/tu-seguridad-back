@@ -1,11 +1,12 @@
-import { SpaceMember, User } from '@prisma/client';
+import { SpaceMemberRosterRecord } from '../../data/accessors/space-member.accessor';
 import { MembersService } from './members.service';
 
-function buildUser(overrides: Partial<User> = {}): User {
+function buildUser(
+  overrides: Partial<SpaceMemberRosterRecord['user']> = {},
+): SpaceMemberRosterRecord['user'] {
   return {
     id: 1,
     email: 'member@example.com',
-    passwordHash: 'hash',
     firstName: 'Ana',
     lastName: 'Gomez',
     phone: '+5491122334455',
@@ -13,27 +14,14 @@ function buildUser(overrides: Partial<User> = {}): User {
     isActive: true,
     lastLoginAt: null,
     profileCompleted: true,
-    createdAt: new Date('2026-01-01T00:00:00Z'),
-    updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   };
 }
 
 function buildMember(
-  overrides: Partial<SpaceMember> = {},
-  user: Partial<User> = {},
-): SpaceMember & { user: User } {
-  return {
-    id: 'member-uuid',
-    spaceId: 'space-uuid',
-    userId: 1,
-    role: 'member',
-    receiveAlerts: true,
-    invitedByUserId: null,
-    joinedAt: new Date('2026-01-01T00:00:00Z'),
-    ...overrides,
-    user: buildUser({ id: overrides.userId ?? 1, ...user }),
-  };
+  user: Partial<SpaceMemberRosterRecord['user']> = {},
+): SpaceMemberRosterRecord {
+  return { user: buildUser(user) };
 }
 
 describe('MembersService', () => {
@@ -57,19 +45,16 @@ describe('MembersService', () => {
 
   it('maps every column, including a null avatarUrl and lastLoginAt', async () => {
     spaceMemberAccessor.listBySpace.mockResolvedValue([
-      buildMember(
-        {},
-        {
-          id: 1,
-          email: 'member@example.com',
-          firstName: 'Ana',
-          lastName: 'Gomez',
-          phone: '+5491122334455',
-          avatarUrl: null,
-          isActive: true,
-          lastLoginAt: null,
-        },
-      ),
+      buildMember({
+        id: 1,
+        email: 'member@example.com',
+        firstName: 'Ana',
+        lastName: 'Gomez',
+        phone: '+5491122334455',
+        avatarUrl: null,
+        isActive: true,
+        lastLoginAt: null,
+      }),
     ]);
 
     const result = await service.findAll(spaceId);
@@ -85,14 +70,38 @@ describe('MembersService', () => {
         avatarUrl: null,
         isActive: true,
         lastLoginAt: null,
+        profileCompleted: true,
+      });
+    }
+  });
+
+  it('serves an invited member that has not completed its profile', async () => {
+    spaceMemberAccessor.listBySpace.mockResolvedValue([
+      buildMember({
+        firstName: '',
+        lastName: '',
+        phone: '',
+        profileCompleted: false,
+      }),
+    ]);
+
+    const result = await service.findAll(spaceId);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.items[0]).toMatchObject({
+        firstName: '',
+        lastName: '',
+        phone: '',
+        profileCompleted: false,
       });
     }
   });
 
   it('sets total to the number of items', async () => {
     spaceMemberAccessor.listBySpace.mockResolvedValue([
-      buildMember({ userId: 1 }),
-      buildMember({ userId: 2 }),
+      buildMember({ id: 1 }),
+      buildMember({ id: 2 }),
     ]);
 
     const result = await service.findAll(spaceId);
@@ -106,8 +115,8 @@ describe('MembersService', () => {
 
   it('preserves the accessor order', async () => {
     spaceMemberAccessor.listBySpace.mockResolvedValue([
-      buildMember({ userId: 2 }, { id: 2, email: 'second@example.com' }),
-      buildMember({ userId: 1 }, { id: 1, email: 'first@example.com' }),
+      buildMember({ id: 2, email: 'second@example.com' }),
+      buildMember({ id: 1, email: 'first@example.com' }),
     ]);
 
     const result = await service.findAll(spaceId);

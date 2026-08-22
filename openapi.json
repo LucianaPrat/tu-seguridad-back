@@ -5733,6 +5733,10 @@
           "isActive": {
             "type": "boolean"
           },
+          "profileCompleted": {
+            "type": "boolean",
+            "description": "False until an invited member completes name, phone and password. Its name and phone are empty strings until then."
+          },
           "lastLoginAt": {
             "format": "date-time",
             "type": "string",
@@ -5746,7 +5750,8 @@
           "firstName",
           "lastName",
           "phone",
-          "isActive"
+          "isActive",
+          "profileCompleted"
         ]
       },
       "MemberListDto": {

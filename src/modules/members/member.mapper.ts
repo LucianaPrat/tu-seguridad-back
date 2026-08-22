@@ -1,7 +1,7 @@
-import { SpaceMember, User } from '@prisma/client';
+import { SpaceMemberRosterRecord } from '../../data/accessors/space-member.accessor';
 import { MemberDto } from './dto/member.dto';
 
-export function toMemberDto(member: SpaceMember & { user: User }): MemberDto {
+export function toMemberDto(member: SpaceMemberRosterRecord): MemberDto {
   return {
     id: member.user.id,
     email: member.user.email,
@@ -11,5 +11,6 @@ export function toMemberDto(member: SpaceMember & { user: User }): MemberDto {
     avatarUrl: member.user.avatarUrl,
     isActive: member.user.isActive,
     lastLoginAt: member.user.lastLoginAt,
+    profileCompleted: member.user.profileCompleted,
   };
 }

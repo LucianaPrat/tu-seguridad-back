@@ -18,6 +18,7 @@ interface MemberBody {
   phone: string;
   avatarUrl: string | null;
   isActive: boolean;
+  profileCompleted: boolean;
   lastLoginAt: string | null;
 }
 
@@ -87,6 +88,7 @@ describe('Members (e2e)', () => {
       phone: '+10000000002',
       avatarUrl: null,
       isActive: false,
+      profileCompleted: true,
       lastLoginAt: null,
     });
     expect(body.items[0]).toMatchObject({
