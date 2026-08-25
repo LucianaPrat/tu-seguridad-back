@@ -29,6 +29,7 @@ export const SENSITIVE_FIELD_NAMES = [
   'faceToken',
   'authorization',
   'fa-token',
+  'fa-client-token',
 ] as const;
 
 export const SENSITIVE_FIELD_NAMES_LOWERCASE: ReadonlySet<string> = new Set(
