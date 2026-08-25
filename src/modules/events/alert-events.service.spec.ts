@@ -1,4 +1,4 @@
-import { AlertEvent } from '@prisma/client';
+import { AlertEvent, Prisma } from '@prisma/client';
 import { ErrorCode, EventHistory } from '../../cross/common/constants';
 import { AlertCandidate } from '../pipeline/alert-candidate';
 import { AlertEventsService } from './alert-events.service';
@@ -16,6 +16,8 @@ function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
     alertType: 'intruder',
     detectedAt: new Date('2026-08-01T10:00:00.000Z'),
     snapshotId: 'snapshot-uuid',
+    personsDetected: 1,
+    confidence: new Prisma.Decimal('0.913'),
     acknowledgedAt: null,
     acknowledgedByUserId: null,
     createdAt: new Date('2026-08-01T10:00:00.000Z'),
@@ -83,7 +85,7 @@ describe('AlertEventsService', () => {
   });
 
   describe('record', () => {
-    it('stores the label and alert type the pipeline decided, not a camera reference', async () => {
+    it('stores the label, alert type and detection metrics the pipeline decided, not a camera reference', async () => {
       await service.record(spaceId, [buildCandidate({ zoneId: 'zone-uuid' })]);
 
       expect(alertEventAccessor.create).toHaveBeenCalledWith(spaceId, {
@@ -93,6 +95,8 @@ describe('AlertEventsService', () => {
         alertType: 'intruder',
         detectedAt: new Date('2026-08-01T10:00:00.000Z'),
         snapshotId: 'snapshot-uuid',
+        personsDetected: 1,
+        confidence: 0.9,
       });
     });
 

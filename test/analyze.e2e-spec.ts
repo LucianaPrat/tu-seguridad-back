@@ -33,6 +33,11 @@ interface AnalyzeBody {
   }[];
 }
 
+interface AlertEventBody {
+  personsDetected: number | null;
+  confidence: number | null;
+}
+
 interface ErrorBody {
   code: string;
 }
@@ -151,6 +156,18 @@ describe('Analyze pipeline (e2e)', () => {
       .get(`/api/v1/snapshots/${snapshotId}`)
       .set(auth());
     expect(bytes.status).toBe(200);
+
+    // The metrics the occupancy engine measured survive the write: history is
+    // where an operator reads how many people the frame held and how sure the
+    // detector was, and a DECIMAL column that came back as a string would make
+    // the second unusable on the client.
+    const history = await request(ctx.httpServer)
+      .get('/api/v1/events')
+      .set(auth());
+    expect(history.status).toBe(200);
+    const [stored] = typedBody<{ items: AlertEventBody[] }>(history).items;
+    expect(stored.personsDetected).toBe(1);
+    expect(stored.confidence).toBe(0.9);
   });
 
   it('raises the zone alert level in partial mode', async () => {

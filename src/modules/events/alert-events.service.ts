@@ -58,6 +58,8 @@ export class AlertEventsService {
         alertType: candidate.alertType,
         detectedAt: candidate.detectedAt,
         snapshotId: candidate.snapshotId,
+        personsDetected: candidate.personsDetected,
+        confidence: candidate.confidence,
       });
       if (!event) {
         this.logger.warn(
