@@ -41,6 +41,7 @@ describe('ZonesService', () => {
     update: jest.Mock;
     countMonitorZones: jest.Mock;
   };
+  let pipelineService: { resetOccupancy: jest.Mock };
   let service: ZonesService;
 
   beforeEach(() => {
@@ -56,7 +57,12 @@ describe('ZonesService', () => {
       update: jest.fn(),
       countMonitorZones: jest.fn(),
     };
-    service = new ZonesService(zoneAccessor as never, cameraAccessor as never);
+    pipelineService = { resetOccupancy: jest.fn() };
+    service = new ZonesService(
+      zoneAccessor as never,
+      cameraAccessor as never,
+      pipelineService as never,
+    );
   });
 
   describe('create', () => {
@@ -263,6 +269,27 @@ describe('ZonesService', () => {
       });
     });
 
+    it('clears the occupancy streak so the zone stops alerting on its old shape', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone());
+      zoneAccessor.update.mockResolvedValue(
+        buildZone({ x: new Prisma.Decimal(5) }),
+      );
+
+      await service.update(spaceId, 'zone-uuid', { x: 5 });
+
+      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+        'camera-uuid',
+      );
+    });
+
+    it('leaves the occupancy streak alone when the update is refused', async () => {
+      zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
+
+      await service.update(spaceId, 'zone-uuid', { x: 5 });
+
+      expect(pipelineService.resetOccupancy).not.toHaveBeenCalled();
+    });
+
     it('refuses to move the box of a free-hand zone without its outline', async () => {
       zoneAccessor.findById.mockResolvedValue(buildZone({ points: outline }));
 
@@ -350,6 +377,9 @@ describe('ZonesService', () => {
         spaceId,
         'camera-uuid',
         { isConfigured: false },
+      );
+      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+        'camera-uuid',
       );
     });
   });
