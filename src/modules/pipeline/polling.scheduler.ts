@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { Camera } from '@prisma/client';
-import { EnvNames } from '../../cross/common/constants';
+import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
@@ -76,7 +76,22 @@ export class PollingScheduler
     for (const spaceId of spaceIds) {
       const cameras = await this.cameraAccessor.findPollableBySpace(spaceId);
       for (const camera of cameras) {
-        await this.pollOnce(spaceId, camera);
+        // One camera must not be able to end the tick. `pollOnce` maps every
+        // failure it expects onto the camera's status, so anything reaching
+        // here is unexpected — and letting it propagate would silently stop
+        // monitoring every remaining camera and every remaining space.
+        try {
+          await this.pollOnce(spaceId, camera);
+        } catch (error) {
+          this.logger.error(
+            `poll failed for camera ${camera.id}`,
+            error instanceof Error ? error.stack : String(error),
+          );
+          this.statusRegistry.record(camera.id, {
+            lastErrorAt: new Date(),
+            lastErrorCode: ErrorCode.INTERNAL_ERROR,
+          });
+        }
       }
     }
   }
