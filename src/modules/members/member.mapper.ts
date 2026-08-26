@@ -12,5 +12,6 @@ export function toMemberDto(member: SpaceMemberRosterRecord): MemberDto {
     isActive: member.user.isActive,
     lastLoginAt: member.user.lastLoginAt,
     profileCompleted: member.user.profileCompleted,
+    receiveAlerts: member.receiveAlerts,
   };
 }

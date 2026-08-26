@@ -13,16 +13,44 @@ export class AlertRoutingAccessorService {
     });
   }
 
-  upsert(
-    spaceId: string,
-    alertType: AlertType,
-    channel: AlertChannel,
-    enabled: boolean,
-  ): Promise<AlertRouting> {
-    return this.prisma.alertRouting.upsert({
-      where: { spaceId_alertType_channel: { spaceId, alertType, channel } },
-      create: { spaceId, alertType, channel, enabled },
-      update: { enabled },
+  listBySpace(spaceId: string): Promise<AlertRouting[]> {
+    return this.prisma.alertRouting.findMany({
+      where: { spaceId },
+      orderBy: [{ alertType: 'asc' }, { channel: 'asc' }],
     });
+  }
+
+  /**
+   * One transaction because the screen saves the whole matrix with one
+   * button, so a half-applied save must not be observable.
+   */
+  upsertMany(
+    spaceId: string,
+    cells: readonly {
+      alertType: AlertType;
+      channel: AlertChannel;
+      enabled: boolean;
+    }[],
+  ): Promise<AlertRouting[]> {
+    return this.prisma.$transaction(
+      cells.map((cell) =>
+        this.prisma.alertRouting.upsert({
+          where: {
+            spaceId_alertType_channel: {
+              spaceId,
+              alertType: cell.alertType,
+              channel: cell.channel,
+            },
+          },
+          create: {
+            spaceId,
+            alertType: cell.alertType,
+            channel: cell.channel,
+            enabled: cell.enabled,
+          },
+          update: { enabled: cell.enabled },
+        }),
+      ),
+    );
   }
 }
