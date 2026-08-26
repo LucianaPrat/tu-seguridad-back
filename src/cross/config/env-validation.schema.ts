@@ -113,7 +113,10 @@ export const envValidationSchema = Joi.object({
     'https://api.face-auth.me',
   ),
   [EnvNames.FACE_AUTH_DOMAIN]: secretRequiredInProduction('change-me'),
-  [EnvNames.FACE_AUTH_TOKEN]: secretRequiredInProduction('change-me'),
+  // The tenant's long-lived client token. It is not what a protected endpoint
+  // accepts: it is exchanged at `/api/v1/auth/authorize` for a short-lived
+  // session token, and only that one is sent as `Fa-Token`.
+  [EnvNames.FACE_AUTH_CLIENT_TOKEN]: secretRequiredInProduction('change-me'),
   [EnvNames.DETECT_TIMEOUT_MS]: Joi.number().default(10000),
 
   [EnvNames.DVR_TIMEOUT_MS]: Joi.number().default(5000),

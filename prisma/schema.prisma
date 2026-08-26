@@ -280,6 +280,12 @@ model AlertEvent {
   alertType            AlertType @map("alert_type")
   detectedAt           DateTime  @map("detected_at")
   snapshotId           String?   @map("snapshot_id")
+  /// Anchors inside the area on the frame that raised the alert, and the
+  /// highest detection score among them. Nullable because an alert written
+  /// before these columns existed knows neither: a zero would read as an alert
+  /// that saw nobody, which cannot happen.
+  personsDetected      Int?      @map("persons_detected")
+  confidence           Decimal?  @db.Decimal(4, 3)
   acknowledgedAt       DateTime? @map("acknowledged_at")
   acknowledgedByUserId Int?      @map("acknowledged_by_user_id")
   createdAt            DateTime  @default(now()) @map("created_at")

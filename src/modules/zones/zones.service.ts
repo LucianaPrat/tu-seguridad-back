@@ -4,6 +4,7 @@ import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
+import { PipelineService } from '../pipeline/pipeline.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { MonitorZoneDto } from './dto/zone.dto';
@@ -29,6 +30,7 @@ export class ZonesService {
   constructor(
     private readonly zoneAccessor: MonitorZoneAccessorService,
     private readonly cameraAccessor: CameraAccessorService,
+    private readonly pipelineService: PipelineService,
   ) {}
 
   async findByCamera(
@@ -143,6 +145,11 @@ export class ZonesService {
     if (!updated) {
       return buildError(ErrorCode.NOT_FOUND, `Zone ${id} not found`);
     }
+
+    // The occupancy streak is keyed by (camera, zone) and knows nothing about
+    // the shape it was accumulated against, so a reshaped zone would keep
+    // alerting on where the old one used to be until the streak ran out.
+    this.pipelineService.resetOccupancy(zone.cameraId);
     return buildData(toMonitorZoneDto(updated));
   }
 
@@ -159,6 +166,7 @@ export class ZonesService {
     }
 
     await this.syncCameraConfiguration(spaceId, zone.cameraId);
+    this.pipelineService.resetOccupancy(zone.cameraId);
     return buildData(null);
   }
 

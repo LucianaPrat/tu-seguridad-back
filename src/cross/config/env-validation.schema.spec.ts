@@ -19,7 +19,7 @@ const productionEnv = {
   [EnvNames.DATABASE_URL]: 'mysql://user:pass@127.0.0.1:3306/tu-seguridad',
   [EnvNames.FACE_AUTH_API_URL]: 'https://api.face-auth.me',
   [EnvNames.FACE_AUTH_DOMAIN]: 'tenant-domain',
-  [EnvNames.FACE_AUTH_TOKEN]: 'tenant-token',
+  [EnvNames.FACE_AUTH_CLIENT_TOKEN]: 'tenant-token',
   // 32 bytes, and deliberately not the all-zero placeholder the dev default carries.
   [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]:
     'dGVuYW50LWFsZXJ0LXRlc3Qta2V5LTMyLWJ5dGVzISE=',
@@ -155,7 +155,7 @@ describe('envValidationSchema', () => {
       [EnvNames.JWT_SECRET, 'change-me'],
       [EnvNames.JWT_REFRESH_SECRET, 'change-me-too'],
       [EnvNames.FACE_AUTH_DOMAIN, 'change-me'],
-      [EnvNames.FACE_AUTH_TOKEN, 'change-me'],
+      [EnvNames.FACE_AUTH_CLIENT_TOKEN, 'change-me'],
       [
         EnvNames.DATABASE_URL,
         'mysql://USER:PASSWORD@127.0.0.1:3306/tu-seguridad',
@@ -193,7 +193,7 @@ describe('envValidationSchema', () => {
       expect(error).toBeUndefined();
       expect(value[EnvNames.JWT_SECRET]).toBe('change-me');
       expect(value[EnvNames.JWT_REFRESH_SECRET]).toBe('change-me-too');
-      expect(value[EnvNames.FACE_AUTH_TOKEN]).toBe('change-me');
+      expect(value[EnvNames.FACE_AUTH_CLIENT_TOKEN]).toBe('change-me');
     });
   });
 });

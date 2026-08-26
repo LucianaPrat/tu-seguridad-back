@@ -44,7 +44,7 @@ Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md),
 ```bash
 nvm use                          # Node 22, see .nvmrc
 npm ci
-cp .env.example .env             # fill real MySQL creds + face-auth tenant/token
+cp .env.example .env             # fill real MySQL creds + face-auth domain/client token
 # MySQL runs in docker in this dev setup (container mysql-local, port 3306) —
 # start it before anything DB-related. `docker ps`, not `systemctl`.
 npx prisma generate
@@ -118,7 +118,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `GET /api/v1/snapshots/:id` | The stored image bytes, space-scoped. The only route that serves them. |
 | `GET/POST /api/v1/cameras/:id/zones` | List / create monitor zones, in percent of the frame. A zone is a free-hand outline (`points`) with the rectangle columns as its bounding box; a request without `points` is a plain rectangle, and the response answers the four corners either way. Coordinates are rounded to two decimals — the stored precision — before the frame-bounds check. Creating is admin-only. |
 | `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` validates the merged shape and re-derives the bounding box from a new outline; moving the box of an outlined zone without sending `points` is refused rather than dropping the outline. `DELETE` is logical. Both admin-only. |
-| `GET /api/v1/events` | Alert history of the caller's space, newest first. Filters: `alertType`, `from` (ISO 8601 lower bound). Keyset pagination: `limit` (default 25, max 100) plus the opaque `cursor` echoed back as `nextCursor`. |
+| `GET /api/v1/events` | Alert history of the caller's space, newest first. Carries what the pipeline measured on the frame that raised it — `personsDetected` and `confidence`, both null on an alert recorded before those columns existed. Filters: `alertType`, `from` (ISO 8601 lower bound). Keyset pagination: `limit` (default 25, max 100) plus the opaque `cursor` echoed back as `nextCursor`. |
 | `GET /api/v1/events/:id` | One alert event. Carries the camera label copied at detection time, so a renamed or deleted camera does not rewrite it. |
 | `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. |
 | `POST /api/v1/events/acknowledgements` | Public provider webhook. Body `{ correlationId }`. Answers `202 { accepted: true }` for a match, a repeat and an unknown id alike, so it reveals no event. Idempotent: the first callback acknowledges the event, later ones change nothing. |
@@ -141,7 +141,18 @@ Face Auth is a second credential on the same accounts: `user_face_identities` st
 
 ## face-auth upstream contract
 
-`FaceAuthClientService` (`src/modules/face-auth-client/`) POSTs camera snapshot as `multipart/form-data` to `{FACE_AUTH_API_URL}/api/v1/persons` with `Fa-Domain`/`Fa-Token` headers → gets back:
+**Two calls, not one.** The detection endpoints do not accept `FACE_AUTH_CLIENT_TOKEN`. It buys a session token first:
+
+```
+POST {FACE_AUTH_API_URL}/api/v1/auth/authorize
+  Fa-Domain: {FACE_AUTH_DOMAIN}
+  Fa-Client-Token: {FACE_AUTH_CLIENT_TOKEN}
+-> 201 { "isAuth": true, "token": "..." }
+```
+
+That `token` is what travels as `Fa-Token`. Sending the client token directly answers `403` on **every** call, which reads as an upstream outage and opens the circuit after two frames — so this is not an optimization, it is the difference between detection running and never running. The session token is opaque (no readable expiry), so it is cached in memory until the upstream refuses it: a `403` clears the cache, re-authorizes **once**, and retries. A second `403` is a real failure, not another exchange — a revoked client token must not become an authorize loop.
+
+`FaceAuthClientService` (`src/modules/face-auth-client/`) then POSTs the camera snapshot as `multipart/form-data` to `{FACE_AUTH_API_URL}/api/v1/persons` with `Fa-Domain`/`Fa-Token` headers → gets back:
 
 ```json
 {
@@ -169,10 +180,10 @@ Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit brea
 2. `FaceAuthClientService.detectPersons` gets bounding boxes + anchors back.
 3. Persons below `PipelineDefaults.CONFIDENCE_THRESHOLD` filtered out.
 4. `OccupancyEngine.evaluate` (`src/modules/pipeline/occupancy.engine.ts`) tests each anchor against the monitored areas — the outline when the operator drew one, its bounding box otherwise; one implicit full-frame area in `monitorMode = full`, the camera's `monitor_zones` in `partial` — and applies **hysteresis**: an area is entered only after `ENTER_CONSECUTIVE_POLLS` consecutive polls with ≥1 anchor inside, and exited after `EXIT_CONSECUTIVE_POLLS` consecutive misses. Single missed/extra poll (flicker) raises nothing — a miss/hit during a pending transition resets the streak to zero, it does not decrement it.
-5. Each entry becomes an alert candidate carrying the camera label as it read at detection time and the alert level of its area — `Camera.alertType` in full mode, the zone's own in partial. An alert stores the frame as a `snapshots` BLOB of its own, kept as evidence; the polling scheduler also refreshes the camera's single live row on every successful poll, whether it alerted or not. Persistence, WebSocket broadcast and channel delivery arrive with the alert-event domain.
+5. Each entry becomes an alert candidate carrying the camera label as it read at detection time, the alert level of its area, how many anchors were inside (`personsDetected`) and the highest `detScore` among them (`confidence`) — `Camera.alertType` in full mode, the zone's own in partial. An alert stores the frame as a `snapshots` BLOB of its own, kept as evidence; the polling scheduler also refreshes the camera's single live row on every successful poll, whether it alerted or not. Persistence, WebSocket broadcast and channel delivery arrive with the alert-event domain.
 6. `CameraStatusRegistry` records outcome (`lastPolledAt`, `lastSuccessAt`, `lastErrorCode`, `lastLatencyMs`, `lastPersonsDetected`, per-area occupancy) — surfaced at `GET /cameras/:id/status`.
 
-`PollingScheduler` drives steps 1–6 automatically every `POLLING_INTERVAL_SECONDS` when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable. A camera whose previous poll is still in flight is counted as skipped, not queued behind it. After detection has run, the tick refreshes that camera's live frame (see [Snapshot storage](#snapshot-storage)); the write is deliberately last and its failure only recorded on the camera's status — a thumbnail must never be able to suppress an alert. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
+`PollingScheduler` drives steps 1–6 automatically every `POLLING_INTERVAL_SECONDS` when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable. A camera whose previous poll is still in flight is counted as skipped, not queued behind it, and one that throws unexpectedly is logged and recorded on its own status rather than ending the tick — otherwise a single bad camera would stop every remaining camera and space from being monitored. After detection has run, the tick refreshes that camera's live frame (see [Snapshot storage](#snapshot-storage)); the write is deliberately last and its failure only recorded on the camera's status — a thumbnail must never be able to suppress an alert. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
 
 ## Snapshot storage
 
@@ -332,7 +343,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `DATABASE_URL_TEST` | — | Test DB — used by `test:int`/`test:e2e`, never dev DB. |
 | `SHADOW_DATABASE_URL` | — | Optional; Prisma's shadow DB for `migrate dev`. Not in original plan spec, added when needed. |
 | `DVR_PASSWORD_ENCRYPTION_KEY` | all-zero placeholder | Base64, must decode to **exactly 32 bytes** — the AES-256-GCM key for `dvrs.password_encrypted`. Required in production, where the placeholder committed in `.env.example` is rejected by name: it decodes to 32 valid bytes, so a length check alone would let a copied example file encrypt real recorder passwords under a key published in this repo. Rotating it makes every stored DVR password undecryptable — re-enter the recorder credentials through `PUT /dvr` after a rotation. Generate one with `openssl rand -base64 32`. |
-| `FACE_AUTH_API_URL` / `FACE_AUTH_DOMAIN` / `FACE_AUTH_TOKEN` | — | Upstream face-auth tenant. Required in production. |
+| `FACE_AUTH_API_URL` / `FACE_AUTH_DOMAIN` / `FACE_AUTH_CLIENT_TOKEN` | — | Upstream face-auth tenant. Required in production. `FACE_AUTH_CLIENT_TOKEN` is the tenant's long-lived **client** token — exchanged for a session token, never sent to a detection endpoint. Renamed from `FACE_AUTH_TOKEN`, which held the same value under a name implying it was the credential `/persons` accepts. |
 | `DETECT_TIMEOUT_MS` | `10000` | face-auth request timeout. |
 | `POLLING_ENABLED` | `false` | Master switch for DVR polling scheduler. |
 | `POLLING_INTERVAL_SECONDS` | `5` | Seconds between poll ticks, `1`–`3600`. One interval for the whole process, not one per camera. |

@@ -3,7 +3,15 @@ import { of, throwError } from 'rxjs';
 import { ErrorCode } from '../../cross/common/constants';
 import { FaceAuthClientService } from './face-auth-client.service';
 
-const SECRET_TOKEN = 'super-secret-fa-token-do-not-leak';
+const SECRET_TOKEN = 'super-secret-fa-client-token-do-not-leak';
+const SESSION_TOKEN = 'session-token-handed-out-by-authorize';
+
+const EMPTY_DETECTION = {
+  personsDetected: false,
+  imageWidth: 0,
+  imageHeight: 0,
+  persons: [],
+};
 
 describe('FaceAuthClientService', () => {
   let httpService: { post: jest.Mock };
@@ -17,7 +25,7 @@ describe('FaceAuthClientService', () => {
         const values: Record<string, string | number> = {
           FACE_AUTH_API_URL: 'https://api.face-auth.me',
           FACE_AUTH_DOMAIN: 'test-domain',
-          FACE_AUTH_TOKEN: SECRET_TOKEN,
+          FACE_AUTH_CLIENT_TOKEN: SECRET_TOKEN,
           DETECT_TIMEOUT_MS: 10000,
         };
         return values[key];
@@ -28,6 +36,37 @@ describe('FaceAuthClientService', () => {
       configService as never,
     );
   });
+
+  /**
+   * Two upstream calls now stand behind one `detectPersons`: the client token
+   * is exchanged at `/auth/authorize`, and only what comes back is accepted by
+   * `/persons`. Routing the mock by URL keeps every case honest about which of
+   * the two it is exercising.
+   */
+  function respondTo(detect: unknown, authorize?: unknown): void {
+    httpService.post.mockImplementation((url: string) =>
+      url.endsWith('/auth/authorize')
+        ? (authorize ?? of({ data: { isAuth: true, token: SESSION_TOKEN } }))
+        : detect,
+    );
+  }
+
+  type PostCall = [
+    string,
+    unknown,
+    { headers: Record<string, string>; timeout: number },
+  ];
+
+  function postCalls(): PostCall[] {
+    return httpService.post.mock.calls as PostCall[];
+  }
+
+  const isAuthorize = (call: PostCall): boolean =>
+    call[0].endsWith('/auth/authorize');
+
+  function detectCalls(): PostCall[] {
+    return postCalls().filter((call) => !isAuthorize(call));
+  }
 
   function axiosError(overrides: Partial<AxiosError>): AxiosError {
     const error = new AxiosError(
@@ -60,39 +99,108 @@ describe('FaceAuthClientService', () => {
         },
       ],
     };
-    httpService.post.mockReturnValue(of({ data: payload }));
+    respondTo(of({ data: payload }));
 
     const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
 
     expect(result).toEqual({ ok: true, data: payload });
   });
 
-  it('sends Fa-Domain/Fa-Token headers and the multipart file field', async () => {
-    httpService.post.mockReturnValue(
-      of({
-        data: {
-          personsDetected: false,
-          imageWidth: 0,
-          imageHeight: 0,
-          persons: [],
-        },
-      }),
-    );
+  it('exchanges the client token and sends only what came back as Fa-Token', async () => {
+    respondTo(of({ data: EMPTY_DETECTION }));
 
     await service.detectPersons(Buffer.from('img'), 'a.jpg');
 
-    const [, , options] = httpService.post.mock.calls[0] as [
-      string,
-      unknown,
-      { headers: Record<string, string>; timeout: number },
-    ];
+    const [authorizeUrl, , authorizeOptions] = postCalls()[0];
+    expect(authorizeUrl).toBe('https://api.face-auth.me/api/v1/auth/authorize');
+    expect(authorizeOptions.headers['Fa-Client-Token']).toBe(SECRET_TOKEN);
+    expect(authorizeOptions.headers['Fa-Domain']).toBe('test-domain');
+
+    const [detectUrl, , options] = detectCalls()[0];
+    expect(detectUrl).toBe('https://api.face-auth.me/api/v1/persons');
     expect(options.headers['Fa-Domain']).toBe('test-domain');
-    expect(options.headers['Fa-Token']).toBe(SECRET_TOKEN);
+    // The client token is not a credential any protected endpoint accepts;
+    // sending it directly is what answered 403 on every call.
+    expect(options.headers['Fa-Token']).toBe(SESSION_TOKEN);
+    expect(options.headers['Fa-Token']).not.toBe(SECRET_TOKEN);
     expect(options.timeout).toBe(10000);
   });
 
+  it('re-authorizes once and retries when the session token is rejected', async () => {
+    let attempt = 0;
+    httpService.post.mockImplementation((url: string) => {
+      if (url.endsWith('/auth/authorize')) {
+        return of({ data: { isAuth: true, token: SESSION_TOKEN } });
+      }
+      attempt += 1;
+      return attempt === 1
+        ? throwError(() =>
+            axiosError({
+              message: 'Request failed with status code 403',
+              response: {
+                status: 403,
+                statusText: 'Forbidden',
+                data: {},
+                headers: new AxiosHeaders(),
+                config: { headers: new AxiosHeaders() } as never,
+              },
+            }),
+          )
+        : of({ data: EMPTY_DETECTION });
+    });
+
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(result).toMatchObject({ ok: true });
+    expect(detectCalls()).toHaveLength(2);
+  });
+
+  it('gives up instead of looping when the fresh token is refused too', async () => {
+    const forbidden = () =>
+      throwError(() =>
+        axiosError({
+          message: 'Request failed with status code 403',
+          response: {
+            status: 403,
+            statusText: 'Forbidden',
+            data: {},
+            headers: new AxiosHeaders(),
+            config: { headers: new AxiosHeaders() } as never,
+          },
+        }),
+      );
+    respondTo(forbidden());
+
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(result).toMatchObject({ ok: false, code: ErrorCode.UPSTREAM_ERROR });
+    expect(detectCalls()).toHaveLength(2);
+  });
+
+  it('reuses the session token instead of authorizing on every frame', async () => {
+    respondTo(of({ data: EMPTY_DETECTION }));
+
+    await service.detectPersons(Buffer.from('img'), 'a.jpg');
+    await service.detectPersons(Buffer.from('img'), 'b.jpg');
+
+    expect(postCalls().filter(isAuthorize)).toHaveLength(1);
+    expect(detectCalls()).toHaveLength(2);
+  });
+
+  it('refuses an authorize answer that carries no session token', async () => {
+    respondTo(
+      of({ data: EMPTY_DETECTION }),
+      of({ data: { isAuth: true, token: '' } }),
+    );
+
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(result).toMatchObject({ ok: false, code: ErrorCode.UPSTREAM_ERROR });
+    expect(detectCalls()).toHaveLength(0);
+  });
+
   it('maps a timeout to UPSTREAM_TIMEOUT without leaking the token', async () => {
-    httpService.post.mockReturnValue(
+    respondTo(
       throwError(() =>
         axiosError({
           code: 'ECONNABORTED',
@@ -113,7 +221,7 @@ describe('FaceAuthClientService', () => {
   });
 
   it('maps a 500 to UPSTREAM_ERROR without leaking the token', async () => {
-    httpService.post.mockReturnValue(
+    respondTo(
       throwError(() =>
         axiosError({
           message: 'Request failed with status code 500',
@@ -138,7 +246,7 @@ describe('FaceAuthClientService', () => {
   });
 
   it('maps a 429 to UPSTREAM_ERROR without leaking the token', async () => {
-    httpService.post.mockReturnValue(
+    respondTo(
       throwError(() =>
         axiosError({
           message: 'Request failed with status code 429',
@@ -163,7 +271,7 @@ describe('FaceAuthClientService', () => {
   });
 
   it('maps a non-axios error to UPSTREAM_ERROR', async () => {
-    httpService.post.mockReturnValue(throwError(() => new Error('boom')));
+    respondTo(throwError(() => new Error('boom')));
 
     const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
 
@@ -171,7 +279,7 @@ describe('FaceAuthClientService', () => {
   });
 
   async function driveOpen(): Promise<void> {
-    httpService.post.mockReturnValue(throwError(() => new Error('boom')));
+    respondTo(throwError(() => new Error('boom')));
     for (let i = 0; i < 5; i++) {
       await service.detectPersons(Buffer.from('img'), 'a.jpg');
     }
@@ -214,18 +322,11 @@ describe('FaceAuthClientService', () => {
       expect(service.circuitState).toBe('halfOpen');
 
       httpService.post.mockClear();
-      httpService.post.mockReturnValue(
-        of({
-          data: {
-            personsDetected: false,
-            imageWidth: 0,
-            imageHeight: 0,
-            persons: [],
-          },
-        }),
-      );
+      respondTo(of({ data: EMPTY_DETECTION }));
       const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
 
+      // One probe, not two: the session token survived the open circuit, so
+      // the half-open call spends its single attempt on detection.
       expect(httpService.post).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({ ok: true });
     } finally {

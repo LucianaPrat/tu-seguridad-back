@@ -15,6 +15,10 @@ export function toAlertEventDto(event: AlertEvent): AlertEventDto {
     alertType: event.alertType,
     detectedAt: event.detectedAt,
     snapshotUrl: event.snapshotId ? snapshotUrl(event.snapshotId) : null,
+    personsDetected: event.personsDetected,
+    // `DECIMAL` comes back as a Prisma `Decimal`, which serializes as a string
+    // — the same conversion the zone rectangle needs, see `zone.mapper.ts`.
+    confidence: event.confidence === null ? null : Number(event.confidence),
     acknowledgedAt: event.acknowledgedAt,
     acknowledgedByUserId: event.acknowledgedByUserId,
   };

@@ -41,6 +41,25 @@ export class AlertEventDto {
   })
   snapshotUrl!: string | null;
 
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'Anchors inside the area on the frame that raised the alert. Null on an ' +
+      'alert recorded before the pipeline stored it.',
+  })
+  personsDetected!: number | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    example: 0.913,
+    description:
+      'Highest detection score among those anchors, 0-1. Null on an alert ' +
+      'recorded before the pipeline stored it.',
+  })
+  confidence!: number | null;
+
   @ApiPropertyOptional({ type: Date, nullable: true })
   acknowledgedAt!: Date | null;
 

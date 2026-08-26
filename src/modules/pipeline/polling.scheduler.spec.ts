@@ -126,6 +126,30 @@ describe('PollingScheduler', () => {
         expect.objectContaining({ id: 'camera-a1' }),
       );
     });
+
+    it('keeps polling the remaining cameras and spaces after one throws', async () => {
+      dvrAccessor.findSpaceIdsWithDvr.mockResolvedValue(['space-a', 'space-b']);
+      cameraAccessor.findPollableBySpace.mockImplementation((spaceId: string) =>
+        Promise.resolve(
+          spaceId === 'space-a'
+            ? [buildCamera('camera-a1'), buildCamera('camera-a2')]
+            : [buildCamera('camera-b1')],
+        ),
+      );
+      snapshotService.capture.mockImplementation((_: string, camera: Camera) =>
+        camera.id === 'camera-a1'
+          ? Promise.reject(new Error('recorder exploded'))
+          : Promise.resolve(buildData(capturedImage)),
+      );
+
+      await scheduler.tick();
+
+      expect(snapshotService.capture).toHaveBeenCalledTimes(3);
+      expect(statusRegistry.record).toHaveBeenCalledWith(
+        'camera-a1',
+        expect.objectContaining({ lastErrorCode: ErrorCode.INTERNAL_ERROR }),
+      );
+    });
   });
 
   describe('pollOnce', () => {
