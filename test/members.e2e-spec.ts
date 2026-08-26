@@ -20,6 +20,7 @@ interface MemberBody {
   isActive: boolean;
   profileCompleted: boolean;
   lastLoginAt: string | null;
+  receiveAlerts: boolean;
 }
 
 interface MemberListBody {
@@ -95,6 +96,7 @@ describe('Members (e2e)', () => {
       id: admin.userId,
       email: admin.email,
       isActive: true,
+      receiveAlerts: true,
     });
     expect(body.items[0].lastLoginAt).not.toBeNull();
   });
@@ -169,5 +171,77 @@ describe('Members (e2e)', () => {
       .send();
 
     expect(res.status).toBe(403);
+  });
+
+  describe('PATCH /api/v1/members/:userId', () => {
+    function patchMember(
+      userId: number | string,
+      body: Record<string, unknown>,
+      bearer = token,
+    ) {
+      return request(ctx.httpServer)
+        .patch(`/api/v1/members/${userId}`)
+        .set(auth(bearer))
+        .send(body);
+    }
+
+    it("flips a member's alert opt-in and persists it", async () => {
+      const member = await seedMember(
+        ctx.prisma,
+        admin.spaceId,
+        'plain@example.com',
+      );
+
+      const res = await patchMember(member.userId, { receiveAlerts: false });
+
+      expect(res.status).toBe(200);
+      expect(typedBody<MemberBody>(res)).toMatchObject({
+        id: member.userId,
+        receiveAlerts: false,
+      });
+
+      const after = typedBody<MemberListBody>(await listMembers());
+      const row = after.items.find((item) => item.id === member.userId);
+      expect(row).toMatchObject({ receiveAlerts: false });
+    });
+
+    it('refuses a plain member', async () => {
+      const member = await seedMember(
+        ctx.prisma,
+        admin.spaceId,
+        'plain@example.com',
+      );
+      const memberToken = await loginAs(
+        ctx.httpServer,
+        member.email,
+        E2E_PASSWORD,
+      );
+
+      const res = await patchMember(
+        member.userId,
+        { receiveAlerts: false },
+        memberToken,
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it('answers 404 for a user id outside the caller space', async () => {
+      const other = await seedTenant(
+        ctx.prisma,
+        'other-owner@example.com',
+        'Other Space',
+      );
+
+      const res = await patchMember(other.userId, { receiveAlerts: false });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('answers 400 for a non-numeric id', async () => {
+      const res = await patchMember('not-a-number', { receiveAlerts: false });
+
+      expect(res.status).toBe(400);
+    });
   });
 });

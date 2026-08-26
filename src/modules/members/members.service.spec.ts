@@ -20,18 +20,27 @@ function buildUser(
 
 function buildMember(
   user: Partial<SpaceMemberRosterRecord['user']> = {},
+  receiveAlerts = true,
 ): SpaceMemberRosterRecord {
-  return { user: buildUser(user) };
+  return { receiveAlerts, user: buildUser(user) };
 }
 
 describe('MembersService', () => {
   const spaceId = 'space-uuid';
 
-  let spaceMemberAccessor: { listBySpace: jest.Mock };
+  let spaceMemberAccessor: {
+    listBySpace: jest.Mock;
+    findBySpaceAndUser: jest.Mock;
+    setReceiveAlerts: jest.Mock;
+  };
   let service: MembersService;
 
   beforeEach(() => {
-    spaceMemberAccessor = { listBySpace: jest.fn() };
+    spaceMemberAccessor = {
+      listBySpace: jest.fn(),
+      findBySpaceAndUser: jest.fn(),
+      setReceiveAlerts: jest.fn(),
+    };
     service = new MembersService(spaceMemberAccessor as never);
   });
 
@@ -71,6 +80,7 @@ describe('MembersService', () => {
         isActive: true,
         lastLoginAt: null,
         profileCompleted: true,
+        receiveAlerts: true,
       });
     }
   });
@@ -136,5 +146,46 @@ describe('MembersService', () => {
     const result = await service.findAll(spaceId);
 
     expect(result).toEqual({ ok: true, data: { items: [], total: 0 } });
+  });
+
+  describe('setReceiveAlerts', () => {
+    it('answers NOT_FOUND when the member is not in the caller space', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      const result = await service.setReceiveAlerts(spaceId, 1, {
+        receiveAlerts: false,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        code: 'NOT_FOUND',
+        message: 'Member 1 not found',
+      });
+      expect(spaceMemberAccessor.setReceiveAlerts).not.toHaveBeenCalled();
+    });
+
+    it('forwards the new value and maps the updated row', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        spaceId,
+        userId: 1,
+      });
+      spaceMemberAccessor.setReceiveAlerts.mockResolvedValue(
+        buildMember({ id: 1 }, false),
+      );
+
+      const result = await service.setReceiveAlerts(spaceId, 1, {
+        receiveAlerts: false,
+      });
+
+      expect(spaceMemberAccessor.setReceiveAlerts).toHaveBeenCalledWith(
+        spaceId,
+        1,
+        false,
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.receiveAlerts).toBe(false);
+      }
+    });
   });
 });

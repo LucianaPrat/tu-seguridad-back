@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 // Only the columns the roster renders. `include: { user: true }` would hand the
 // module layer every member's `passwordHash`.
 const ROSTER_SELECT = {
+  receiveAlerts: true,
   user: {
     select: {
       id: true,
@@ -59,6 +60,18 @@ export class SpaceMemberAccessorService {
       where: { spaceId },
       select: ROSTER_SELECT,
       orderBy: { joinedAt: 'asc' },
+    });
+  }
+
+  setReceiveAlerts(
+    spaceId: string,
+    userId: number,
+    receiveAlerts: boolean,
+  ): Promise<SpaceMemberRosterRecord> {
+    return this.prisma.spaceMember.update({
+      where: { spaceId_userId: { spaceId, userId } },
+      data: { receiveAlerts },
+      select: ROSTER_SELECT,
     });
   }
 }

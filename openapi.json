@@ -27,6 +27,180 @@
         ]
       }
     },
+    "/api/v1/alert-routings": {
+      "get": {
+        "description": "The full alert type x channel grid the /channels screen renders, always six cells even for a space that never wrote any of them.",
+        "operationId": "AlertRoutingsController_findAll_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRoutingListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read the alert routing matrix",
+        "tags": [
+          "alert-routings"
+        ]
+      },
+      "put": {
+        "description": "Admin only. Partial saves are allowed — only the cells sent are written, the rest keep their stored value — and the response is always the full matrix.",
+        "operationId": "AlertRoutingsController_replace_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRoutingListDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRoutingListDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Replace the alert routing matrix",
+        "tags": [
+          "alert-routings"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "description": "Public. Opens a session for an existing account. The access token comes back in the body; the refresh token is set only as an `httpOnly`, path-scoped cookie and is never returned in a body. A wrong password and an unknown address answer the same 401, so the route cannot be used to probe which addresses have accounts.",
@@ -4621,7 +4795,7 @@
     },
     "/api/v1/members": {
       "get": {
-        "description": "Every member of the caller space, inactive ones included — the screen renders the state as a badge.",
+        "description": "Every member of the caller space, inactive ones included — the screen renders the state as a badge. Each row carries `receiveAlerts`, the per-member alert opt-in the channels screen toggles.",
         "operationId": "MembersController_findAll_v1",
         "parameters": [],
         "responses": {
@@ -4685,6 +4859,144 @@
           }
         },
         "summary": "List the members of the space",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/members/{userId}": {
+      "patch": {
+        "description": "Admin only. The id is the user id the roster returns; the member itself is untouched otherwise.",
+        "operationId": "MembersController_setReceiveAlerts_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberAlertsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member after the update.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, or a non-numeric id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No such member in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Set whether a member receives the space alerts",
         "tags": [
           "members"
         ]
@@ -4775,6 +5087,48 @@
           "statusCode",
           "code",
           "message"
+        ]
+      },
+      "AlertRoutingDto": {
+        "type": "object",
+        "properties": {
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "call",
+              "whatsapp",
+              "email"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "alertType",
+          "channel",
+          "enabled"
+        ]
+      },
+      "AlertRoutingListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertRoutingDto"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "LoginDto": {
@@ -5742,6 +6096,10 @@
             "type": "string",
             "nullable": true,
             "description": "Null until the member's first login"
+          },
+          "receiveAlerts": {
+            "type": "boolean",
+            "description": "The per-member alert opt-in the channels screen toggles: false means the member stays in the space but no alert delivery is planned for them."
           }
         },
         "required": [
@@ -5751,7 +6109,8 @@
           "lastName",
           "phone",
           "isActive",
-          "profileCompleted"
+          "profileCompleted",
+          "receiveAlerts"
         ]
       },
       "MemberListDto": {
@@ -5771,6 +6130,17 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "UpdateMemberAlertsDto": {
+        "type": "object",
+        "properties": {
+          "receiveAlerts": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "receiveAlerts"
         ]
       }
     }

@@ -11,6 +11,7 @@ import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { HitInterceptor } from './cross/interceptors/hit.interceptor';
 import { DataModule } from './data/data.module';
+import { AlertRoutingsModule } from './modules/alert-routings/alert-routings.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CameraStatusModule } from './modules/cameras/camera-status.module';
 import { CamerasModule } from './modules/cameras/cameras.module';
@@ -41,6 +42,7 @@ import { ZonesModule } from './modules/zones/zones.module';
       useFactory: createThrottlerOptions,
     }),
     DataModule,
+    AlertRoutingsModule,
     AuthModule,
     InvitationsModule,
     HealthModule,

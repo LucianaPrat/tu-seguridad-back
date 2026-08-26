@@ -37,4 +37,11 @@ export class MemberDto {
     description: "Null until the member's first login",
   })
   lastLoginAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'The per-member alert opt-in the channels screen toggles: false means the ' +
+      'member stays in the space but no alert delivery is planned for them.',
+  })
+  receiveAlerts!: boolean;
 }
