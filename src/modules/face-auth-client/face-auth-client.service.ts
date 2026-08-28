@@ -8,7 +8,10 @@ import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import { withSpan } from '../../observability/tracing.helpers';
-import { DetectPersonsResponse } from './detect-persons-response';
+import {
+  DetectPersonsResponse,
+  isDetectPersonsResponse,
+} from './detect-persons-response';
 
 type CircuitState = 'open' | 'halfOpen' | 'closed';
 
@@ -115,19 +118,19 @@ export class FaceAuthClientService {
     form.append('file', image, filename);
 
     const response = await firstValueFrom(
-      this.httpService.post<DetectPersonsResponse>(
-        `${this.apiUrl()}/api/v1/persons`,
-        form,
-        {
-          headers: {
-            ...form.getHeaders(),
-            'Fa-Domain': this.domain(),
-            'Fa-Token': sessionToken,
-          },
-          timeout: this.timeout(),
+      this.httpService.post<unknown>(`${this.apiUrl()}/api/v1/persons`, form, {
+        headers: {
+          ...form.getHeaders(),
+          'Fa-Domain': this.domain(),
+          'Fa-Token': sessionToken,
         },
-      ),
+        timeout: this.timeout(),
+      }),
     );
+
+    if (!isDetectPersonsResponse(response.data)) {
+      throw new Error('face-auth detect answered a body it cannot read');
+    }
     return response.data;
   }
 
