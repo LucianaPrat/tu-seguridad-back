@@ -106,6 +106,49 @@ describe('FaceAuthClientService', () => {
     expect(result).toEqual({ ok: true, data: payload });
   });
 
+  /**
+   * The pipeline reads `detScore` and `anchor` and nothing else, so those two
+   * are what a changed contract has to fail on. Left untyped, a dropped
+   * `anchor` reaches `toPercentPoint` as `undefined` and the camera silently
+   * stops alerting instead of reporting an upstream that changed under it.
+   */
+  it('refuses a body whose persons lost the anchor', async () => {
+    respondTo(
+      of({
+        data: {
+          personsDetected: true,
+          imageWidth: 1280,
+          imageHeight: 720,
+          persons: [
+            {
+              detScore: 0.91,
+              bbox: {
+                topLeft: { x: 417, y: 163 },
+                bottomRight: { x: 596, y: 682 },
+              },
+              bboxNorm: {
+                topLeft: { x: 0.32, y: 0.22 },
+                bottomRight: { x: 0.46, y: 0.94 },
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(result).toMatchObject({ ok: false, code: ErrorCode.UPSTREAM_ERROR });
+  });
+
+  it('accepts an empty persons array — a frame with nobody in it', async () => {
+    respondTo(of({ data: EMPTY_DETECTION }));
+
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(result).toEqual({ ok: true, data: EMPTY_DETECTION });
+  });
+
   it('exchanges the client token and sends only what came back as Fa-Token', async () => {
     respondTo(of({ data: EMPTY_DETECTION }));
 

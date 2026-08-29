@@ -39,7 +39,14 @@ import {
 
 const BCRYPT_COST = 10;
 
-export class FakeFaceAuthClientService {
+/**
+ * Structurally unchecked before: a rename on the real client left every e2e
+ * spec green against a stand-in that no longer matched it.
+ */
+export class FakeFaceAuthClientService implements Pick<
+  FaceAuthClientService,
+  'detectPersons'
+> {
   response: DetectPersonsResponse = {
     personsDetected: false,
     imageWidth: 100,

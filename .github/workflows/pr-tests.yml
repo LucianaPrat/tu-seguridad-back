@@ -24,7 +24,7 @@ env:
   ADMIN_PASSWORD: ci-admin-password
   FACE_AUTH_API_URL: https://api.face-auth.me
   FACE_AUTH_DOMAIN: ci-dummy-domain
-  FACE_AUTH_TOKEN: ci-dummy-token
+  FACE_AUTH_CLIENT_TOKEN: ci-dummy-token
   POLLING_ENABLED: 'false'
   OTEL_ENABLED: 'false'
 
