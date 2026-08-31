@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AlertEvent } from '@prisma/client';
+import { AlertEvent, EventDelivery } from '@prisma/client';
 import { ErrorCode, EventHistory } from '../../cross/common/constants';
 import { SecretTokenService } from '../../cross/crypto/secret-token.service';
 import { buildData, buildError, Either } from '../../cross/errors/either';
@@ -9,9 +9,13 @@ import {
   EventDeliveryAccessorService,
   EventDeliveryDraft,
 } from '../../data/accessors/event-delivery.accessor';
-import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
+import {
+  AlertRecipientRecord,
+  SpaceMemberAccessorService,
+} from '../../data/accessors/space-member.accessor';
 import { AcknowledgementDto } from '../auth/dto/acknowledgement.dto';
 import { AlertCandidate } from '../pipeline/alert-candidate';
+import { AlertEmailService } from './alert-email.service';
 import {
   decodeCursor,
   encodeCursor,
@@ -24,6 +28,12 @@ import { EventDeliveryDto } from './dto/event-delivery.dto';
 import { QueryAlertEventsDto } from './dto/query-alert-events.dto';
 import { ALERT_EVENT_MESSAGE, EventsGateway } from './events.gateway';
 
+/** What one event's fan-out produced, and who it was addressed to. */
+interface PlannedDeliveries {
+  deliveries: EventDelivery[];
+  recipients: AlertRecipientRecord[];
+}
+
 @Injectable()
 export class AlertEventsService {
   private readonly logger = new Logger(AlertEventsService.name);
@@ -35,6 +45,7 @@ export class AlertEventsService {
     private readonly memberAccessor: SpaceMemberAccessorService,
     private readonly secretToken: SecretTokenService,
     private readonly gateway: EventsGateway,
+    private readonly alertEmail: AlertEmailService,
   ) {}
 
   /**
@@ -68,11 +79,20 @@ export class AlertEventsService {
         continue;
       }
 
-      await this.planDeliveries(spaceId, event);
+      const planned = await this.planDeliveries(spaceId, event);
       this.gateway.broadcast(
         spaceId,
         ALERT_EVENT_MESSAGE,
         toAlertEventDto(event),
+      );
+      // Not awaited: the socket broadcast is what the dashboard reacts to, and
+      // an SMTP round trip per recipient would push it — and the next poll of
+      // this camera — behind a relay this process does not control. `dispatch`
+      // never rejects, so there is no unhandled rejection to leak here.
+      void this.alertEmail.dispatch(
+        event,
+        planned.deliveries,
+        planned.recipients,
       );
       events.push(event);
     }
@@ -159,12 +179,17 @@ export class AlertEventsService {
    * own correlation id: the id is what an inbound reply is resolved by, so two
    * recipients sharing one would make either of them the acknowledger.
    *
-   * Rows are written `pending`. Nothing sends them yet — see the tracker.
+   * Rows are written `pending`. `AlertEmailService` moves the `email` ones;
+   * `call` and `whatsapp` have no sender yet and stay as planned.
+   *
+   * The rows are read back rather than derived from the drafts because only the
+   * stored row carries its id, and the accessor is allowed to drop a draft whose
+   * recipient is not a member of the space.
    */
   private async planDeliveries(
     spaceId: string,
     event: AlertEvent,
-  ): Promise<number> {
+  ): Promise<PlannedDeliveries> {
     const [routings, recipients] = await Promise.all([
       this.routingAccessor.findEnabled(spaceId, event.alertType),
       this.memberAccessor.findActiveRecipients(spaceId),
@@ -177,6 +202,18 @@ export class AlertEventsService {
         correlationId: this.secretToken.generate(),
       })),
     );
-    return this.deliveryAccessor.createManyForEvent(spaceId, event.id, drafts);
+    const created = await this.deliveryAccessor.createManyForEvent(
+      spaceId,
+      event.id,
+      drafts,
+    );
+    if (created === 0) {
+      return { deliveries: [], recipients };
+    }
+
+    return {
+      deliveries: await this.deliveryAccessor.findByEventId(spaceId, event.id),
+      recipients,
+    };
   }
 }

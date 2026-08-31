@@ -74,6 +74,44 @@ export class EventDeliveryAccessorService {
   }
 
   /**
+   * Records a sent attempt. Guarded on `pending` rather than written blind: an
+   * inbound acknowledgement can land before the send call returns, and that
+   * callback already set the row `delivered` — overwriting it with `sent` would
+   * lose the acknowledgement the operator actually made.
+   */
+  async markSent(
+    deliveryId: string,
+    providerMessageId: string | null,
+    now = new Date(),
+  ): Promise<boolean> {
+    const updated = await this.prisma.eventDelivery.updateMany({
+      where: { id: deliveryId, status: EventDeliveryStatus.pending },
+      data: {
+        status: EventDeliveryStatus.sent,
+        sentAt: now,
+        providerMessageId,
+      },
+    });
+    return updated.count === 1;
+  }
+
+  /**
+   * Same `pending` guard, same reason. `error` is what went wrong, never a
+   * credential.
+   *
+   * `sentAt` stays null: nothing was sent. When the attempt was made is
+   * `updatedAt`, and a failed row carrying a send time would read to the history
+   * screen as a message that went out.
+   */
+  async markFailed(deliveryId: string, error: string): Promise<boolean> {
+    const updated = await this.prisma.eventDelivery.updateMany({
+      where: { id: deliveryId, status: EventDeliveryStatus.pending },
+      data: { status: EventDeliveryStatus.failed, error },
+    });
+    return updated.count === 1;
+  }
+
+  /**
    * Claims one inbound provider callback and acknowledges its event in the same
    * transaction. Split in two, a failure between them records a reply the
    * history never shows as acknowledged.

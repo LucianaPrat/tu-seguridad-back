@@ -7,6 +7,7 @@ import { asExpiresIn } from '../../cross/common/jwt-payload.type';
 import { JwtAuthGuard } from '../../cross/guards/jwt-auth.guard';
 import { ProfileCompletedGuard } from '../../cross/guards/profile-completed.guard';
 import { RolesGuard } from '../../cross/guards/roles.guard';
+import { MailerService } from '../../cross/mail/mailer.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { CredentialDeliveryPort } from './credential-delivery.port';
@@ -47,14 +48,15 @@ import { SmtpCredentialDeliveryService } from './smtp-credential-delivery.servic
     // without it delivery stays the logging placeholder, so a machine with no
     // relay — CI included — behaves exactly as it did before a transport existed.
     // The port is what the domain depends on, so the choice lives on this line
-    // only. Both implementations take nothing but ConfigService, hence the
-    // direct construction instead of two more providers.
+    // only. The logged implementation takes nothing but ConfigService; the SMTP
+    // one also takes MailerService, hence the direct construction instead of two
+    // more providers.
     {
       provide: CredentialDeliveryPort,
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
+      inject: [ConfigService, MailerService],
+      useFactory: (config: ConfigService, mailer: MailerService) =>
         config.get<boolean>(EnvNames.MAIL_ENABLED)
-          ? new SmtpCredentialDeliveryService(config)
+          ? new SmtpCredentialDeliveryService(config, mailer)
           : new LoggedCredentialDeliveryService(config),
     },
     // Authentication first, then authorization, then the profile-completion gate.

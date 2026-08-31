@@ -1,19 +1,12 @@
 import { Logger } from '@nestjs/common';
-import { createTransport } from 'nodemailer';
 import { EnvNames } from '../../cross/common/constants';
+import { MailerService } from '../../cross/mail/mailer.service';
 import { DeliveredCredentialPurpose } from './credential-delivery.port';
 import { SmtpCredentialDeliveryService } from './smtp-credential-delivery.service';
-
-jest.mock('nodemailer', () => ({ createTransport: jest.fn() }));
-
-const createTransportMock = createTransport as jest.MockedFunction<
-  typeof createTransport
->;
 
 const TOKEN = 'raw-secret-token';
 
 type SentMail = {
-  from: string;
   to: string;
   subject: string;
   text: string;
@@ -28,65 +21,33 @@ describe('SmtpCredentialDeliveryService', () => {
     expiresAt: new Date('2026-08-25T00:00:00.000Z'),
   };
 
-  let sendMail: jest.Mock;
+  let mailer: { send: jest.Mock };
 
   function serviceFor(overrides: Record<string, unknown> = {}) {
     const env: Record<string, unknown> = {
-      [EnvNames.SMTP_HOST]: '127.0.0.1',
-      [EnvNames.SMTP_PORT]: 1025,
-      [EnvNames.MAIL_FROM]: 'Tu Seguridad <no-reply@tu-seguridad.local>',
       [EnvNames.APP_BASE_URL]: 'http://localhost:5173',
       ...overrides,
     };
-    return new SmtpCredentialDeliveryService({
-      get: (key: string) => env[key],
-    } as never);
+    return new SmtpCredentialDeliveryService(
+      { get: (key: string) => env[key] } as never,
+      mailer as unknown as MailerService,
+    );
   }
 
   function sentMessage(): SentMail {
-    const calls = sendMail.mock.calls as SentMail[][];
+    const calls = mailer.send.mock.calls as SentMail[][];
     return calls[0][0];
   }
 
   beforeEach(() => {
-    sendMail = jest.fn().mockResolvedValue({ messageId: '<mail-1@local>' });
-    createTransportMock.mockReturnValue({ sendMail } as never);
+    mailer = {
+      send: jest.fn().mockResolvedValue({ messageId: '<mail-1@local>' }),
+    };
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
-  });
-
-  it('leaves TLS implicit only on port 465', () => {
-    serviceFor({ [EnvNames.SMTP_PORT]: 465 });
-    expect(createTransportMock).toHaveBeenCalledWith(
-      expect.objectContaining({ port: 465, secure: true }),
-    );
-
-    serviceFor();
-    expect(createTransportMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ port: 1025, secure: false }),
-    );
-  });
-
-  it('omits auth entirely when no SMTP user is configured', () => {
-    serviceFor({ [EnvNames.SMTP_USER]: '' });
-    expect(createTransportMock).toHaveBeenCalledWith(
-      expect.objectContaining({ auth: undefined }),
-    );
-  });
-
-  it('authenticates when a user is configured', () => {
-    serviceFor({
-      [EnvNames.SMTP_USER]: 'sender@gmail.com',
-      [EnvNames.SMTP_PASSWORD]: 'app-password',
-    });
-    expect(createTransportMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        auth: { user: 'sender@gmail.com', pass: 'app-password' },
-      }),
-    );
   });
 
   it.each([
@@ -113,7 +74,6 @@ describe('SmtpCredentialDeliveryService', () => {
 
       const message = sentMessage();
       expect(message.to).toBe('member@example.com');
-      expect(message.from).toBe('Tu Seguridad <no-reply@tu-seguridad.local>');
       expect(message.subject).toBe(subject);
       const link = `http://localhost:5173${path}?token=${TOKEN}`;
       expect(message.text).toContain(link);
@@ -151,7 +111,7 @@ describe('SmtpCredentialDeliveryService', () => {
 
   it('logs and absorbs a transport failure instead of failing the caller', async () => {
     const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
-    sendMail.mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:1025'));
+    mailer.send.mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:1025'));
 
     await expect(serviceFor().deliver(delivery)).resolves.toBeUndefined();
 

@@ -123,7 +123,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `GET/PUT/DELETE /api/v1/zones/:id` | `PUT` validates the merged shape and re-derives the bounding box from a new outline; moving the box of an outlined zone without sending `points` is refused rather than dropping the outline. `DELETE` is logical. Both admin-only. |
 | `GET /api/v1/events` | Alert history of the caller's space, newest first. Carries what the pipeline measured on the frame that raised it — `personsDetected` and `confidence`, both null on an alert recorded before those columns existed. Filters: `alertType`, `from` (ISO 8601 lower bound). Keyset pagination: `limit` (default 25, max 100) plus the opaque `cursor` echoed back as `nextCursor`. |
 | `GET /api/v1/events/:id` | One alert event. Carries the camera label copied at detection time, so a renamed or deleted camera does not rewrite it. |
-| `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. |
+| `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. `email` rows carry their real outcome — `sent` with the relay's message id, or `failed` with the reason; `call` and `whatsapp` stay `pending` until those channels get a sender. |
 | `POST /api/v1/events/acknowledgements` | Public provider webhook. Body `{ correlationId }`. Answers `202 { accepted: true }` for a match, a repeat and an unknown id alike, so it reveals no event. Idempotent: the first callback acknowledges the event, later ones change nothing. |
 | `POST /api/v1/streaming/authorize` | Public media-server hook, called for the HLS playlist and **every** segment. The reader bearer token arrives in the body, validated by the same verifier the bearer guard uses. Only `read` over `hls`, only a camera inside the space the token names — a granted `publish` would let someone feed fake video to the dashboard. |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
@@ -207,6 +207,16 @@ The level goes **up on the raw sighting and down on the confirmed one**. A perso
 A poll that fails — unreachable recorder, upstream detection error, or a skip because the previous poll is still in flight — re-arms the camera at the level it already had. The frame said nothing about how fast to go, and dropping an unreachable recorder back onto the base tick would hammer exactly the thing already struggling.
 
 A `monitorMode = full` camera never sees `active`: its whole frame is the monitored area, so any person it detects is already a detection. The current level is on `GET /cameras/:id/status` as `pollLevel` / `pollIntervalSeconds`, and each real transition logs one line.
+
+## Alert emails
+
+An alert raised by the pipeline is fanned out into one `event_deliveries` row per enabled channel per opted-in active member — the routing matrix (`PUT /alert-routings`) crossed with the roster's `receiveAlerts` flag. Email is the one channel with a sender; `call` and `whatsapp` rows are planned and stay `pending`.
+
+- **The switch is `MAIL_ENABLED`**, the same one credential mail uses, over the same transport (`src/cross/mail/mailer.service.ts`). Off, nothing is sent and every row stays `pending` — a machine with no relay behaves exactly as before a sender existed. Local setup, and pointing the same code at Gmail: [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+- **What the mail says**: the alert type, the camera label copied at detection time, the detection timestamp, the number of people in the frame, and a link to `APP_BASE_URL/events/:id`.
+- **What it never says**: the delivery `correlationId` — that is the only credential `POST /events/acknowledgements` accepts, and mailing it would hand an acknowledgement to anyone who reads the mailbox — and the snapshot bytes, which stay behind the authenticated `GET /snapshots/:id`.
+- **Outcome per row**: `sent` with the relay's message id, or `failed` with the reason. Both writes are guarded on the row still being `pending`, so an acknowledgement that arrives while the send is in flight is not overwritten.
+- **Not awaited.** The socket broadcast reaches the dashboard first, and an SMTP round trip per recipient never delays it or the camera's next poll. The cost of that: no retry, no queue, and a process restart mid-fan-out leaves the rest `pending` for good. A relay failure fails one row and the loop continues.
 
 ## Snapshot storage
 
@@ -387,11 +397,11 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector. |
 | `OTEL_SERVICE_NAME` | `tu-seguridad-back` | Reported service name. |
 | `SENTRY_DSN` | — | Opt-in error tracking. Unset = disabled (no network activity). Only unexpected 500s reported; secrets scrubbed. |
-| `MAIL_ENABLED` | `false` | Master switch for credential delivery over SMTP. Off = invitation/magic-link/reset tokens are only logged, no relay contacted. Forced off by the e2e harness. |
+| `MAIL_ENABLED` | `false` | Master switch for every outbound mail: credential delivery and alert emails both. Off = invitation/magic-link/reset tokens are only logged and planned alert deliveries stay `pending`, no relay contacted. Forced off by the e2e harness. |
 | `SMTP_HOST` / `SMTP_PORT` | `127.0.0.1` / `1025` | Defaults describe the local mailpit container ([`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md)). Port `465` switches to implicit TLS; anything else stays plain or negotiates STARTTLS. |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Both optional. Empty user means authentication is skipped entirely, which is what mailpit wants. Never a `smtp://user:pass@host` URL — separate values keep `secretlint` quiet and the password out of a loggable string. |
 | `MAIL_FROM` | `Tu Seguridad <no-reply@tu-seguridad.local>` | `From` header, address or `Name <address>` form. |
-| `APP_BASE_URL` | `http://localhost:5173` | Origin the emailed links point at — the frontend, not this API. A subpath (`https://host/app`) is preserved. |
+| `APP_BASE_URL` | `http://localhost:5173` | Origin the emailed links point at — the frontend, not this API. A subpath (`https://host/app`) is preserved. Used by the credential links and by the `/events/:id` link in an alert email. |
 
 ## Docs map
 
@@ -418,7 +428,8 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 - **02 — infra hardening** ([`plans/02.infra-hardening.md`](plans/02.infra-hardening.md), in progress): CD pipeline, circuit breaker, Prometheus metrics, Sentry, dependency scanning, `sops` secrets, deeper health checks + graceful shutdown, OpenAPI contract. **Deferred** in that plan: Docker, anything Redis-dependent (distributed throttler storage, cache, socket.io adapter, BullMQ) — cost-prohibitive at current scale.
 - **03 — tenant alert data model** ([`plans/03.tenant-alert-data-model.md`](plans/03.tenant-alert-data-model.md), **done**): spaces, memberships and invitations, DVR-owned cameras, rectangle monitor zones, MySQL snapshots, alert history and delivery planning.
 - **Deferred out of 03, in rough order of need:**
-  - The notification provider itself. Delivery rows are planned and stay `pending` — `sent`/`failed`, `providerMessageId` and `error` exist in the schema with no writer. The sender interface ships with the provider that needs it, not before.
+  - The `call` and `whatsapp` providers. Email ships (see [Alert emails](#alert-emails)); those two channels are still planned-only, and their rows stay `pending` because no code sends them. Each provider ships with its own adapter, not with a shared abstraction invented ahead of it.
+  - Alert-email retry and a drain for whatever was `pending` when the process died. Sending is fire-and-forget today.
   - Webhook authentication for `POST /events/acknowledgements`. It is public today and the correlation id is its only credential.
   - Snapshot retention and the move to object storage ([Snapshot storage](#snapshot-storage)), plus alert-event retention and partitioning.
   - Detection cooldown and deduplication — a camera that keeps seeing someone raises one alert per hysteresis cycle, and nothing suppresses a burst.

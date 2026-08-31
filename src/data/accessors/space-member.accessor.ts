@@ -25,6 +25,18 @@ export type SpaceMemberRosterRecord = Prisma.SpaceMemberGetPayload<{
   select: typeof ROSTER_SELECT;
 }>;
 
+// Who an alert actually goes to. Separate from ROSTER_SELECT because a delivery
+// needs the address and the first name and nothing else — the roster's badges
+// are not a notification's business.
+const ALERT_RECIPIENT_SELECT = {
+  userId: true,
+  user: { select: { email: true, firstName: true } },
+} as const;
+
+export type AlertRecipientRecord = Prisma.SpaceMemberGetPayload<{
+  select: typeof ALERT_RECIPIENT_SELECT;
+}>;
+
 @Injectable()
 export class SpaceMemberAccessorService {
   constructor(private readonly prisma: PrismaService) {}
@@ -46,9 +58,10 @@ export class SpaceMemberAccessorService {
     });
   }
 
-  findActiveRecipients(spaceId: string): Promise<SpaceMember[]> {
+  findActiveRecipients(spaceId: string): Promise<AlertRecipientRecord[]> {
     return this.prisma.spaceMember.findMany({
       where: { spaceId, receiveAlerts: true, user: { isActive: true } },
+      select: ALERT_RECIPIENT_SELECT,
       orderBy: { userId: 'asc' },
     });
   }

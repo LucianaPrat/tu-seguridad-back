@@ -681,4 +681,120 @@ describe('tenant-scoped accessors (int)', () => {
     });
     expect(acknowledged?.acknowledgedAt).toEqual(delivery.inboundReceivedAt);
   });
+
+  it('marks a pending delivery sent and stamps the sent time and provider id', async () => {
+    const tenant = await createTenant('mark-sent');
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      cameraLabelSnapshot: tenant.camera.name,
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+    await deliveryAccessor.createManyForEvent(tenant.space.id, event.id, [
+      {
+        channel: 'email',
+        recipientUserId: tenant.user.id,
+        correlationId: 'correlation-mark-sent',
+      },
+    ]);
+    const [delivery] = await deliveryAccessor.findByEventId(
+      tenant.space.id,
+      event.id,
+    );
+
+    const result = await deliveryAccessor.markSent(
+      delivery.id,
+      'provider-message-1',
+    );
+
+    expect(result).toBe(true);
+    const updated = await prisma.eventDelivery.findUnique({
+      where: { id: delivery.id },
+    });
+    expect(updated).toMatchObject({
+      status: 'sent',
+      providerMessageId: 'provider-message-1',
+    });
+    expect(updated?.sentAt).not.toBeNull();
+  });
+
+  it('leaves an already-sent delivery unchanged on a second markSent call', async () => {
+    const tenant = await createTenant('mark-sent-twice');
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      cameraLabelSnapshot: tenant.camera.name,
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+    await deliveryAccessor.createManyForEvent(tenant.space.id, event.id, [
+      {
+        channel: 'email',
+        recipientUserId: tenant.user.id,
+        correlationId: 'correlation-mark-sent-twice',
+      },
+    ]);
+    const [delivery] = await deliveryAccessor.findByEventId(
+      tenant.space.id,
+      event.id,
+    );
+    expect(
+      await deliveryAccessor.markSent(delivery.id, 'provider-message-1'),
+    ).toBe(true);
+
+    const second = await deliveryAccessor.markSent(
+      delivery.id,
+      'provider-message-2',
+    );
+
+    expect(second).toBe(false);
+    const updated = await prisma.eventDelivery.findUnique({
+      where: { id: delivery.id },
+    });
+    expect(updated).toMatchObject({
+      status: 'sent',
+      providerMessageId: 'provider-message-1',
+    });
+  });
+
+  it('keeps an inbound acknowledgement when a failure report arrives afterward', async () => {
+    const tenant = await createTenant('mark-failed-after-ack');
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      cameraLabelSnapshot: tenant.camera.name,
+      alertType: 'intruder',
+      detectedAt: new Date('2026-08-01T00:00:00.000Z'),
+    });
+    if (!event) {
+      throw new Error('fixture event creation unexpectedly failed');
+    }
+    await deliveryAccessor.createManyForEvent(tenant.space.id, event.id, [
+      {
+        channel: 'email',
+        recipientUserId: tenant.user.id,
+        correlationId: 'correlation-mark-failed-after-ack',
+      },
+    ]);
+    const [delivery] = await deliveryAccessor.findByEventId(
+      tenant.space.id,
+      event.id,
+    );
+    await deliveryAccessor.consumeInbound('correlation-mark-failed-after-ack');
+
+    const result = await deliveryAccessor.markFailed(
+      delivery.id,
+      'relay refused',
+    );
+
+    expect(result).toBe(false);
+    const updated = await prisma.eventDelivery.findUnique({
+      where: { id: delivery.id },
+    });
+    expect(updated).toMatchObject({ status: 'delivered', error: null });
+  });
 });

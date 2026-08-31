@@ -56,6 +56,7 @@ describe('AlertEventsService', () => {
   let memberAccessor: { findActiveRecipients: jest.Mock };
   let secretToken: { generate: jest.Mock };
   let gateway: { broadcast: jest.Mock };
+  let alertEmail: { dispatch: jest.Mock };
   let service: AlertEventsService;
 
   beforeEach(() => {
@@ -74,6 +75,7 @@ describe('AlertEventsService', () => {
     let issued = 0;
     secretToken = { generate: jest.fn(() => `correlation-${++issued}`) };
     gateway = { broadcast: jest.fn() };
+    alertEmail = { dispatch: jest.fn().mockResolvedValue(undefined) };
     service = new AlertEventsService(
       alertEventAccessor as never,
       deliveryAccessor as never,
@@ -81,6 +83,7 @@ describe('AlertEventsService', () => {
       memberAccessor as never,
       secretToken,
       gateway as never,
+      alertEmail as never,
     );
   });
 
@@ -174,6 +177,47 @@ describe('AlertEventsService', () => {
       expect(events).toEqual([]);
       expect(deliveryAccessor.createManyForEvent).not.toHaveBeenCalled();
       expect(gateway.broadcast).not.toHaveBeenCalled();
+      expect(alertEmail.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('hands the stored delivery rows and their recipients to the email channel', async () => {
+      const rows = [
+        {
+          id: 'delivery-1',
+          channel: 'email',
+          recipientUserId: 1,
+          status: 'pending',
+        },
+      ];
+      routingAccessor.findEnabled.mockResolvedValue([{ channel: 'email' }]);
+      memberAccessor.findActiveRecipients.mockResolvedValue([
+        { userId: 1, user: { email: 'owner@example.com', firstName: 'Ada' } },
+      ]);
+      deliveryAccessor.createManyForEvent.mockResolvedValue(1);
+      deliveryAccessor.findByEventId.mockResolvedValue(rows);
+
+      await service.record(spaceId, [buildCandidate()]);
+
+      expect(deliveryAccessor.findByEventId).toHaveBeenCalledWith(
+        spaceId,
+        'event-1',
+      );
+      expect(alertEmail.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'event-1' }),
+        rows,
+        [{ userId: 1, user: { email: 'owner@example.com', firstName: 'Ada' } }],
+      );
+    });
+
+    it('reads no delivery row back when the fan-out planned nothing', async () => {
+      await service.record(spaceId, [buildCandidate()]);
+
+      expect(deliveryAccessor.findByEventId).not.toHaveBeenCalled();
+      expect(alertEmail.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'event-1' }),
+        [],
+        [],
+      );
     });
   });
 

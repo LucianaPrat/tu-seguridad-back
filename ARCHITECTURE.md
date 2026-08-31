@@ -56,6 +56,21 @@ Decisions from infra-hardening plan ([`plans/02.infra-hardening.md`](plans/02.in
   long as the scope is stated where it is configured. Why this scope and not `--audit-level=high`:
   [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
 
+## Outbound mail
+
+One transport for the whole process, `MailerService` (`src/cross/mail/mailer.service.ts`), provided by a `@Global()` `MailModule`. It exists because two unrelated features send mail — credentials from `AuthModule`, alerts from `EventsModule` — and the repo's "point the same code at Gmail with four `.env` variables" property has to hold for both at once. Two transports would drift the first time one gained a TLS option or a pool setting the other did not. The service is the transport and nothing else: it throws on relay failure, and what a failure *means* is each sender's decision.
+
+Those decisions differ, which is why there is no shared "mail sender" abstraction above it:
+
+- **Credential delivery swallows the failure.** `CredentialRecoveryService` owes an identical answer for a registered and an unregistered address, so a throw would make a failed reset distinguishable from a successful one. It is also the reason that path keeps its two-implementation port (`CredentialDeliveryPort` + the logging placeholder): a developer with no relay still has to be able to accept an invitation, so the dev fallback *prints the token*.
+- **Alert email records the failure.** `AlertEmailService` (`src/modules/events/alert-email.service.ts`) has an `event_deliveries` row to write the outcome to, so a failure becomes `failed` plus a reason. It needs no second implementation and no port: nothing has to be printed when mail is off, so it is one service that reads `MAIL_ENABLED` itself and returns early. `call` and `whatsapp` have no sender at all, and their rows stay `pending` — the honest state for an attempt nobody made.
+
+Two invariants in `AlertEmailService` are not stylistic. It **never throws** — the pipeline calls it without awaiting, so a rejection would surface as an unhandled one and a relay outage would read as a bug in detection. And the HTML part **escapes** the camera label and the member's first name, the only place operator-supplied text stops being data; a label of `<a href="…">` would otherwise render as a link the recipient can click.
+
+`markSent`/`markFailed` are guarded on `status: pending` rather than written blind, because `consumeInbound` can set the row `delivered` while the send is still in flight, and overwriting that with `sent` would lose the acknowledgement an operator actually made.
+
+`EventDelivery.error` is served by `GET /events/:id/deliveries`, which every member of the space can read, so what a relay chose to say ends up in an API response. The stored reason is capped at 500 characters and the log keeps the whole thing. The cap is about a `TEXT` column and an unbounded upstream string, not about secrecy: an SMTP rejection can name the relay host, and in a single-tenant space whose members the owner invited, that is accepted rather than scrubbed — the same call the HLS URL gets under [Live streaming](README.md#live-streaming).
+
 ## Testing layers
 
 - **Unit** (`*.spec.ts`): root jest config, `testRegex: ".*\\.spec\\.ts$"`. Does NOT match `*.int-spec.ts` (different suffix shape: `-spec` not `.spec`) — no DB, no network.
