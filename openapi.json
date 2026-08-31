@@ -3781,7 +3781,7 @@
     },
     "/api/v1/events/acknowledgements": {
       "post": {
-        "description": "The inbound webhook for a notification provider. Public: no webhook authentication scheme is chosen yet, so the correlation id issued with the delivery is the only credential, and it is never returned by any other route. The first callback acknowledges the alert; a repeat and an id that matches nothing are answered identically, so the response reveals no event.",
+        "description": "Two callers use this route, and the field they send says which. A notification provider sends `correlationId`, the value issued with the delivery, which no other route returns and no message ever carries. The recipient of an alert email sends `token`, the value in the acknowledge link of that mail — the frontend page behind the link posts it here. Exactly one of the two, never both. The first call acknowledges the alert; a repeat, an unknown id and a token that fails its signature are answered identically, so the response reveals no event. Public: no session exists on either path.",
         "operationId": "AlertEventsController_acknowledge_v1",
         "parameters": [],
         "requestBody": {
@@ -3796,7 +3796,7 @@
         },
         "responses": {
           "202": {
-            "description": "Callback accepted. Same answer for a match, a repeat and an unknown id.",
+            "description": "Accepted. Same answer for a match, a repeat, an unknown id and a bad token.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3806,7 +3806,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_ERROR` — Missing `correlationId`, or one over the maximum token length.",
+            "description": "`VALIDATION_ERROR` — Both credentials sent or neither, or one over the maximum token length.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3833,7 +3833,7 @@
         "security": [
           {}
         ],
-        "summary": "Acknowledge an alert from a provider callback",
+        "summary": "Acknowledge an alert with a delivery credential",
         "tags": [
           "events"
         ]
@@ -5797,12 +5797,13 @@
         "properties": {
           "correlationId": {
             "type": "string",
-            "description": "The correlation id sent with the delivery"
+            "description": "The correlation id sent with the delivery. Provider callbacks only."
+          },
+          "token": {
+            "type": "string",
+            "description": "The token from the acknowledge link of an alert email."
           }
-        },
-        "required": [
-          "correlationId"
-        ]
+        }
       },
       "EventDeliveryDto": {
         "type": "object",

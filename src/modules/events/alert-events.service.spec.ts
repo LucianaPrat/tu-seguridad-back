@@ -6,6 +6,9 @@ import { ALERT_EVENT_MESSAGE } from './events.gateway';
 
 const spaceId = 'space-uuid';
 
+/** Every acknowledgement outcome answers this, so the route reveals no event. */
+const ACCEPTED = { ok: true, data: { accepted: true } };
+
 function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
   return {
     id: 'event-1',
@@ -57,6 +60,7 @@ describe('AlertEventsService', () => {
   let secretToken: { generate: jest.Mock };
   let gateway: { broadcast: jest.Mock };
   let alertEmail: { dispatch: jest.Mock };
+  let ackToken: { issue: jest.Mock; resolve: jest.Mock };
   let service: AlertEventsService;
 
   beforeEach(() => {
@@ -76,6 +80,10 @@ describe('AlertEventsService', () => {
     secretToken = { generate: jest.fn(() => `correlation-${++issued}`) };
     gateway = { broadcast: jest.fn() };
     alertEmail = { dispatch: jest.fn().mockResolvedValue(undefined) };
+    ackToken = {
+      issue: jest.fn(() => 'a.token'),
+      resolve: jest.fn(() => null),
+    };
     service = new AlertEventsService(
       alertEventAccessor as never,
       deliveryAccessor as never,
@@ -84,6 +92,7 @@ describe('AlertEventsService', () => {
       secretToken,
       gateway as never,
       alertEmail as never,
+      ackToken as never,
     );
   });
 
@@ -359,14 +368,56 @@ describe('AlertEventsService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
 
-      const matched = await service.acknowledgeInbound('correlation-1');
-      const repeated = await service.acknowledgeInbound('correlation-1');
-      const unknown = await service.acknowledgeInbound('never-issued');
+      const matched = await service.acknowledgeInbound({
+        correlationId: 'correlation-1',
+      });
+      const repeated = await service.acknowledgeInbound({
+        correlationId: 'correlation-1',
+      });
+      const unknown = await service.acknowledgeInbound({
+        correlationId: 'never-issued',
+      });
 
-      const accepted = { ok: true, data: { accepted: true } };
-      expect(matched).toEqual(accepted);
-      expect(repeated).toEqual(accepted);
-      expect(unknown).toEqual(accepted);
+      expect(matched).toEqual(ACCEPTED);
+      expect(repeated).toEqual(ACCEPTED);
+      expect(unknown).toEqual(ACCEPTED);
+    });
+
+    it('resolves an emailed token to its delivery and claims that row by id', async () => {
+      ackToken.resolve.mockReturnValue('delivery-9');
+
+      const result = await service.acknowledgeInbound({ token: 'a.token' });
+
+      expect(ackToken.resolve).toHaveBeenCalledWith('a.token');
+      expect(deliveryAccessor.consumeInbound).toHaveBeenCalledWith({
+        id: 'delivery-9',
+      });
+      expect(result).toEqual(ACCEPTED);
+    });
+
+    it('answers a token that fails its signature exactly like a good one', async () => {
+      ackToken.resolve.mockReturnValue(null);
+
+      const result = await service.acknowledgeInbound({ token: 'forged' });
+
+      expect(deliveryAccessor.consumeInbound).not.toHaveBeenCalled();
+      expect(result).toEqual(ACCEPTED);
+    });
+
+    it('refuses a call that presents both credentials or neither', async () => {
+      for (const dto of [
+        {},
+        { correlationId: 'correlation-1', token: 'a.token' },
+      ]) {
+        const result = await service.acknowledgeInbound(dto);
+
+        expect(result).toEqual({
+          ok: false,
+          code: ErrorCode.VALIDATION_ERROR,
+          message: 'Send exactly one of correlationId or token',
+        });
+      }
+      expect(deliveryAccessor.consumeInbound).not.toHaveBeenCalled();
     });
   });
 });

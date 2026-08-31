@@ -7,12 +7,26 @@ import { EnvNames } from '../common/constants';
 /** Implicit TLS. Every other port negotiates STARTTLS or stays plain. */
 const IMPLICIT_TLS_PORT = 465;
 
+/**
+ * A file carried inside the message. `cid` is what makes it *inline*: the HTML
+ * part references it as `cid:<value>`, so the image renders without the client
+ * fetching anything — which also means no tracking pixel and no remote-image
+ * warning banner.
+ */
+export interface OutboundAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+  cid: string;
+}
+
 /** One message. `from` is not a caller's choice — the transport owns it. */
 export interface OutboundMail {
   to: string;
   subject: string;
   text: string;
   html: string;
+  attachments?: OutboundAttachment[];
 }
 
 /**

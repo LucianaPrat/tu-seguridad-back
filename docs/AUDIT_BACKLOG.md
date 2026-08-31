@@ -390,9 +390,12 @@ authentication for `POST /events/acknowledgements` (public today, correlation id
 credential) — stay where `README.md` → *Roadmap* put them. They are scope, not defects, and they
 belong in `plans/04.*` when that plan gets written.
 
-The provider item has since narrowed: email ships, so `email` delivery rows now reach `sent` or
-`failed`. `call` and `whatsapp` are what is left. The acknowledgement gap is untouched by that and
-is not widened by it either — an alert email deliberately carries no correlation id, so nothing is
-acknowledged by mail: its link lands on the dashboard, where the session is the credential.
-Acknowledging from the mail itself would need a `GET` route (a mail client cannot `POST`) holding a
-single-use token, which is a design decision, not an oversight.
+Both have since narrowed. Email ships, so `email` delivery rows now reach `sent` or `failed`;
+`call` and `whatsapp` are what is left of the provider item.
+
+The acknowledgement gap is now only about *provider callbacks*. An alert email is acknowledged with
+a signed per-delivery token, not the correlation id, and that token never reaches a log: the link
+opens the frontend, which posts it in a request body, where `SENSITIVE_FIELD_NAMES` redacts it. The
+route stays public because neither caller has a session — a provider has no account, and a recipient
+reading mail on a phone is not logged in — so what is still missing is a signature scheme for the
+provider half, and that ships with the provider that defines one.

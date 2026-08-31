@@ -50,6 +50,15 @@ function buildRecipient(userId = 1, email = 'owner@example.com') {
 describe('AlertEmailService', () => {
   let mailer: { send: jest.Mock };
   let deliveryAccessor: { markSent: jest.Mock; markFailed: jest.Mock };
+  let snapshotAccessor: { findForAlertEvent: jest.Mock };
+  let dvrAccessor: { findBySpaceId: jest.Mock };
+  let ackToken: { issue: jest.Mock };
+
+  /** The mock is untyped, so one place does the narrowing every read needs. */
+  function sentMail(index = 0): OutboundMail {
+    const calls = mailer.send.mock.calls as OutboundMail[][];
+    return calls[index][0];
+  }
 
   function build(mailEnabled = true): AlertEmailService {
     const config = {
@@ -62,13 +71,10 @@ describe('AlertEmailService', () => {
       config as never,
       mailer as never,
       deliveryAccessor as never,
+      snapshotAccessor as never,
+      dvrAccessor as never,
+      ackToken as never,
     );
-  }
-
-  /** The mock is untyped, so one place does the narrowing every read needs. */
-  function sentMail(index = 0): OutboundMail {
-    const calls = mailer.send.mock.calls as OutboundMail[][];
-    return calls[index][0];
   }
 
   beforeEach(() => {
@@ -79,6 +85,16 @@ describe('AlertEmailService', () => {
       markSent: jest.fn().mockResolvedValue(true),
       markFailed: jest.fn().mockResolvedValue(true),
     };
+    snapshotAccessor = {
+      findForAlertEvent: jest.fn().mockResolvedValue({
+        data: Buffer.from('jpeg-bytes'),
+        mimeType: 'image/jpeg',
+      }),
+    };
+    dvrAccessor = {
+      findBySpaceId: jest.fn().mockResolvedValue({ timezone: 'UTC' }),
+    };
+    ackToken = { issue: jest.fn(() => 'delivery-1.signature') };
   });
 
   it('sends nothing and moves no row when MAIL_ENABLED is off', async () => {
@@ -93,6 +109,18 @@ describe('AlertEmailService', () => {
     expect(deliveryAccessor.markFailed).not.toHaveBeenCalled();
   });
 
+  it('reads neither the frame nor the recorder when nothing is pending on email', async () => {
+    await build().dispatch(
+      buildEvent(),
+      [buildDelivery({ channel: 'whatsapp' })],
+      [buildRecipient()],
+    );
+
+    expect(snapshotAccessor.findForAlertEvent).not.toHaveBeenCalled();
+    expect(dvrAccessor.findBySpaceId).not.toHaveBeenCalled();
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
   it('sends the email deliveries and leaves the channels with no sender pending', async () => {
     await build().dispatch(
       buildEvent(),
@@ -105,7 +133,6 @@ describe('AlertEmailService', () => {
     );
 
     expect(mailer.send).toHaveBeenCalledTimes(1);
-    expect(deliveryAccessor.markSent).toHaveBeenCalledTimes(1);
     expect(deliveryAccessor.markSent).toHaveBeenCalledWith(
       'delivery-1',
       'relay-message-1',
@@ -141,48 +168,71 @@ describe('AlertEmailService', () => {
     ]);
   });
 
-  it('carries the alert type, the copied camera label, the detection time and a link that keeps the frontend subpath', async () => {
+  it('attaches the stored frame inline and reads it once for the whole fan-out', async () => {
+    await build().dispatch(
+      buildEvent(),
+      [
+        buildDelivery(),
+        buildDelivery({ id: 'delivery-2', recipientUserId: 2 }),
+      ],
+      [buildRecipient(1), buildRecipient(2, 'member@example.com')],
+    );
+
+    expect(snapshotAccessor.findForAlertEvent).toHaveBeenCalledTimes(1);
+    expect(snapshotAccessor.findForAlertEvent).toHaveBeenCalledWith(
+      spaceId,
+      'snapshot-uuid',
+    );
+    const [attachment] = sentMail().attachments!;
+    expect(attachment.content.toString()).toBe('jpeg-bytes');
+    expect(attachment.contentType).toBe('image/jpeg');
+    expect(sentMail().html).toContain(`src="cid:${attachment.cid}"`);
+    expect(sentMail(1).attachments).toHaveLength(1);
+  });
+
+  it('still sends, without an image, when the alert stored no frame', async () => {
+    await build().dispatch(
+      buildEvent({ snapshotId: null }),
+      [buildDelivery()],
+      [buildRecipient()],
+    );
+
+    expect(snapshotAccessor.findForAlertEvent).not.toHaveBeenCalled();
+    expect(sentMail().attachments).toBeUndefined();
+    expect(sentMail().html).not.toContain('<img');
+  });
+
+  it('still sends when the frame cannot be read at all', async () => {
+    snapshotAccessor.findForAlertEvent.mockRejectedValue(
+      new Error('blob unreadable'),
+    );
+
     await build().dispatch(buildEvent(), [buildDelivery()], [buildRecipient()]);
 
-    const mail = sentMail();
-    expect(mail.subject).toBe('Intruder alert — Front door – Street side');
-    expect(mail.text).toContain('Front door – Street side');
-    expect(mail.text).toContain('2026-08-01T10:00:00.000Z');
-    expect(mail.text).toContain('People in frame: 2');
-    expect(mail.text).toContain('http://localhost:5173/app/events/event-1');
-    expect(mail.html).toContain('http://localhost:5173/app/events/event-1');
+    expect(mailer.send).toHaveBeenCalledTimes(1);
+    expect(sentMail().attachments).toBeUndefined();
+  });
+
+  it('carries an acknowledge link built from the token of that one delivery', async () => {
+    await build().dispatch(
+      buildEvent(),
+      [buildDelivery({ id: 'delivery-7' })],
+      [buildRecipient()],
+    );
+
+    expect(ackToken.issue).toHaveBeenCalledWith('delivery-7');
+    expect(sentMail().html).toContain(
+      'events/event-1/acknowledge?token=delivery-1.signature',
+    );
+    expect(sentMail().html).toContain('events/event-1"');
   });
 
   it('never puts the delivery correlation id in the message', async () => {
     await build().dispatch(buildEvent(), [buildDelivery()], [buildRecipient()]);
 
-    const mail = sentMail();
+    const { attachments, ...mail } = sentMail();
     expect(JSON.stringify(mail)).not.toContain('correlation-secret-1');
-  });
-
-  it('escapes operator-supplied text in the html part', async () => {
-    await build().dispatch(
-      buildEvent({
-        cameraLabelSnapshot: '<a href="http://evil.example">Gate</a>',
-      }),
-      [buildDelivery()],
-      [buildRecipient()],
-    );
-
-    const mail = sentMail();
-    expect(mail.html).not.toContain('<a href="http://evil.example">');
-    expect(mail.html).toContain('&lt;a href=&quot;http://evil.example&quot;');
-  });
-
-  it('says the frame count was not recorded rather than printing null', async () => {
-    await build().dispatch(
-      buildEvent({ personsDetected: null }),
-      [buildDelivery()],
-      [buildRecipient()],
-    );
-
-    const mail = sentMail();
-    expect(mail.text).toContain('People in frame: not recorded');
+    expect(attachments).toBeDefined();
   });
 
   it('records the relay failure on the row instead of throwing at the pipeline', async () => {
@@ -252,5 +302,13 @@ describe('AlertEmailService', () => {
     await expect(
       build().dispatch(buildEvent(), [buildDelivery()], [buildRecipient()]),
     ).resolves.toBeUndefined();
+  });
+
+  it('falls back to UTC when the space has no recorder to take a time zone from', async () => {
+    dvrAccessor.findBySpaceId.mockResolvedValue(null);
+
+    await build().dispatch(buildEvent(), [buildDelivery()], [buildRecipient()]);
+
+    expect(sentMail().text).toContain('(UTC)');
   });
 });

@@ -63,35 +63,39 @@ export class AlertEventsController {
   }
 
   /**
-   * The provider webhook. Public because no webhook authentication scheme is
-   * chosen yet; the correlation id is the only thing it accepts, and every
-   * outcome answers `202 { accepted: true }`.
+   * Acknowledgement from outside a session. Public because the credential in the
+   * body is the whole authorization: a provider holds the delivery's correlation
+   * id, an alert email's recipient holds a token derived from it. Every outcome
+   * answers `202 { accepted: true }`.
    */
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
   @Post('acknowledgements')
   @ApiOperation({
-    summary: 'Acknowledge an alert from a provider callback',
+    summary: 'Acknowledge an alert with a delivery credential',
     description:
-      'The inbound webhook for a notification provider. Public: no webhook ' +
-      'authentication scheme is chosen yet, so the correlation id issued with the ' +
-      'delivery is the only credential, and it is never returned by any other route. ' +
-      'The first callback acknowledges the alert; a repeat and an id that matches ' +
-      'nothing are answered identically, so the response reveals no event.',
+      'Two callers use this route, and the field they send says which. A notification ' +
+      'provider sends `correlationId`, the value issued with the delivery, which no ' +
+      'other route returns and no message ever carries. The recipient of an alert ' +
+      'email sends `token`, the value in the acknowledge link of that mail — the frontend ' +
+      'page behind the link posts it here. Exactly one of the two, never both. ' +
+      'The first call acknowledges the alert; a repeat, an unknown id and a token ' +
+      'that fails its signature are answered identically, so the response reveals ' +
+      'no event. Public: no session exists on either path.',
   })
   @ApiAcceptedResponse({
     type: AcknowledgementDto,
     description:
-      'Callback accepted. Same answer for a match, a repeat and an unknown id.',
+      'Accepted. Same answer for a match, a repeat, an unknown id and a bad token.',
   })
   @ApiFailures({
     [ErrorCode.VALIDATION_ERROR]:
-      'Missing `correlationId`, or one over the maximum token length.',
+      'Both credentials sent or neither, or one over the maximum token length.',
   })
   acknowledge(
     @Body() dto: InboundAcknowledgementDto,
   ): Promise<Either<AcknowledgementDto>> {
-    return this.alertEventsService.acknowledgeInbound(dto.correlationId);
+    return this.alertEventsService.acknowledgeInbound(dto);
   }
 
   @Get(':id')

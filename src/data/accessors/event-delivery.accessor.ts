@@ -112,22 +112,28 @@ export class EventDeliveryAccessorService {
   }
 
   /**
-   * Claims one inbound provider callback and acknowledges its event in the same
+   * Claims one inbound acknowledgement and acknowledges its event in the same
    * transaction. Split in two, a failure between them records a reply the
    * history never shows as acknowledged.
    *
    * `inboundReceivedAt: null` is what makes it idempotent: the second callback
-   * for the same correlation id updates nothing and gets `null` back, which is
-   * also what an unknown id gets — the caller cannot tell them apart, and no
+   * for the same delivery updates nothing and gets `null` back, which is also
+   * what an unknown one gets — the caller cannot tell them apart, and no
    * unauthenticated route should be able to.
+   *
+   * The delivery is addressed by whichever unique column the caller holds: a
+   * provider webhook has the `correlationId`, and the emailed acknowledge link
+   * resolves to an `id`. One implementation because the claim, the ordering and
+   * the first-responder rule are identical either way — the difference is only
+   * which credential proved the caller may act.
    */
   consumeInbound(
-    correlationId: string,
+    target: { correlationId: string } | { id: string },
     now = new Date(),
   ): Promise<InboundAcknowledgement | null> {
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.eventDelivery.updateMany({
-        where: { correlationId, inboundReceivedAt: null },
+        where: { ...target, inboundReceivedAt: null },
         data: {
           inboundReceivedAt: now,
           deliveredAt: now,
@@ -138,9 +144,7 @@ export class EventDeliveryAccessorService {
         return null;
       }
 
-      const delivery = await tx.eventDelivery.findUnique({
-        where: { correlationId },
-      });
+      const delivery = await tx.eventDelivery.findUnique({ where: target });
       if (!delivery) {
         return null;
       }

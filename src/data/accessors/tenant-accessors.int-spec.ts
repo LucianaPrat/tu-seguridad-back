@@ -655,9 +655,15 @@ describe('tenant-scoped accessors (int)', () => {
       },
     ]);
 
-    const first = await deliveryAccessor.consumeInbound('correlation-inbound');
-    const repeat = await deliveryAccessor.consumeInbound('correlation-inbound');
-    const unknown = await deliveryAccessor.consumeInbound('never-issued');
+    const first = await deliveryAccessor.consumeInbound({
+      correlationId: 'correlation-inbound',
+    });
+    const repeat = await deliveryAccessor.consumeInbound({
+      correlationId: 'correlation-inbound',
+    });
+    const unknown = await deliveryAccessor.consumeInbound({
+      correlationId: 'never-issued',
+    });
 
     expect(first).toMatchObject({
       eventId: event.id,
@@ -784,7 +790,9 @@ describe('tenant-scoped accessors (int)', () => {
       tenant.space.id,
       event.id,
     );
-    await deliveryAccessor.consumeInbound('correlation-mark-failed-after-ack');
+    await deliveryAccessor.consumeInbound({
+      correlationId: 'correlation-mark-failed-after-ack',
+    });
 
     const result = await deliveryAccessor.markFailed(
       delivery.id,

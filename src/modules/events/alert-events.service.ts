@@ -25,7 +25,9 @@ import {
 import { AlertEventPageDto } from './dto/alert-event-page.dto';
 import { AlertEventDto } from './dto/alert-event.dto';
 import { EventDeliveryDto } from './dto/event-delivery.dto';
+import { InboundAcknowledgementDto } from './dto/inbound-acknowledgement.dto';
 import { QueryAlertEventsDto } from './dto/query-alert-events.dto';
+import { EventAckTokenService } from './event-ack-token.service';
 import { ALERT_EVENT_MESSAGE, EventsGateway } from './events.gateway';
 
 /** What one event's fan-out produced, and who it was addressed to. */
@@ -46,6 +48,7 @@ export class AlertEventsService {
     private readonly secretToken: SecretTokenService,
     private readonly gateway: EventsGateway,
     private readonly alertEmail: AlertEmailService,
+    private readonly ackToken: EventAckTokenService,
   ) {}
 
   /**
@@ -156,22 +159,49 @@ export class AlertEventsService {
   }
 
   /**
-   * A provider callback, answered identically whether the correlation id
-   * matched a delivery, matched one that was already acknowledged, or matched
-   * nothing at all. The route is unauthenticated until a webhook
-   * authentication scheme is chosen, so its answer must reveal no event.
+   * An acknowledgement from outside a session: a provider callback carrying the
+   * delivery's `correlationId`, or a recipient following the acknowledge link of
+   * an alert email, which carries a token derived from the delivery id.
+   *
+   * Every outcome answers the same `202`, whether the credential matched a
+   * delivery, matched one already acknowledged, or matched nothing. The route is
+   * unauthenticated — the credential is the whole authorization — so its answer
+   * must reveal no event. A token that fails its MAC is therefore not an error
+   * either: it is simply resolved to nothing.
+   *
+   * The only refused shape is a request that presents both credentials or
+   * neither. That is a malformed call, not a failed one, and saying so leaks
+   * nothing about any event.
    */
   async acknowledgeInbound(
-    correlationId: string,
+    dto: InboundAcknowledgementDto,
   ): Promise<Either<AcknowledgementDto>> {
-    const acknowledgement =
-      await this.deliveryAccessor.consumeInbound(correlationId);
+    if ((dto.correlationId === undefined) === (dto.token === undefined)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'Send exactly one of correlationId or token',
+      );
+    }
+
+    const target = dto.correlationId
+      ? { correlationId: dto.correlationId }
+      : this.resolveAckToken(dto.token!);
+    if (!target) {
+      return buildData({ accepted: true });
+    }
+
+    const acknowledgement = await this.deliveryAccessor.consumeInbound(target);
     if (acknowledgement) {
       this.logger.log(
         `Event ${acknowledgement.eventId} acknowledged by user ${acknowledgement.acknowledgedByUserId}`,
       );
     }
     return buildData({ accepted: true });
+  }
+
+  private resolveAckToken(token: string): { id: string } | null {
+    const deliveryId = this.ackToken.resolve(token);
+    return deliveryId ? { id: deliveryId } : null;
   }
 
   /**

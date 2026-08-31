@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AlertEmailService } from './alert-email.service';
 import { AlertEventsController } from './alert-events.controller';
 import { AlertEventsService } from './alert-events.service';
+import { EventAckTokenService } from './event-ack-token.service';
 import { EventsGateway } from './events.gateway';
 
 /**
@@ -18,7 +19,12 @@ import { EventsGateway } from './events.gateway';
 @Module({
   imports: [AuthModule],
   controllers: [AlertEventsController],
-  providers: [EventsGateway, AlertEventsService, AlertEmailService],
+  providers: [
+    EventsGateway,
+    AlertEventsService,
+    AlertEmailService,
+    EventAckTokenService,
+  ],
   exports: [AlertEventsService],
 })
 export class EventsModule {}

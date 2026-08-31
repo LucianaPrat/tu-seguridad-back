@@ -67,6 +67,24 @@ Those decisions differ, which is why there is no shared "mail sender" abstractio
 
 Two invariants in `AlertEmailService` are not stylistic. It **never throws** — the pipeline calls it without awaiting, so a rejection would surface as an unhandled one and a relay outage would read as a bug in detection. And the HTML part **escapes** the camera label and the member's first name, the only place operator-supplied text stops being data; a label of `<a href="…">` would otherwise render as a link the recipient can click.
 
+### What the alert mail carries, and why
+
+The message itself lives in `alert-email.template.ts`, separate from the service that sends it, because it is the piece with a design brief rather than a delivery contract: a person reads it on a phone at 3am and has to decide in seconds whether it needs them. So the captured frame is the hero, the recorder's own on-screen-display vocabulary (monospace channel label and timecode) carries what the machine measured, and prose carries what the system is telling a person. Email constraints are absolute — table layout, inline styles, no web font, no external asset — and the template spec asserts them, because the failure mode is silent: a client simply drops what it does not support.
+
+Three decisions inside it are load-bearing:
+
+- **The frame is inline, not linked.** `cid:` attachment, so it renders with no remote fetch — which also means no tracking pixel and no "images blocked" banner. A linked `GET /snapshots/:id` would show a logged-out recipient nothing, which is most recipients most of the time. This is the one narrowing of the snapshot-bytes rule in [`AGENTS.md`](AGENTS.md), and it is scoped: bytes go to an opted-in member of the space that owns the camera, and nowhere else.
+- **The timestamp is wall-clock at the recorder**, read from `Dvr.timezone`, falling back to UTC when the space has no DVR or carries a zone Node cannot resolve. A UTC timestamp in an alert is a small puzzle to solve at exactly the wrong moment.
+- **The acknowledge link points at the frontend, not at this API.** Same as every credential link here. A token in a URL this process serves would be written into its own access log on every click; in the request body it is redacted, because `token` is on `SENSITIVE_FIELD_NAMES`. The frontend route the link assumes (`/events/:id/acknowledge?token=…`) posts it to `POST /events/acknowledgements` — that assumption is stated in `alert-email.service.ts` beside the one `CREDENTIAL_MAIL` already makes.
+
+### Acknowledging without a session
+
+`POST /events/acknowledgements` now takes either credential, and which one arrives says who is calling: a provider holds the delivery's `correlationId`, an email recipient holds a token from `EventAckTokenService`. That token is an HMAC over the delivery id, domain-separated and keyed by `JWT_SECRET` — so nothing is persisted, no migration was needed, the link survives a restart, and rotating the secret invalidates every link in flight. It is deliberately *not* the `correlationId`: mailing that value would hand a working acknowledgement to whoever reads the mailbox, forever.
+
+A token that fails its MAC is resolved to nothing and answered `202` like everything else, because the route is unauthenticated and its answer must reveal no event. The only refused shape is both credentials or neither — malformed, not failed, and saying so leaks nothing. `consumeInbound` takes the unique column the caller proved it holds (`{ correlationId }` or `{ id }`) and keeps one implementation: the claim, the ordering and the first-responder rule are identical, and only the credential differs.
+
+Two properties this inherits rather than adds: a replayed link is a no-op, because the claim is guarded on `inboundReceivedAt: null`; and a link stays valid indefinitely, because there is no expiry column and the alert it acknowledges does not expire either.
+
 `markSent`/`markFailed` are guarded on `status: pending` rather than written blind, because `consumeInbound` can set the row `delivered` while the send is still in flight, and overwriting that with `sent` would lose the acknowledgement an operator actually made.
 
 `EventDelivery.error` is served by `GET /events/:id/deliveries`, which every member of the space can read, so what a relay chose to say ends up in an API response. The stored reason is capped at 500 characters and the log keeps the whole thing. The cap is about a `TEXT` column and an unbounded upstream string, not about secrecy: an SMTP rejection can name the relay host, and in a single-tenant space whose members the owner invited, that is accepted rather than scrubbed — the same call the HLS URL gets under [Live streaming](README.md#live-streaming).
