@@ -226,7 +226,9 @@ The *Mark as handled* button carries a per-delivery token — an HMAC over the d
 
 The link opens the **frontend**, which posts the token to `POST /api/v1/events/acknowledgements`. Two reasons it is not a link straight into this API: a token in a URL this process serves would land in its own access log on every click, whereas in a request body it is redacted (`token` is on `SENSITIVE_FIELD_NAMES`); and a `GET` that acknowledges would be triggered by every link scanner and prefetcher between the relay and the reader, silently marking an intruder alert as handled by nobody.
 
-**The frontend route this assumes:** `GET <APP_BASE_URL>/events/:id/acknowledge?token=…` — a page that posts `{ token }` to the API and then sends the reader to `/events/:id`. It needs no session: the token is the whole credential, which is the point, since a recipient reading mail on a phone usually is not logged in. Until that route exists the button leads nowhere; every other part of the flow is live and covered end to end. The assumption is stated in `alert-email.service.ts`, next to the one the credential mails already make.
+**The frontend route this assumes:** `GET <APP_BASE_URL>/events/:id/acknowledge?token=…` — a page that posts `{ token }` to the API and then sends the reader to `/events/:id`. It needs no session: the token is the whole credential, which is the point, since a recipient reading mail on a phone usually is not logged in. The assumption is stated in `alert-email.service.ts`, next to the one the credential mails already make.
+
+That page is implemented in `tu-seguridad-front` and sends nothing until its button is pressed — a link scanner that renders the page would otherwise acknowledge on the reader's behalf, which is the same reason this side is not a `GET`. The *View the alert* button currently lands on the history list: the frontend has no per-event screen yet, and the mail already sends the id for the day it does.
 
 Whoever clicks first wins: the acknowledgement records that recipient, and later clicks — from another recipient, another channel, or the same link twice — change nothing.
 
@@ -443,7 +445,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
   - The `call` and `whatsapp` providers. Email ships (see [Alert emails](#alert-emails)); those two channels are still planned-only, and their rows stay `pending` because no code sends them. Each provider ships with its own adapter, not with a shared abstraction invented ahead of it.
   - Alert-email retry and a drain for whatever was `pending` when the process died. Sending is fire-and-forget today.
   - Webhook authentication for `POST /events/acknowledgements`. Still public, and for a provider callback the correlation id is still the only credential — a signature scheme ships with the provider that defines one. The emailed path is not waiting on this: its token is signed, scoped to one delivery, and never logged.
-  - The frontend `/events/:id/acknowledge` route the alert mail's button points at ([Acknowledging from a mail](#acknowledging-from-a-mail)).
+  - A per-event screen in the frontend. The alert mail's *View the alert* button carries the id, and `/events/:id` lands on the history list until one exists.
   - Snapshot retention and the move to object storage ([Snapshot storage](#snapshot-storage)), plus alert-event retention and partitioning.
   - Detection cooldown and deduplication — a camera that keeps seeing someone raises one alert per hysteresis cycle, and nothing suppresses a burst.
   - Poll versus DVR push/WebSocket. Both must drive the same discovery, status and snapshot services; the schema does not pick a winner.
