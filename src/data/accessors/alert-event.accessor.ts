@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AlertEvent, AlertType, Prisma } from '@prisma/client';
+import { AlertChannel, AlertEvent, AlertType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -12,6 +12,15 @@ export interface AlertEventCursor {
   detectedAt: Date;
   id: string;
 }
+
+/**
+ * An `AlertEvent` row plus the channel of each delivery planned for it — the
+ * list route and the single-event route both need this to render which
+ * channels an alert went out on without an N+1 call to the deliveries route.
+ */
+export type AlertEventWithChannels = AlertEvent & {
+  deliveries: { channel: AlertChannel }[];
+};
 
 export interface AlertEventQuery {
   alertType?: AlertType;
@@ -64,9 +73,13 @@ export class AlertEventAccessorService {
     return this.prisma.alertEvent.create({ data: { ...data, spaceId } });
   }
 
-  findById(spaceId: string, eventId: string): Promise<AlertEvent | null> {
+  findById(
+    spaceId: string,
+    eventId: string,
+  ): Promise<AlertEventWithChannels | null> {
     return this.prisma.alertEvent.findFirst({
       where: { id: eventId, spaceId },
+      include: { deliveries: { select: { channel: true } } },
     });
   }
 
@@ -77,7 +90,10 @@ export class AlertEventAccessorService {
    * the schema, and an offset both scans what it discards and shifts under a
    * reader while new alerts arrive at the head.
    */
-  query(spaceId: string, query: AlertEventQuery): Promise<AlertEvent[]> {
+  query(
+    spaceId: string,
+    query: AlertEventQuery,
+  ): Promise<AlertEventWithChannels[]> {
     const where: Prisma.AlertEventWhereInput = { spaceId };
     if (query.alertType) {
       where.alertType = query.alertType;
@@ -97,6 +113,7 @@ export class AlertEventAccessorService {
       where,
       orderBy: [{ detectedAt: 'desc' }, { id: 'desc' }],
       take: query.take,
+      include: { deliveries: { select: { channel: true } } },
     });
   }
 }

@@ -1,4 +1,5 @@
-import { AlertEvent, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AlertEventWithChannels } from '../../data/accessors/alert-event.accessor';
 import { ErrorCode, EventHistory } from '../../cross/common/constants';
 import { AlertCandidate } from '../pipeline/alert-candidate';
 import { AlertEventsService } from './alert-events.service';
@@ -9,7 +10,9 @@ const spaceId = 'space-uuid';
 /** Every acknowledgement outcome answers this, so the route reveals no event. */
 const ACCEPTED = { ok: true, data: { accepted: true } };
 
-function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
+function buildEvent(
+  overrides: Partial<AlertEventWithChannels> = {},
+): AlertEventWithChannels {
   return {
     id: 'event-1',
     spaceId,
@@ -24,6 +27,7 @@ function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
     acknowledgedAt: null,
     acknowledgedByUserId: null,
     createdAt: new Date('2026-08-01T10:00:00.000Z'),
+    deliveries: [],
     ...overrides,
   };
 }
@@ -187,6 +191,29 @@ describe('AlertEventsService', () => {
       expect(deliveryAccessor.createManyForEvent).not.toHaveBeenCalled();
       expect(gateway.broadcast).not.toHaveBeenCalled();
       expect(alertEmail.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('broadcasts the channels the fan-out actually planned, not an empty list', async () => {
+      routingAccessor.findEnabled.mockResolvedValue([
+        { channel: 'email' },
+        { channel: 'whatsapp' },
+      ]);
+      memberAccessor.findActiveRecipients.mockResolvedValue([{ userId: 1 }]);
+      deliveryAccessor.createManyForEvent.mockResolvedValue(2);
+      deliveryAccessor.findByEventId.mockResolvedValue([
+        { id: 'delivery-1', channel: 'email', recipientUserId: 1 },
+        { id: 'delivery-2', channel: 'whatsapp', recipientUserId: 1 },
+      ]);
+
+      await service.record(spaceId, [buildCandidate()]);
+
+      // Planning reads the rows back before the broadcast, so the socket
+      // payload matches what GET /events/:id answers for the same alert.
+      expect(gateway.broadcast).toHaveBeenCalledWith(
+        spaceId,
+        ALERT_EVENT_MESSAGE,
+        expect.objectContaining({ channels: ['email', 'whatsapp'] }),
+      );
     });
 
     it('hands the stored delivery rows and their recipients to the email channel', async () => {

@@ -83,10 +83,15 @@ export class AlertEventsService {
       }
 
       const planned = await this.planDeliveries(spaceId, event);
+      // `event` is the row from `create`, which carries no deliveries. Planning
+      // already read the stored rows back, so the broadcast reports the real
+      // channels instead of the empty list it had to send before that read
+      // existed — no extra query, and the socket payload matches what
+      // `GET /events/:id` answers for the same alert.
       this.gateway.broadcast(
         spaceId,
         ALERT_EVENT_MESSAGE,
-        toAlertEventDto(event),
+        toAlertEventDto({ ...event, deliveries: planned.deliveries }),
       );
       // Not awaited: the socket broadcast is what the dashboard reacts to, and
       // an SMTP round trip per recipient would push it — and the next poll of

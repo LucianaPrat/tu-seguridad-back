@@ -1,12 +1,15 @@
 import { AlertEvent, EventDelivery } from '@prisma/client';
-import { AlertEventCursor } from '../../data/accessors/alert-event.accessor';
+import {
+  AlertEventCursor,
+  AlertEventWithChannels,
+} from '../../data/accessors/alert-event.accessor';
 import { snapshotUrl } from '../snapshots/snapshot.mapper';
 import { AlertEventDto } from './dto/alert-event.dto';
 import { EventDeliveryDto } from './dto/event-delivery.dto';
 
 const CURSOR_SEPARATOR = '|';
 
-export function toAlertEventDto(event: AlertEvent): AlertEventDto {
+export function toAlertEventDto(event: AlertEventWithChannels): AlertEventDto {
   return {
     id: event.id,
     cameraId: event.cameraId,
@@ -21,6 +24,9 @@ export function toAlertEventDto(event: AlertEvent): AlertEventDto {
     confidence: event.confidence === null ? null : Number(event.confidence),
     acknowledgedAt: event.acknowledgedAt,
     acknowledgedByUserId: event.acknowledgedByUserId,
+    channels: [
+      ...new Set(event.deliveries.map((delivery) => delivery.channel)),
+    ],
   };
 }
 

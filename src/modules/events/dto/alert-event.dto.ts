@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AlertType } from '@prisma/client';
+import { AlertChannel, AlertType } from '@prisma/client';
 
 /**
  * One row of the history screen. `cameraLabel` is the label copied at detection
@@ -65,4 +65,11 @@ export class AlertEventDto {
 
   @ApiPropertyOptional({ type: Number, nullable: true })
   acknowledgedByUserId!: number | null;
+
+  /**
+   * The distinct set of channels the alert's deliveries used, not one entry
+   * per delivery. Empty when no delivery was planned yet.
+   */
+  @ApiProperty({ enum: AlertChannel, isArray: true })
+  channels!: AlertChannel[];
 }
