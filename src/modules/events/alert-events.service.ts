@@ -69,10 +69,13 @@ export class AlertEventsService {
       }
 
       await this.planDeliveries(spaceId, event);
+      // `event` is the row from `create`, never refetched with its
+      // deliveries — the mapper needs the shape, so it gets an empty list
+      // rather than a fetch this broadcast never needed before.
       this.gateway.broadcast(
         spaceId,
         ALERT_EVENT_MESSAGE,
-        toAlertEventDto(event),
+        toAlertEventDto({ ...event, deliveries: [] }),
       );
       events.push(event);
     }

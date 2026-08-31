@@ -5764,13 +5764,25 @@
           "acknowledgedByUserId": {
             "type": "number",
             "nullable": true
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "call",
+                "whatsapp",
+                "email"
+              ]
+            }
           }
         },
         "required": [
           "id",
           "cameraLabel",
           "alertType",
-          "detectedAt"
+          "detectedAt",
+          "channels"
         ]
       },
       "AlertEventPageDto": {
