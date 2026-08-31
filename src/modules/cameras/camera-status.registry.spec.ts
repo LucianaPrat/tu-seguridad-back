@@ -17,6 +17,8 @@ describe('CameraStatusRegistry', () => {
       lastLatencyMs: null,
       lastPersonsDetected: null,
       skippedPolls: 0,
+      pollLevel: null,
+      pollIntervalSeconds: null,
       zones: [],
     });
   });

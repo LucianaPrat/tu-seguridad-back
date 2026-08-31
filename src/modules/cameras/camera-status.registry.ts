@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AlertType } from '@prisma/client';
+import { CadenceLevel } from '../pipeline/cadence.engine';
 
 export interface ZoneOccupancySnapshot {
   /** `null` on a full-frame camera: the whole image is the monitored area. */
@@ -17,6 +18,9 @@ export interface CameraPipelineStatus {
   lastLatencyMs: number | null;
   lastPersonsDetected: boolean | null;
   skippedPolls: number;
+  /** Which rung of the poll cadence ladder this camera is currently on. */
+  pollLevel: CadenceLevel | null;
+  pollIntervalSeconds: number | null;
   zones: ZoneOccupancySnapshot[];
 }
 
@@ -29,6 +33,8 @@ const EMPTY_STATUS = (cameraId: string): CameraPipelineStatus => ({
   lastLatencyMs: null,
   lastPersonsDetected: null,
   skippedPolls: 0,
+  pollLevel: null,
+  pollIntervalSeconds: null,
   zones: [],
 });
 

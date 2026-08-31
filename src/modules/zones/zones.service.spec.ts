@@ -41,7 +41,7 @@ describe('ZonesService', () => {
     update: jest.Mock;
     countMonitorZones: jest.Mock;
   };
-  let pipelineService: { resetOccupancy: jest.Mock };
+  let pipelineService: { resetCameraState: jest.Mock };
   let service: ZonesService;
 
   beforeEach(() => {
@@ -57,7 +57,7 @@ describe('ZonesService', () => {
       update: jest.fn(),
       countMonitorZones: jest.fn(),
     };
-    pipelineService = { resetOccupancy: jest.fn() };
+    pipelineService = { resetCameraState: jest.fn() };
     service = new ZonesService(
       zoneAccessor as never,
       cameraAccessor as never,
@@ -277,7 +277,7 @@ describe('ZonesService', () => {
 
       await service.update(spaceId, 'zone-uuid', { x: 5 });
 
-      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+      expect(pipelineService.resetCameraState).toHaveBeenCalledWith(
         'camera-uuid',
       );
     });
@@ -287,7 +287,7 @@ describe('ZonesService', () => {
 
       await service.update(spaceId, 'zone-uuid', { x: 5 });
 
-      expect(pipelineService.resetOccupancy).not.toHaveBeenCalled();
+      expect(pipelineService.resetCameraState).not.toHaveBeenCalled();
     });
 
     it('refuses to move the box of a free-hand zone without its outline', async () => {
@@ -378,7 +378,7 @@ describe('ZonesService', () => {
         'camera-uuid',
         { isConfigured: false },
       );
-      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+      expect(pipelineService.resetCameraState).toHaveBeenCalledWith(
         'camera-uuid',
       );
     });

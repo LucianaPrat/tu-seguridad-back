@@ -149,7 +149,7 @@ export class ZonesService {
     // The occupancy streak is keyed by (camera, zone) and knows nothing about
     // the shape it was accumulated against, so a reshaped zone would keep
     // alerting on where the old one used to be until the streak ran out.
-    this.pipelineService.resetOccupancy(zone.cameraId);
+    this.pipelineService.resetCameraState(zone.cameraId);
     return buildData(toMonitorZoneDto(updated));
   }
 
@@ -166,7 +166,7 @@ export class ZonesService {
     }
 
     await this.syncCameraConfiguration(spaceId, zone.cameraId);
-    this.pipelineService.resetOccupancy(zone.cameraId);
+    this.pipelineService.resetCameraState(zone.cameraId);
     return buildData(null);
   }
 

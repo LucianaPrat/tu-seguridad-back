@@ -13,6 +13,7 @@ import { toZoneArea } from '../zones/zone.mapper';
 import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
 import { AlertCandidate } from './alert-candidate';
 import { AnalysisResult, ZoneResult } from './analysis-result';
+import { CadenceEngine } from './cadence.engine';
 import {
   AnchorWithScore,
   OccupancyEngine,
@@ -27,11 +28,20 @@ export class PipelineService {
     private readonly snapshotService: SnapshotService,
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly occupancyEngine: OccupancyEngine,
+    private readonly cadenceEngine: CadenceEngine,
     private readonly alertEvents: AlertEventsService,
   ) {}
 
-  resetOccupancy(cameraId: string): void {
+  /**
+   * Drops everything this process remembers about a camera: the occupancy
+   * streak and the poll cadence it had earned. Called when the configuration
+   * underneath them moved (zone reshaped or deleted, camera disabled or
+   * deleted), which is also what keeps both maps from holding rows for cameras
+   * that no longer exist.
+   */
+  resetCameraState(cameraId: string): void {
     this.occupancyEngine.reset(cameraId);
+    this.cadenceEngine.reset(cameraId);
   }
 
   /**
@@ -80,6 +90,10 @@ export class PipelineService {
     const entries = transitions.filter(
       (transition) => transition.kind === 'entered',
     );
+    // Read after `evaluate`, so it reflects the state this frame just produced.
+    const occupancyPending = this.occupancyEngine.hasPendingOccupancy(
+      camera.id,
+    );
 
     // The frame is written to MySQL only when it is evidence: a poll that saw
     // nothing would otherwise store a BLOB every tick, and snapshot retention
@@ -122,7 +136,7 @@ export class PipelineService {
       await this.alertEvents.record(spaceId, alerts);
     }
 
-    return buildData({ persons, zoneResults, alerts });
+    return buildData({ persons, zoneResults, alerts, occupancyPending });
   }
 
   /**

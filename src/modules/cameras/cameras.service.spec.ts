@@ -40,7 +40,7 @@ describe('CamerasService', () => {
     captureAndStore: jest.Mock;
   };
   let statusRegistry: { get: jest.Mock };
-  let pipelineService: { processImage: jest.Mock; resetOccupancy: jest.Mock };
+  let pipelineService: { processImage: jest.Mock; resetCameraState: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let service: CamerasService;
 
@@ -57,7 +57,7 @@ describe('CamerasService', () => {
       captureAndStore: jest.fn(),
     };
     statusRegistry = { get: jest.fn() };
-    pipelineService = { processImage: jest.fn(), resetOccupancy: jest.fn() };
+    pipelineService = { processImage: jest.fn(), resetCameraState: jest.fn() };
     configService = {
       getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
     };
@@ -205,7 +205,7 @@ describe('CamerasService', () => {
         monitorMode: 'partial',
       });
 
-      expect(pipelineService.resetOccupancy).toHaveBeenCalledWith(
+      expect(pipelineService.resetCameraState).toHaveBeenCalledWith(
         'camera-uuid',
       );
     });
