@@ -73,6 +73,10 @@ const base64KeyRequiredInProduction = (devDefault: string) => {
   });
 };
 
+/** One rung of the poll cadence ladder: whole seconds, at most an hour apart. */
+const pollCadenceSeconds = (seconds: number) =>
+  Joi.number().integer().min(1).max(3600).default(seconds);
+
 export const envValidationSchema = Joi.object({
   [EnvNames.NODE_ENV]: Joi.string()
     .valid('development', 'test', 'production')
@@ -130,11 +134,13 @@ export const envValidationSchema = Joi.object({
   [EnvNames.DVR_RTSP_STREAM]: Joi.string().valid('main', 'sub').default('sub'),
 
   [EnvNames.POLLING_ENABLED]: Joi.boolean().default(false),
-  [EnvNames.POLLING_INTERVAL_SECONDS]: Joi.number()
-    .integer()
-    .min(1)
-    .max(3600)
-    .default(5),
+  // The poll cadence ladder. A camera moves between the three depending on what
+  // its last frame showed, and the scheduler's single interval runs at the
+  // shortest of them — there is deliberately no separate base-tick knob to get
+  // out of step with these.
+  [EnvNames.POLLING_PASSIVE_SECONDS]: pollCadenceSeconds(15),
+  [EnvNames.POLLING_ACTIVE_SECONDS]: pollCadenceSeconds(10),
+  [EnvNames.POLLING_DETECTION_SECONDS]: pollCadenceSeconds(5),
   [EnvNames.SNAPSHOT_TIMEOUT_MS]: Joi.number().default(5000),
   [EnvNames.SNAPSHOT_MAX_BYTES]: Joi.number()
     .integer()

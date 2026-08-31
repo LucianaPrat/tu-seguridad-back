@@ -93,6 +93,21 @@ export class OccupancyEngine {
     return transitions;
   }
 
+  /**
+   * True while any zone of this camera sits past `Outside` — an entry or an
+   * exit is still unconfirmed. What the poll cadence keys on: the camera has
+   * unfinished business in a zone, whatever the latest frame happened to show.
+   */
+  hasPendingOccupancy(cameraId: string): boolean {
+    const prefix = `${cameraId}:`;
+    for (const [key, occupancy] of this.states) {
+      if (key.startsWith(prefix) && occupancy.state !== 'Outside') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Clears all zone state for a camera (zone edit, disable or delete). */
   reset(cameraId: string): void {
     const prefix = `${cameraId}:`;

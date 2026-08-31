@@ -209,4 +209,55 @@ describe('OccupancyEngine', () => {
       ]);
     });
   });
+
+  describe('hasPendingOccupancy', () => {
+    it('is false for a camera with nothing going on', () => {
+      const engine = new OccupancyEngine(2, 3);
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
+
+      engine.evaluate('camera-1', [zoneA], []);
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
+    });
+
+    it('is true from the first frame inside, before the entry is confirmed', () => {
+      const engine = new OccupancyEngine(2, 3);
+
+      engine.evaluate('camera-1', [zoneA], [insideA]); // CandidateInside
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+    });
+
+    it('stays true through the unconfirmed exit and clears once the zone retires', () => {
+      const engine = new OccupancyEngine(2, 3);
+      engine.evaluate('camera-1', [zoneA], [insideA]);
+      engine.evaluate('camera-1', [zoneA], [insideA]); // Inside
+
+      engine.evaluate('camera-1', [zoneA], []); // CandidateOutside 1/3
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+      engine.evaluate('camera-1', [zoneA], []); // 2/3
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+      engine.evaluate('camera-1', [zoneA], []); // 3/3, exited
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
+    });
+
+    it('is true while any one zone is pending, and never leaks across cameras', () => {
+      const engine = new OccupancyEngine(2, 3);
+
+      engine.evaluate('camera-1', [zoneA, zoneB], [insideB]);
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+      expect(engine.hasPendingOccupancy('camera-2')).toBe(false);
+    });
+
+    it('is false again after a reset', () => {
+      const engine = new OccupancyEngine(2, 3);
+      engine.evaluate('camera-1', [fullFrameZone], [insideA]);
+
+      engine.reset('camera-1');
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
+    });
+  });
 });

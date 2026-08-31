@@ -5,6 +5,7 @@ import { EnvNames } from '../../cross/common/constants';
 import { EventsModule } from '../events/events.module';
 import { FaceAuthClientModule } from '../face-auth-client/face-auth-client.module';
 import { SnapshotsModule } from '../snapshots/snapshots.module';
+import { CadenceEngine } from './cadence.engine';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
 import { PollingScheduler } from './polling.scheduler';
@@ -29,6 +30,16 @@ import { PollingScheduler } from './polling.scheduler';
         new OccupancyEngine(
           config.getOrThrow<number>(EnvNames.ENTER_CONSECUTIVE_POLLS),
           config.getOrThrow<number>(EnvNames.EXIT_CONSECUTIVE_POLLS),
+        ),
+    },
+    {
+      provide: CadenceEngine,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new CadenceEngine(
+          config.getOrThrow<number>(EnvNames.POLLING_PASSIVE_SECONDS),
+          config.getOrThrow<number>(EnvNames.POLLING_ACTIVE_SECONDS),
+          config.getOrThrow<number>(EnvNames.POLLING_DETECTION_SECONDS),
         ),
     },
   ],

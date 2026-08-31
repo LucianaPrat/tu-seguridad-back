@@ -12,17 +12,21 @@ import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
 import { SnapshotService } from '../snapshots/snapshot.service';
+import { AnalysisResult } from './analysis-result';
+import { CadenceEngine } from './cadence.engine';
 import { PipelineService } from './pipeline.service';
 
 const INTERVAL_NAME = 'camera-poll';
 
 /**
- * Pulls a frame from every pollable camera on a fixed cadence.
+ * Pulls a frame from every pollable camera that is due for one.
  *
- * One interval for the whole process, not one per camera: cameras no longer
- * carry their own interval, and the work list changes as spaces configure their
+ * One interval for the whole process, not one per camera: cameras still carry
+ * no timer of their own, and the work list changes as spaces configure their
  * recorders — a single tick that re-reads the list cannot go stale between
- * ticks the way a registry of per-camera timers does.
+ * ticks the way a registry of per-camera timers does. What each camera does
+ * carry is a cadence: the interval runs at the shortest rung of the ladder and
+ * `CadenceEngine` decides, per camera, which ticks it actually sits out.
  */
 @Injectable()
 export class PollingScheduler
@@ -39,6 +43,7 @@ export class PollingScheduler
     private readonly snapshotService: SnapshotService,
     private readonly pipelineService: PipelineService,
     private readonly statusRegistry: CameraStatusRegistry,
+    private readonly cadenceEngine: CadenceEngine,
     private readonly schedulerRegistry: SchedulerRegistry,
   ) {}
 
@@ -48,9 +53,10 @@ export class PollingScheduler
       return;
     }
 
-    const seconds = this.configService.getOrThrow<number>(
-      EnvNames.POLLING_INTERVAL_SECONDS,
-    );
+    // The tick is the ladder's shortest rung, not a knob of its own: a separate
+    // base-tick setting could only ever be configured out of step with the
+    // cadences it is meant to serve.
+    const seconds = this.cadenceEngine.tickSeconds;
     const handle = setInterval(() => {
       this.tick().catch((error: unknown) =>
         this.logger.error('polling tick failed', error),
@@ -58,7 +64,7 @@ export class PollingScheduler
     }, seconds * 1000);
     this.schedulerRegistry.addInterval(INTERVAL_NAME, handle);
     this.registered = true;
-    this.logger.log(`polling every ${seconds}s`);
+    this.logger.log(`polling ticks every ${seconds}s, cameras poll on cadence`);
   }
 
   onModuleDestroy(): void {
@@ -72,10 +78,18 @@ export class PollingScheduler
 
   /** One pass over every space that owns a recorder. Public so tests can drive it. */
   async tick(): Promise<void> {
+    const now = Date.now();
     const spaceIds = await this.dvrAccessor.findSpaceIdsWithDvr();
     for (const spaceId of spaceIds) {
       const cameras = await this.cameraAccessor.findPollableBySpace(spaceId);
       for (const camera of cameras) {
+        // Cheapest thing in the loop, and deliberately first: a camera on the
+        // passive cadence costs nothing on the ticks it sits out — no recorder
+        // request, no detection call, no live-frame write.
+        if (!this.cadenceEngine.isDue(camera.id, now)) {
+          continue;
+        }
+
         // One camera must not be able to end the tick. `pollOnce` maps every
         // failure it expects onto the camera's status, so anything reaching
         // here is unexpected — and letting it propagate would silently stop
@@ -91,6 +105,9 @@ export class PollingScheduler
             lastErrorAt: new Date(),
             lastErrorCode: ErrorCode.INTERNAL_ERROR,
           });
+          // Same reason as every other failure path: a camera left un-armed is
+          // due again on the very next tick.
+          this.cadenceEngine.rearm(camera.id, Date.now());
         }
       }
     }
@@ -100,10 +117,16 @@ export class PollingScheduler
    * One poll for one camera. A camera whose previous poll is still running is
    * counted as skipped rather than queued behind it: a slow recorder must not
    * build a backlog that outlives the condition causing it.
+   *
+   * Every path out re-arms the camera's cadence. A failed poll keeps the level
+   * it already had — the frame said nothing about how fast to go, and dropping
+   * a camera whose recorder is unreachable back onto the base tick would
+   * hammer exactly the thing that is already struggling.
    */
   async pollOnce(spaceId: string, camera: Camera): Promise<void> {
     if (this.inFlight.has(camera.id)) {
       this.statusRegistry.incrementSkipped(camera.id);
+      this.cadenceEngine.rearm(camera.id, Date.now());
       return;
     }
 
@@ -115,10 +138,20 @@ export class PollingScheduler
           lastErrorAt: new Date(),
           lastErrorCode: captured.code,
         });
+        this.cadenceEngine.rearm(camera.id, Date.now());
         return;
       }
 
-      await this.pipelineService.processImage(spaceId, camera, captured.data);
+      const analysis = await this.pipelineService.processImage(
+        spaceId,
+        camera,
+        captured.data,
+      );
+      if (analysis.ok) {
+        this.applyCadence(camera.id, analysis.data);
+      } else {
+        this.cadenceEngine.rearm(camera.id, Date.now());
+      }
 
       // Every successful poll refreshes the camera's live frame, so the grid
       // has a thumbnail and the zone editor a backdrop for a camera that never
@@ -142,6 +175,28 @@ export class PollingScheduler
       }
     } finally {
       this.inFlight.delete(camera.id);
+    }
+  }
+
+  /**
+   * Re-arms the camera from the frame it just produced and publishes where it
+   * landed. Logged only when the level actually moved: one line per real
+   * transition is readable, one per poll is not.
+   */
+  private applyCadence(cameraId: string, analysis: AnalysisResult): void {
+    const { level, seconds, changed } = this.cadenceEngine.record(
+      cameraId,
+      analysis,
+      Date.now(),
+    );
+    this.statusRegistry.record(cameraId, {
+      pollLevel: level,
+      pollIntervalSeconds: seconds,
+    });
+    if (changed) {
+      this.logger.log(
+        `camera ${cameraId} now polling ${level} every ${seconds}s`,
+      );
     }
   }
 }

@@ -96,7 +96,7 @@ export class CamerasService {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${id} not found`);
     }
     if (monitorMode !== camera.monitorMode || alertType !== camera.alertType) {
-      this.pipelineService.resetOccupancy(camera.id);
+      this.pipelineService.resetCameraState(camera.id);
     }
     return buildData(toCameraDto(updated));
   }

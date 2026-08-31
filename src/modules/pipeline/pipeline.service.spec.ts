@@ -2,6 +2,7 @@ import { Camera, MonitorZone, Prisma } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
 import { CapturedImage } from '../dvr/dvr-client.port';
+import { CadenceEngine } from './cadence.engine';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
 
@@ -97,6 +98,7 @@ describe('PipelineService', () => {
       // Real engine with a one-poll threshold: alert-level selection is the
       // behavior under test, and mocking it away would test nothing.
       new OccupancyEngine(1, 1),
+      new CadenceEngine(15, 10, 5),
       alertEvents as never,
     );
   });
