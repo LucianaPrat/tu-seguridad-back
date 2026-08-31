@@ -1,4 +1,5 @@
-import { AlertEvent, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AlertEventWithChannels } from '../../data/accessors/alert-event.accessor';
 import { ErrorCode, EventHistory } from '../../cross/common/constants';
 import { AlertCandidate } from '../pipeline/alert-candidate';
 import { AlertEventsService } from './alert-events.service';
@@ -6,7 +7,9 @@ import { ALERT_EVENT_MESSAGE } from './events.gateway';
 
 const spaceId = 'space-uuid';
 
-function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
+function buildEvent(
+  overrides: Partial<AlertEventWithChannels> = {},
+): AlertEventWithChannels {
   return {
     id: 'event-1',
     spaceId,
@@ -21,6 +24,7 @@ function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
     acknowledgedAt: null,
     acknowledgedByUserId: null,
     createdAt: new Date('2026-08-01T10:00:00.000Z'),
+    deliveries: [],
     ...overrides,
   };
 }

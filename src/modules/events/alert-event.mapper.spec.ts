@@ -1,11 +1,14 @@
-import { AlertEvent, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AlertEventWithChannels } from '../../data/accessors/alert-event.accessor';
 import {
   decodeCursor,
   encodeCursor,
   toAlertEventDto,
 } from './alert-event.mapper';
 
-function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
+function buildEvent(
+  overrides: Partial<AlertEventWithChannels> = {},
+): AlertEventWithChannels {
   return {
     id: 'event-1',
     spaceId: 'space-uuid',
@@ -20,6 +23,7 @@ function buildEvent(overrides: Partial<AlertEvent> = {}): AlertEvent {
     acknowledgedAt: null,
     acknowledgedByUserId: null,
     createdAt: new Date('2026-08-01T10:00:00.000Z'),
+    deliveries: [],
     ...overrides,
   };
 }
@@ -66,5 +70,25 @@ describe('toAlertEventDto', () => {
 
     expect(dto.personsDetected).toBeNull();
     expect(dto.confidence).toBeNull();
+  });
+
+  it('collapses deliveries to the distinct set of channels used', () => {
+    const dto = toAlertEventDto(
+      buildEvent({
+        deliveries: [
+          { channel: 'call' },
+          { channel: 'email' },
+          { channel: 'call' },
+        ],
+      }),
+    );
+
+    expect(dto.channels).toEqual(['call', 'email']);
+  });
+
+  it('is an empty array when no delivery was planned yet', () => {
+    const dto = toAlertEventDto(buildEvent({ deliveries: [] }));
+
+    expect(dto.channels).toEqual([]);
   });
 });
