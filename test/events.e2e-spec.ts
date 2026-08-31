@@ -1,5 +1,6 @@
 import { io, Socket as ClientSocket } from 'socket.io-client';
 import request from 'supertest';
+import { EventAckTokenService } from '../src/modules/events/event-ack-token.service';
 import { authAs, loginAs } from './utils/auth-as';
 import {
   bootstrapE2eApp,
@@ -312,6 +313,74 @@ describe('Alert events (e2e)', () => {
 
     const unchanged = await ctx.prisma.alertEvent.findFirstOrThrow();
     expect(unchanged.acknowledgedAt).toEqual(acknowledged.acknowledgedAt);
+  });
+
+  it('acknowledges an event from the token in an alert email', async () => {
+    await raiseOneAlert();
+    const delivery = await ctx.prisma.eventDelivery.findFirstOrThrow();
+    const eventAckToken = ctx.app.get(EventAckTokenService).issue(delivery.id);
+
+    const acknowledge = () =>
+      request(ctx.httpServer)
+        .post('/api/v1/events/acknowledgements')
+        .send({ token: eventAckToken });
+
+    // Unauthenticated on purpose: the token is the credential.
+    const first = await acknowledge();
+    expect(first.status).toBe(202);
+    expect(typedBody<{ accepted: boolean }>(first)).toEqual({ accepted: true });
+
+    const acknowledged = await ctx.prisma.alertEvent.findFirstOrThrow();
+    expect(acknowledged.acknowledgedByUserId).toBe(adminUserId);
+    expect(acknowledged.acknowledgedAt).not.toBeNull();
+    await expect(
+      ctx.prisma.eventDelivery.findFirstOrThrow(),
+    ).resolves.toMatchObject({ status: 'delivered' });
+
+    const repeat = await acknowledge();
+    expect(repeat.status).toBe(202);
+    expect(typedBody<{ accepted: boolean }>(repeat)).toEqual({
+      accepted: true,
+    });
+
+    const unchanged = await ctx.prisma.alertEvent.findFirstOrThrow();
+    expect(unchanged.acknowledgedAt).toEqual(acknowledged.acknowledgedAt);
+  });
+
+  it('answers a forged token exactly like a good one and acknowledges nothing', async () => {
+    await raiseOneAlert();
+    const delivery = await ctx.prisma.eventDelivery.findFirstOrThrow();
+
+    const forged = await request(ctx.httpServer)
+      .post('/api/v1/events/acknowledgements')
+      .send({ token: `${delivery.id}.tampered` });
+
+    expect(forged.status).toBe(202);
+    expect(typedBody<{ accepted: boolean }>(forged)).toEqual({
+      accepted: true,
+    });
+
+    const untouched = await ctx.prisma.alertEvent.findFirstOrThrow();
+    expect(untouched.acknowledgedAt).toBeNull();
+  });
+
+  it('refuses a call that presents both credentials or neither', async () => {
+    await raiseOneAlert();
+    const delivery = await ctx.prisma.eventDelivery.findFirstOrThrow();
+    const eventAckToken = ctx.app.get(EventAckTokenService).issue(delivery.id);
+
+    const neither = await request(ctx.httpServer)
+      .post('/api/v1/events/acknowledgements')
+      .send({});
+    expect(neither.status).toBe(400);
+
+    const both = await request(ctx.httpServer)
+      .post('/api/v1/events/acknowledgements')
+      .send({ correlationId: delivery.correlationId, token: eventAckToken });
+    expect(both.status).toBe(400);
+
+    const untouched = await ctx.prisma.alertEvent.findFirstOrThrow();
+    expect(untouched.acknowledgedAt).toBeNull();
   });
 
   it('delivers a new alert over the socket to its own space only', async () => {

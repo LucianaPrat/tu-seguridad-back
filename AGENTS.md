@@ -102,8 +102,16 @@ project fact no standard can know.
   formatter and Sentry's `beforeSend`/`beforeBreadcrumb`. A new secret-bearing field lands there in
   the same commit that introduces it; two lists drift, and the drift only shows up in production
   logs. What must never leave the process: `Dvr.passwordEncrypted` and the plaintext behind it,
-  every `tokenHash`, the delivery `correlationId`, and snapshot BLOB bytes. Snapshots are served
-  only by `GET /snapshots/:id`; a DTO carries the URL, never the bytes.
+  every `tokenHash`, and the delivery `correlationId` — that last one is the credential
+  `POST /events/acknowledgements` accepts, so no response and no message may carry it. The emailed
+  acknowledge link carries a token derived from the delivery id instead
+  (`src/modules/events/event-ack-token.service.ts`).
+- **Snapshot bytes leave the process in exactly one other place.** No API response carries them
+  except `GET /snapshots/:id`; a DTO carries the URL, never the bytes. The single exception is the
+  inline frame of an alert email, addressed to an opted-in member of the space that owns the camera.
+  The frame is the whole point of the notice and a link shows a logged-out recipient nothing, so the
+  narrowing is deliberate — see [`ARCHITECTURE.md`](ARCHITECTURE.md), "Outbound mail". Anything else
+  that wants the bytes is a bug.
 - **Accessor layering is verifiable.** `grep -rn "PrismaService" src/modules/` must stay empty.
 - **Test database migration.** After `npx prisma migrate dev --name <description>`, apply the same
   migration to the test database: `DATABASE_URL="$DATABASE_URL_TEST" npx prisma migrate deploy`.

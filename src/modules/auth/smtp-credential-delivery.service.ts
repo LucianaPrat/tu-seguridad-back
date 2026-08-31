@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createTransport, Transporter } from 'nodemailer';
-import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import { EnvNames } from '../../cross/common/constants';
+import { MailerService } from '../../cross/mail/mailer.service';
 import {
   CredentialDelivery,
   CredentialDeliveryPort,
@@ -32,14 +31,10 @@ const CREDENTIAL_MAIL: Record<
   },
 };
 
-/** Implicit TLS. Every other port negotiates STARTTLS or stays plain. */
-const IMPLICIT_TLS_PORT = 465;
-
 /**
  * The SMTP delivery channel, selected by `MAIL_ENABLED` in `auth.module.ts`. The
- * transport is entirely env-driven: the local default is the mailpit container
- * (`127.0.0.1:1025`, no authentication), and pointing the same code at
- * `smtp.gmail.com:465` with an app password is a `.env` change, not a code change.
+ * transport lives in `MailerService` (`src/cross/mail/mailer.service.ts`); this
+ * class owns only what a credential mail says.
  *
  * The link is the credential. Neither it nor the raw token is ever logged — the
  * invariant `LoggedCredentialDeliveryService` documents holds here too, and it
@@ -48,24 +43,12 @@ const IMPLICIT_TLS_PORT = 465;
 @Injectable()
 export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
   private readonly logger = new Logger(SmtpCredentialDeliveryService.name);
-  private readonly transporter: Transporter<SMTPTransport.SentMessageInfo>;
-  private readonly from: string;
   private readonly appBaseUrl: string;
 
-  constructor(configService: ConfigService) {
-    const port = configService.get<number>(EnvNames.SMTP_PORT)!;
-    const user = configService.get<string>(EnvNames.SMTP_USER);
-    const pass = configService.get<string>(EnvNames.SMTP_PASSWORD);
-
-    this.transporter = createTransport({
-      host: configService.get<string>(EnvNames.SMTP_HOST),
-      port,
-      secure: port === IMPLICIT_TLS_PORT,
-      // Omitted rather than sent empty: an unauthenticated relay must not receive
-      // a login attempt with a blank password.
-      auth: user ? { user, pass } : undefined,
-    });
-    this.from = configService.get<string>(EnvNames.MAIL_FROM)!;
+  constructor(
+    configService: ConfigService,
+    private readonly mailer: MailerService,
+  ) {
     this.appBaseUrl = configService.get<string>(EnvNames.APP_BASE_URL)!;
   }
 
@@ -79,8 +62,7 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
     const expiresAt = delivery.expiresAt.toISOString();
 
     try {
-      const sent = await this.transporter.sendMail({
-        from: this.from,
+      const sent = await this.mailer.send({
         to: delivery.email,
         subject,
         text: `${subject}\n\n${link.href}\n\nThe link expires at ${expiresAt} and can be used once.`,

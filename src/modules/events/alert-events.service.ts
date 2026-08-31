@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AlertEvent } from '@prisma/client';
+import { AlertEvent, EventDelivery } from '@prisma/client';
 import { ErrorCode, EventHistory } from '../../cross/common/constants';
 import { SecretTokenService } from '../../cross/crypto/secret-token.service';
 import { buildData, buildError, Either } from '../../cross/errors/either';
@@ -9,9 +9,13 @@ import {
   EventDeliveryAccessorService,
   EventDeliveryDraft,
 } from '../../data/accessors/event-delivery.accessor';
-import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
+import {
+  AlertRecipientRecord,
+  SpaceMemberAccessorService,
+} from '../../data/accessors/space-member.accessor';
 import { AcknowledgementDto } from '../auth/dto/acknowledgement.dto';
 import { AlertCandidate } from '../pipeline/alert-candidate';
+import { AlertEmailService } from './alert-email.service';
 import {
   decodeCursor,
   encodeCursor,
@@ -21,8 +25,16 @@ import {
 import { AlertEventPageDto } from './dto/alert-event-page.dto';
 import { AlertEventDto } from './dto/alert-event.dto';
 import { EventDeliveryDto } from './dto/event-delivery.dto';
+import { InboundAcknowledgementDto } from './dto/inbound-acknowledgement.dto';
 import { QueryAlertEventsDto } from './dto/query-alert-events.dto';
+import { EventAckTokenService } from './event-ack-token.service';
 import { ALERT_EVENT_MESSAGE, EventsGateway } from './events.gateway';
+
+/** What one event's fan-out produced, and who it was addressed to. */
+interface PlannedDeliveries {
+  deliveries: EventDelivery[];
+  recipients: AlertRecipientRecord[];
+}
 
 @Injectable()
 export class AlertEventsService {
@@ -35,6 +47,8 @@ export class AlertEventsService {
     private readonly memberAccessor: SpaceMemberAccessorService,
     private readonly secretToken: SecretTokenService,
     private readonly gateway: EventsGateway,
+    private readonly alertEmail: AlertEmailService,
+    private readonly ackToken: EventAckTokenService,
   ) {}
 
   /**
@@ -68,14 +82,25 @@ export class AlertEventsService {
         continue;
       }
 
-      await this.planDeliveries(spaceId, event);
-      // `event` is the row from `create`, never refetched with its
-      // deliveries — the mapper needs the shape, so it gets an empty list
-      // rather than a fetch this broadcast never needed before.
+      const planned = await this.planDeliveries(spaceId, event);
+      // `event` is the row from `create`, which carries no deliveries. Planning
+      // already read the stored rows back, so the broadcast reports the real
+      // channels instead of the empty list it had to send before that read
+      // existed — no extra query, and the socket payload matches what
+      // `GET /events/:id` answers for the same alert.
       this.gateway.broadcast(
         spaceId,
         ALERT_EVENT_MESSAGE,
-        toAlertEventDto({ ...event, deliveries: [] }),
+        toAlertEventDto({ ...event, deliveries: planned.deliveries }),
+      );
+      // Not awaited: the socket broadcast is what the dashboard reacts to, and
+      // an SMTP round trip per recipient would push it — and the next poll of
+      // this camera — behind a relay this process does not control. `dispatch`
+      // never rejects, so there is no unhandled rejection to leak here.
+      void this.alertEmail.dispatch(
+        event,
+        planned.deliveries,
+        planned.recipients,
       );
       events.push(event);
     }
@@ -139,16 +164,38 @@ export class AlertEventsService {
   }
 
   /**
-   * A provider callback, answered identically whether the correlation id
-   * matched a delivery, matched one that was already acknowledged, or matched
-   * nothing at all. The route is unauthenticated until a webhook
-   * authentication scheme is chosen, so its answer must reveal no event.
+   * An acknowledgement from outside a session: a provider callback carrying the
+   * delivery's `correlationId`, or a recipient following the acknowledge link of
+   * an alert email, which carries a token derived from the delivery id.
+   *
+   * Every outcome answers the same `202`, whether the credential matched a
+   * delivery, matched one already acknowledged, or matched nothing. The route is
+   * unauthenticated — the credential is the whole authorization — so its answer
+   * must reveal no event. A token that fails its MAC is therefore not an error
+   * either: it is simply resolved to nothing.
+   *
+   * The only refused shape is a request that presents both credentials or
+   * neither. That is a malformed call, not a failed one, and saying so leaks
+   * nothing about any event.
    */
   async acknowledgeInbound(
-    correlationId: string,
+    dto: InboundAcknowledgementDto,
   ): Promise<Either<AcknowledgementDto>> {
-    const acknowledgement =
-      await this.deliveryAccessor.consumeInbound(correlationId);
+    if ((dto.correlationId === undefined) === (dto.token === undefined)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'Send exactly one of correlationId or token',
+      );
+    }
+
+    const target = dto.correlationId
+      ? { correlationId: dto.correlationId }
+      : this.resolveAckToken(dto.token!);
+    if (!target) {
+      return buildData({ accepted: true });
+    }
+
+    const acknowledgement = await this.deliveryAccessor.consumeInbound(target);
     if (acknowledgement) {
       this.logger.log(
         `Event ${acknowledgement.eventId} acknowledged by user ${acknowledgement.acknowledgedByUserId}`,
@@ -157,17 +204,27 @@ export class AlertEventsService {
     return buildData({ accepted: true });
   }
 
+  private resolveAckToken(token: string): { id: string } | null {
+    const deliveryId = this.ackToken.resolve(token);
+    return deliveryId ? { id: deliveryId } : null;
+  }
+
   /**
    * One delivery per enabled channel per opted-in active member, each with its
    * own correlation id: the id is what an inbound reply is resolved by, so two
    * recipients sharing one would make either of them the acknowledger.
    *
-   * Rows are written `pending`. Nothing sends them yet — see the tracker.
+   * Rows are written `pending`. `AlertEmailService` moves the `email` ones;
+   * `call` and `whatsapp` have no sender yet and stay as planned.
+   *
+   * The rows are read back rather than derived from the drafts because only the
+   * stored row carries its id, and the accessor is allowed to drop a draft whose
+   * recipient is not a member of the space.
    */
   private async planDeliveries(
     spaceId: string,
     event: AlertEvent,
-  ): Promise<number> {
+  ): Promise<PlannedDeliveries> {
     const [routings, recipients] = await Promise.all([
       this.routingAccessor.findEnabled(spaceId, event.alertType),
       this.memberAccessor.findActiveRecipients(spaceId),
@@ -180,6 +237,18 @@ export class AlertEventsService {
         correlationId: this.secretToken.generate(),
       })),
     );
-    return this.deliveryAccessor.createManyForEvent(spaceId, event.id, drafts);
+    const created = await this.deliveryAccessor.createManyForEvent(
+      spaceId,
+      event.id,
+      drafts,
+    );
+    if (created === 0) {
+      return { deliveries: [], recipients };
+    }
+
+    return {
+      deliveries: await this.deliveryAccessor.findByEventId(spaceId, event.id),
+      recipients,
+    };
   }
 }

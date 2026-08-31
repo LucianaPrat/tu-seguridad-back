@@ -385,7 +385,17 @@ since none of them needs a code change.
 Item 13 is not code, but it is first among the housekeeping: while the tracker claims T04 shipped,
 anyone reading it will assume the API exposes metrics it does not have.
 
-The two roadmap items nothing here supersedes — a notification provider (delivery rows are written
-`pending` and no code ever moves them) and authentication for `POST /events/acknowledgements` (public
-today, correlation id as its only credential) — stay where `README.md` → *Roadmap* put them. They are
-scope, not defects, and they belong in `plans/04.*` when that plan gets written.
+The two roadmap items nothing here supersedes — the remaining notification providers and
+authentication for `POST /events/acknowledgements` (public today, correlation id as its only
+credential) — stay where `README.md` → *Roadmap* put them. They are scope, not defects, and they
+belong in `plans/04.*` when that plan gets written.
+
+Both have since narrowed. Email ships, so `email` delivery rows now reach `sent` or `failed`;
+`call` and `whatsapp` are what is left of the provider item.
+
+The acknowledgement gap is now only about *provider callbacks*. An alert email is acknowledged with
+a signed per-delivery token, not the correlation id, and that token never reaches a log: the link
+opens the frontend, which posts it in a request body, where `SENSITIVE_FIELD_NAMES` redacts it. The
+route stays public because neither caller has a session — a provider has no account, and a recipient
+reading mail on a phone is not logged in — so what is still missing is a signature scheme for the
+provider half, and that ships with the provider that defines one.

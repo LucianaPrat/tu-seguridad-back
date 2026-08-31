@@ -7,6 +7,9 @@ import { ALERT_EVENT_MESSAGE } from './events.gateway';
 
 const spaceId = 'space-uuid';
 
+/** Every acknowledgement outcome answers this, so the route reveals no event. */
+const ACCEPTED = { ok: true, data: { accepted: true } };
+
 function buildEvent(
   overrides: Partial<AlertEventWithChannels> = {},
 ): AlertEventWithChannels {
@@ -60,6 +63,8 @@ describe('AlertEventsService', () => {
   let memberAccessor: { findActiveRecipients: jest.Mock };
   let secretToken: { generate: jest.Mock };
   let gateway: { broadcast: jest.Mock };
+  let alertEmail: { dispatch: jest.Mock };
+  let ackToken: { issue: jest.Mock; resolve: jest.Mock };
   let service: AlertEventsService;
 
   beforeEach(() => {
@@ -78,6 +83,11 @@ describe('AlertEventsService', () => {
     let issued = 0;
     secretToken = { generate: jest.fn(() => `correlation-${++issued}`) };
     gateway = { broadcast: jest.fn() };
+    alertEmail = { dispatch: jest.fn().mockResolvedValue(undefined) };
+    ackToken = {
+      issue: jest.fn(() => 'a.token'),
+      resolve: jest.fn(() => null),
+    };
     service = new AlertEventsService(
       alertEventAccessor as never,
       deliveryAccessor as never,
@@ -85,6 +95,8 @@ describe('AlertEventsService', () => {
       memberAccessor as never,
       secretToken,
       gateway as never,
+      alertEmail as never,
+      ackToken as never,
     );
   });
 
@@ -178,6 +190,70 @@ describe('AlertEventsService', () => {
       expect(events).toEqual([]);
       expect(deliveryAccessor.createManyForEvent).not.toHaveBeenCalled();
       expect(gateway.broadcast).not.toHaveBeenCalled();
+      expect(alertEmail.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('broadcasts the channels the fan-out actually planned, not an empty list', async () => {
+      routingAccessor.findEnabled.mockResolvedValue([
+        { channel: 'email' },
+        { channel: 'whatsapp' },
+      ]);
+      memberAccessor.findActiveRecipients.mockResolvedValue([{ userId: 1 }]);
+      deliveryAccessor.createManyForEvent.mockResolvedValue(2);
+      deliveryAccessor.findByEventId.mockResolvedValue([
+        { id: 'delivery-1', channel: 'email', recipientUserId: 1 },
+        { id: 'delivery-2', channel: 'whatsapp', recipientUserId: 1 },
+      ]);
+
+      await service.record(spaceId, [buildCandidate()]);
+
+      // Planning reads the rows back before the broadcast, so the socket
+      // payload matches what GET /events/:id answers for the same alert.
+      expect(gateway.broadcast).toHaveBeenCalledWith(
+        spaceId,
+        ALERT_EVENT_MESSAGE,
+        expect.objectContaining({ channels: ['email', 'whatsapp'] }),
+      );
+    });
+
+    it('hands the stored delivery rows and their recipients to the email channel', async () => {
+      const rows = [
+        {
+          id: 'delivery-1',
+          channel: 'email',
+          recipientUserId: 1,
+          status: 'pending',
+        },
+      ];
+      routingAccessor.findEnabled.mockResolvedValue([{ channel: 'email' }]);
+      memberAccessor.findActiveRecipients.mockResolvedValue([
+        { userId: 1, user: { email: 'owner@example.com', firstName: 'Ada' } },
+      ]);
+      deliveryAccessor.createManyForEvent.mockResolvedValue(1);
+      deliveryAccessor.findByEventId.mockResolvedValue(rows);
+
+      await service.record(spaceId, [buildCandidate()]);
+
+      expect(deliveryAccessor.findByEventId).toHaveBeenCalledWith(
+        spaceId,
+        'event-1',
+      );
+      expect(alertEmail.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'event-1' }),
+        rows,
+        [{ userId: 1, user: { email: 'owner@example.com', firstName: 'Ada' } }],
+      );
+    });
+
+    it('reads no delivery row back when the fan-out planned nothing', async () => {
+      await service.record(spaceId, [buildCandidate()]);
+
+      expect(deliveryAccessor.findByEventId).not.toHaveBeenCalled();
+      expect(alertEmail.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'event-1' }),
+        [],
+        [],
+      );
     });
   });
 
@@ -319,14 +395,56 @@ describe('AlertEventsService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
 
-      const matched = await service.acknowledgeInbound('correlation-1');
-      const repeated = await service.acknowledgeInbound('correlation-1');
-      const unknown = await service.acknowledgeInbound('never-issued');
+      const matched = await service.acknowledgeInbound({
+        correlationId: 'correlation-1',
+      });
+      const repeated = await service.acknowledgeInbound({
+        correlationId: 'correlation-1',
+      });
+      const unknown = await service.acknowledgeInbound({
+        correlationId: 'never-issued',
+      });
 
-      const accepted = { ok: true, data: { accepted: true } };
-      expect(matched).toEqual(accepted);
-      expect(repeated).toEqual(accepted);
-      expect(unknown).toEqual(accepted);
+      expect(matched).toEqual(ACCEPTED);
+      expect(repeated).toEqual(ACCEPTED);
+      expect(unknown).toEqual(ACCEPTED);
+    });
+
+    it('resolves an emailed token to its delivery and claims that row by id', async () => {
+      ackToken.resolve.mockReturnValue('delivery-9');
+
+      const result = await service.acknowledgeInbound({ token: 'a.token' });
+
+      expect(ackToken.resolve).toHaveBeenCalledWith('a.token');
+      expect(deliveryAccessor.consumeInbound).toHaveBeenCalledWith({
+        id: 'delivery-9',
+      });
+      expect(result).toEqual(ACCEPTED);
+    });
+
+    it('answers a token that fails its signature exactly like a good one', async () => {
+      ackToken.resolve.mockReturnValue(null);
+
+      const result = await service.acknowledgeInbound({ token: 'forged' });
+
+      expect(deliveryAccessor.consumeInbound).not.toHaveBeenCalled();
+      expect(result).toEqual(ACCEPTED);
+    });
+
+    it('refuses a call that presents both credentials or neither', async () => {
+      for (const dto of [
+        {},
+        { correlationId: 'correlation-1', token: 'a.token' },
+      ]) {
+        const result = await service.acknowledgeInbound(dto);
+
+        expect(result).toEqual({
+          ok: false,
+          code: ErrorCode.VALIDATION_ERROR,
+          message: 'Send exactly one of correlationId or token',
+        });
+      }
+      expect(deliveryAccessor.consumeInbound).not.toHaveBeenCalled();
     });
   });
 });

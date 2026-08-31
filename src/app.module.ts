@@ -10,6 +10,7 @@ import { createPinoHttpOptions } from './cross/config/logger.options';
 import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
 import { HitInterceptor } from './cross/interceptors/hit.interceptor';
+import { MailModule } from './cross/mail/mail.module';
 import { DataModule } from './data/data.module';
 import { AlertRoutingsModule } from './modules/alert-routings/alert-routings.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -42,6 +43,7 @@ import { ZonesModule } from './modules/zones/zones.module';
       useFactory: createThrottlerOptions,
     }),
     DataModule,
+    MailModule,
     AlertRoutingsModule,
     AuthModule,
     InvitationsModule,

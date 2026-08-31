@@ -22,7 +22,9 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 - Dev SMTP is a plain container, same as MySQL — this repo has no compose file and does not need one:
   `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`. Web UI on
   <http://localhost:8025>, SMTP on `1025`, no authentication. Then set `MAIL_ENABLED=true` in `.env`;
-  the other mail defaults already point at it. Cleanup: `docker stop mailpit && docker rm mailpit`.
+  the other mail defaults already point at it. That one switch also turns on alert emails, so a
+  detection with `email` enabled in the routing matrix lands in the same inbox. Cleanup:
+  `docker stop mailpit && docker rm mailpit`.
 - Mailpit **catches** mail, it never delivers it. To land a message in a real Gmail inbox, point the
   same code at Google — no code change, four variables: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`,
   `SMTP_USER=<your gmail address>`, `SMTP_PASSWORD=<16-char App Password>`.

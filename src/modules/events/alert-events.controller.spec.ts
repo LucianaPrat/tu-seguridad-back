@@ -51,10 +51,14 @@ describe('AlertEventsController', () => {
     );
   });
 
-  it('delegates an inbound acknowledgement by correlation id alone', async () => {
-    await controller.acknowledge({ correlationId: 'correlation-1' });
-    expect(alertEventsService.acknowledgeInbound).toHaveBeenCalledWith(
-      'correlation-1',
-    );
+  // The credential the body carries is the service's to interpret: the route is
+  // the same for a provider callback and for an emailed acknowledge link, and
+  // deciding between them here would put that rule in two places.
+  it.each([
+    ['a provider correlation id', { correlationId: 'correlation-1' }],
+    ['an emailed token', { token: 'delivery-1.signature' }],
+  ])('passes %s through to the service untouched', async (_case, dto) => {
+    await controller.acknowledge(dto);
+    expect(alertEventsService.acknowledgeInbound).toHaveBeenCalledWith(dto);
   });
 });
