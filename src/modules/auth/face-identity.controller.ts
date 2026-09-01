@@ -23,6 +23,7 @@ import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { AccessTokenDto } from './dto/access-token.dto';
 import { FaceIdentityDto } from './dto/face-identity.dto';
 import { FaceTokenDto } from './dto/face-token.dto';
@@ -65,6 +66,7 @@ export class FaceIdentityController {
   }
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @ApiOperation({

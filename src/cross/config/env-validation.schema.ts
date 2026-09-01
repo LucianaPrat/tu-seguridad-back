@@ -174,6 +174,16 @@ export const envValidationSchema = Joi.object({
   [EnvNames.THROTTLE_TTL_SECONDS]: Joi.number().default(1),
   [EnvNames.THROTTLE_LIMIT]: Joi.number().default(10),
 
+  // The interactive docs are a full inventory of the routes, their bodies and
+  // their failure codes. That is exactly what a developer needs and exactly
+  // what a stranger should not be handed, so the default flips with the
+  // environment rather than being one value an operator has to remember.
+  [EnvNames.SWAGGER_ENABLED]: Joi.boolean().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: Joi.boolean().default(false),
+    otherwise: Joi.boolean().default(true),
+  }),
+
   [EnvNames.OTEL_ENABLED]: Joi.boolean().default(false),
   [EnvNames.OTEL_EXPORTER_OTLP_ENDPOINT]: Joi.string().default(
     'http://localhost:4318',

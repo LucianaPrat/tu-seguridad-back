@@ -21,6 +21,7 @@ import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { CredentialRecoveryService } from './credential-recovery.service';
 import { AccessTokenDto } from './dto/access-token.dto';
 import { AcknowledgementDto } from './dto/acknowledgement.dto';
@@ -42,6 +43,7 @@ export class CredentialRecoveryController {
   ) {}
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.ACCEPTED)
   @Post('password-reset/request')
   @ApiOperation({
@@ -66,6 +68,7 @@ export class CredentialRecoveryController {
   }
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('password-reset/confirm')
   @ApiOperation({
@@ -91,6 +94,7 @@ export class CredentialRecoveryController {
   }
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.ACCEPTED)
   @Post('magic-link/request')
   @ApiOperation({
@@ -115,6 +119,7 @@ export class CredentialRecoveryController {
   }
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('magic-link/consume')
   @ApiOperation({
