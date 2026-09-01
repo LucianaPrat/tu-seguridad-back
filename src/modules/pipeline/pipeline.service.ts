@@ -7,11 +7,13 @@ import { CameraStatusRegistry } from '../cameras/camera-status.registry';
 import { toCameraLabel } from '../cameras/camera.mapper';
 import { CapturedImage } from '../dvr/dvr-client.port';
 import { AlertEventsService } from '../events/alert-events.service';
+import { PersonDetection } from '../face-auth-client/detect-persons-response';
 import { FaceAuthClientService } from '../face-auth-client/face-auth-client.service';
 import { SnapshotService } from '../snapshots/snapshot.service';
 import { toZoneArea } from '../zones/zone.mapper';
 import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
 import { AlertCandidate } from './alert-candidate';
+import { annotateDetections } from './annotate-frame';
 import { AnalysisResult, ZoneResult } from './analysis-result';
 import { CadenceEngine } from './cadence.engine';
 import {
@@ -100,7 +102,7 @@ export class PipelineService {
     // is explicitly not solved yet.
     const snapshotId =
       entries.length > 0
-        ? await this.storeEvidence(spaceId, camera, image)
+        ? await this.storeEvidence(spaceId, camera, image, persons)
         : null;
 
     const detectedAt = new Date();
@@ -168,13 +170,35 @@ export class PipelineService {
     }));
   }
 
+  /**
+   * The stored frame carries the upstream's boxes drawn on it, so the alert
+   * email and the dashboard both show where the person actually was rather than
+   * leaving the reader to find them. Annotation never fails the write: it hands
+   * back the original bytes when it cannot decode the frame, and a write the
+   * annotated bytes were rejected for is retried with the frame as captured.
+   * Re-encoding can push a frame that was under `SNAPSHOT_MAX_BYTES` over it,
+   * and an alert with no evidence at all is the worse outcome.
+   */
   private async storeEvidence(
     spaceId: string,
     camera: Camera,
     image: CapturedImage,
+    persons: PersonDetection[],
   ): Promise<string | null> {
-    const stored = await this.snapshotService.store(spaceId, camera.id, image);
-    return stored.ok ? stored.data.id : null;
+    const evidence = await annotateDetections(image, persons);
+    const stored = await this.snapshotService.store(
+      spaceId,
+      camera.id,
+      evidence,
+    );
+    if (stored.ok) {
+      return stored.data.id;
+    }
+    if (evidence === image) {
+      return null;
+    }
+    const raw = await this.snapshotService.store(spaceId, camera.id, image);
+    return raw.ok ? raw.data.id : null;
   }
 
   /**

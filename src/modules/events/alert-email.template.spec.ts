@@ -7,6 +7,7 @@ function content(overrides: Partial<AlertMailContent> = {}): AlertMailContent {
     detectedAt: new Date('2026-08-31T14:05:00.000Z'),
     timezone: 'America/Montevideo',
     personsDetected: 2,
+    confidence: 0.847,
     recipientFirstName: 'Ada',
     eventUrl: 'http://localhost:5173/app/events/event-1',
     acknowledgeUrl:
@@ -67,6 +68,21 @@ describe('buildAlertMail', () => {
 
     expect(mail.text).not.toContain('People');
     expect(mail.html).not.toContain('People in frame');
+  });
+
+  it('reports the detection confidence as a whole percent', () => {
+    const mail = buildAlertMail(content());
+
+    expect(mail.text).toContain('85% confidence');
+    expect(mail.html).toContain('Detection confidence');
+    expect(mail.html).toContain('85%');
+  });
+
+  it('omits the confidence rather than printing a placeholder for it', () => {
+    const mail = buildAlertMail(content({ confidence: null }));
+
+    expect(mail.text).not.toContain('confidence');
+    expect(mail.html).not.toContain('Detection confidence');
   });
 
   it('escapes operator-supplied text in the html part', () => {
