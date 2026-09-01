@@ -147,6 +147,16 @@ export const envValidationSchema = Joi.object({
     .min(1024)
     .max(MEDIUMBLOB_MAX_BYTES)
     .default(2_000_000),
+  // Minimum seconds between live-frame writes for one camera on the poll path.
+  // The poll used to rewrite that MEDIUMBLOB every tick, which is one BLOB
+  // write per camera per cadence rung with no retention to clean it up. Zero
+  // restores that behaviour, so it does not reuse `pollCadenceSeconds`, whose
+  // floor is one second. The manual capture route is never throttled.
+  [EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS]: Joi.number()
+    .integer()
+    .min(0)
+    .max(3600)
+    .default(300),
   [EnvNames.ENTER_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(2),
   [EnvNames.EXIT_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(3),
 

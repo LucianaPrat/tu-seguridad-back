@@ -1,0 +1,66 @@
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: ${env:OTELCOL_MEMORY_LIMIT_MIB}
+    spike_limit_mib: ${env:OTELCOL_MEMORY_SPIKE_LIMIT_MIB}
+  resource:
+    attributes:
+      - action: upsert
+        key: deployment.environment.name
+        value: ${env:OTELCOL_DEPLOY_ENV}
+      - action: upsert
+        key: host.name
+        value: ${env:OTELCOL_INSTANCE_NAME}
+  attributes/sanitize:
+    actions:
+      - action: delete
+        key: db.statement
+      - action: delete
+        key: http.request.body
+      - action: delete
+        key: http.response.body
+      - action: delete
+        key: user.id
+      - action: delete
+        key: user.email
+      - action: delete
+        key: enduser.id
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlphttp/grafana:
+    endpoint: ${env:GRAFANA_CLOUD_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${env:GRAFANA_CLOUD_OTLP_AUTH_HEADER}
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+                without_type_suffix: true
+                without_units: true
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes/sanitize, batch]
+      exporters: [otlphttp/grafana]

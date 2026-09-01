@@ -19,7 +19,8 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 
 ## Mail (local)
 
-- Dev SMTP is a plain container, same as MySQL — this repo has no compose file and does not need one:
+- Dev SMTP is a plain container, same as MySQL — it needs nothing from the repo's compose file, which
+  only owns the MediaMTX sidecar:
   `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`. Web UI on
   <http://localhost:8025>, SMTP on `1025`, no authentication. Then set `MAIL_ENABLED=true` in `.env`;
   the other mail defaults already point at it. That one switch also turns on alert emails, so a
@@ -52,6 +53,27 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   lands within ~20% of the captured bytes, but it can grow. A frame that was just under
   `SNAPSHOT_MAX_BYTES` can be refused after annotation; the pipeline retries that write with the
   frame as captured rather than dropping the evidence.
+
+## Observability (local)
+
+- Traces need a collector listening, and there is no container for it: it is a PM2 process from
+  [`ops/otel-collector/`](../ops/otel-collector/README.md). `scripts/install.sh` once, then a `.env`
+  with `OTELCOL_MODE=debug`, then `scripts/start.sh`. Debug mode prints every span with
+  `verbosity: detailed` **and** ships it to Grafana Cloud, so `pm2 logs
+  tu-seguridad-otel-collector` is the whole tool for reading one trace. `OTELCOL_MODE=test` needs no
+  Grafana credentials at all.
+- **`OTEL_ENABLED=true` in the app's `.env` is the other half.** With the collector up and the switch
+  off, or the switch on and no collector, nothing arrives — and the second case looks worse than it
+  is: the OTLP exporter retries and fills the log with export failures. `scripts/check-health.sh`
+  checks both halves.
+- **Quote the Grafana auth header** in the collector's `.env`:
+  `GRAFANA_CLOUD_OTLP_AUTH_HEADER="Basic <base64>"`. The scripts `source` that file, so the space in
+  `Basic <base64>` unquoted assigns `Basic` and then tries to run the base64 as a command. The error
+  it produces names the variable as missing, which points nowhere near the quoting.
+- The face-api collector on this machine listens on the same `127.0.0.1:4318`. Two collectors cannot
+  both bind it, and they do not need to: in dev, whichever one is up serves both APIs, and
+  `service.name` keeps the two services apart in Grafana. In prod they are different hosts, which is
+  why this repo has an instance of its own.
 
 ## Infra / CI (plan 02)
 
