@@ -1,4 +1,5 @@
 import { Camera, MonitorZone, Prisma } from '@prisma/client';
+import sharp from 'sharp';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
 import { CapturedImage } from '../dvr/dvr-client.port';
@@ -268,6 +269,84 @@ describe('PipelineService', () => {
     if (result.ok) {
       expect(result.data.alerts[0].snapshotId).toBeNull();
     }
+  });
+
+  /**
+   * Re-encoding an annotated frame can push it over `SNAPSHOT_MAX_BYTES`, and an
+   * alert whose evidence was dropped over a drawn rectangle is a regression on
+   * an alert that simply had a frame. The unannotated bytes are the fallback.
+   */
+  it('falls back to the unannotated frame when the annotated one is refused', async () => {
+    const decodable: CapturedImage = {
+      ...image,
+      data: await sharp({
+        create: {
+          width: 64,
+          height: 64,
+          channels: 3,
+          background: { r: 20, g: 20, b: 20 },
+        },
+      })
+        .jpeg()
+        .toBuffer(),
+    };
+    // `detection()` collapses the box onto the anchor; a real one is needed here,
+    // or there is nothing to draw and the annotated bytes are the captured ones.
+    faceAuthClient.detectPersons.mockResolvedValue(
+      buildData({
+        personsDetected: true,
+        imageWidth: 64,
+        imageHeight: 64,
+        persons: [
+          {
+            detScore: 0.9,
+            bbox: { topLeft: { x: 10, y: 10 }, bottomRight: { x: 40, y: 55 } },
+            bboxNorm: {
+              topLeft: { x: 0.15, y: 0.15 },
+              bottomRight: { x: 0.62, y: 0.86 },
+            },
+            anchor: { x: 0.5, y: 0.5 },
+          },
+        ],
+      }),
+    );
+    snapshotService.store
+      .mockResolvedValueOnce(
+        buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'Snapshot is larger than the limit',
+        ),
+      )
+      .mockResolvedValueOnce(buildData({ id: 'snapshot-uuid' }));
+
+    const result = await service.processImage(
+      spaceId,
+      buildCamera(),
+      decodable,
+    );
+
+    expect(snapshotService.store).toHaveBeenCalledTimes(2);
+    // The retry carries the frame exactly as it was captured.
+    expect(snapshotService.store).toHaveBeenLastCalledWith(
+      spaceId,
+      'camera-uuid',
+      decodable,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.alerts[0].snapshotId).toBe('snapshot-uuid');
+    }
+  });
+
+  it('does not retry the write when there was nothing to annotate', async () => {
+    faceAuthClient.detectPersons.mockResolvedValue(detection());
+    snapshotService.store.mockResolvedValue(
+      buildError(ErrorCode.CONFLICT, 'database is down'),
+    );
+
+    await service.processImage(spaceId, buildCamera(), image);
+
+    expect(snapshotService.store).toHaveBeenCalledTimes(1);
   });
 
   it('ignores detections below the confidence threshold', async () => {

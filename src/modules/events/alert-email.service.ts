@@ -160,6 +160,9 @@ export class AlertEmailService {
         detectedAt: event.detectedAt,
         timezone,
         personsDetected: event.personsDetected,
+        // Prisma hands `Decimal(4,3)` back as its own type; the template wants
+        // the plain 0..1 number it formats as a percent.
+        confidence: event.confidence === null ? null : Number(event.confidence),
         recipientFirstName: recipient.user.firstName,
         eventUrl: `${this.appBaseUrl}${EVENT_PATH}/${event.id}`,
         acknowledgeUrl: this.acknowledgeUrl(event.id, delivery.id),

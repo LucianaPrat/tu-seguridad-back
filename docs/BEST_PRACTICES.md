@@ -39,6 +39,20 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   `FaceAuthClientService` and `DvrClientPort` but not `CredentialDeliveryPort`. That setup file now
   forces the switch off. Any new harness that boots `AuthModule` must do the same.
 
+## Frame annotation
+
+- **The confidence tag needs a font on the host.** `sharp` composites the detection boxes from an
+  SVG, and the `%` label inside it is rendered by librsvg through fontconfig — which uses the
+  *host's* fonts, not something the package ships. A deploy target with no font packages installed
+  draws the green box and the filled tag and leaves the tag empty. `fc-list | head` on the host says
+  whether there is anything to render with; `fonts-dejavu-core` is enough. The failure is silent and
+  only visible in the delivered mail, which is why the label sits on a filled rectangle: an empty
+  tag still marks the detection.
+- **Re-encoding changes the frame size.** The annotated JPEG is written at quality 88 and typically
+  lands within ~20% of the captured bytes, but it can grow. A frame that was just under
+  `SNAPSHOT_MAX_BYTES` can be refused after annotation; the pipeline retries that write with the
+  frame as captured rather than dropping the evidence.
+
 ## Infra / CI (plan 02)
 
 - **`npm audit` gate scope.** CI runs `npm audit --omit=dev --audit-level=critical`, not `--audit-level=high` on the full tree. Advisory DB updates constantly → full-tree `high` gate turns red on unrelated PRs the moment a new transitive advisory lands (it happened — 30 new `high`s, all dev tooling + transitive prod, 0 critical, appeared days after a green run). Dev-tooling vulns (jest/babel/etc.) never ship; high transitive prod advisories are Dependabot's job. Gate blocks only production-dependency **critical** severity. If it ever fires, fix the dep — don't widen `--audit-level` or `|| true` it.

@@ -55,6 +55,8 @@ export interface AlertMailContent {
   detectedAt: Date;
   timezone: string;
   personsDetected: number | null;
+  /** Highest `detScore` of the frame, 0..1. Null on an alert recorded before the column existed. */
+  confidence: number | null;
   recipientFirstName: string;
   eventUrl: string;
   acknowledgeUrl: string;
@@ -143,6 +145,12 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
   const sentence = presentation.sentence(content.cameraLabel);
   const people =
     content.personsDetected === null ? null : String(content.personsDetected);
+  // The number the detector reported, as the whole percent a person reads at a
+  // glance. Fractions of a percent say nothing about whether to get up.
+  const confidence =
+    content.confidence === null
+      ? null
+      : `${Math.round(content.confidence * 100)}%`;
 
   const preheader = [
     `${when.time} at ${content.cameraLabel}`,
@@ -164,6 +172,7 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
     `Camera:   ${content.cameraLabel}`,
     `Detected: ${when.date} ${when.time} (${when.zone})`,
     ...(people === null ? [] : [`People:   ${people}`]),
+    ...(confidence === null ? [] : [`Match:    ${confidence} confidence`]),
     '',
     `View the alert:   ${content.eventUrl}`,
     `Mark as handled:  ${content.acknowledgeUrl}`,
@@ -172,7 +181,7 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
   ].join('\n');
 
   const frame = content.snapshotCid
-    ? `<img src="cid:${escapeHtml(content.snapshotCid)}" width="600" alt="Frame captured at ${escapeHtml(when.time)} by ${escapeHtml(content.cameraLabel)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;background-color:${INK};" />`
+    ? `<img src="cid:${escapeHtml(content.snapshotCid)}" width="600" alt="Frame captured at ${escapeHtml(when.time)} by ${escapeHtml(content.cameraLabel)}, each detected person outlined in green" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;background-color:${INK};" />`
     : '';
 
   const html = `<!DOCTYPE html>
@@ -214,6 +223,7 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
 ${factRow('Detected', `${escapeHtml(when.date)} ${escapeHtml(when.time)}`)}
 ${factRow('Time zone', escapeHtml(when.zone))}
 ${people === null ? '' : factRow('People in frame', escapeHtml(people))}
+${confidence === null ? '' : factRow('Detection confidence', escapeHtml(confidence))}
 </table>
 </td></tr>
 
