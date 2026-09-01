@@ -8,6 +8,7 @@ const PASSIVE = 15;
 const ACTIVE = 10;
 const DETECTION = 5;
 const LIVE_WRITE = 300;
+const CONCURRENCY = 2;
 
 function buildCamera(id: string): Camera {
   return {
@@ -54,6 +55,7 @@ describe('PollingScheduler', () => {
     config = {
       [EnvNames.POLLING_ENABLED]: true,
       [EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS]: LIVE_WRITE,
+      [EnvNames.POLLING_CONCURRENCY]: CONCURRENCY,
     };
     configService = {
       get: jest.fn((key: string) => config[key]),
@@ -175,6 +177,70 @@ describe('PollingScheduler', () => {
         'camera-a1',
         expect.objectContaining({ lastErrorCode: ErrorCode.INTERNAL_ERROR }),
       );
+    });
+
+    it('polls several cameras at once, never more than the configured limit', async () => {
+      dvrAccessor.findSpaceIdsWithDvr.mockResolvedValue(['space-a']);
+      cameraAccessor.findPollableBySpace.mockResolvedValue([
+        buildCamera('camera-1'),
+        buildCamera('camera-2'),
+        buildCamera('camera-3'),
+        buildCamera('camera-4'),
+      ]);
+      let running = 0;
+      let peak = 0;
+      const release: (() => void)[] = [];
+      // Captures that only finish when this test says so, which is what makes
+      // "how many were in flight together" observable at all.
+      snapshotService.capture.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            running += 1;
+            peak = Math.max(peak, running);
+            release.push(() => {
+              running -= 1;
+              resolve(buildData(capturedImage));
+            });
+          }),
+      );
+
+      const tick = scheduler.tick();
+      // One wave per batch the pool can hold, plus slack: let whatever it
+      // started reach the capture, then let those captures finish.
+      for (let wave = 0; wave < 6; wave += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        release.splice(0).forEach((finish) => finish());
+      }
+      await tick;
+
+      // Above one proves the polls overlap; equal to the limit proves the pool
+      // caps them rather than firing the whole estate at the recorder.
+      expect(peak).toBe(CONCURRENCY);
+      expect(snapshotService.capture).toHaveBeenCalledTimes(4);
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(4);
+    });
+
+    it('runs the tick serially when the limit is one', async () => {
+      config[EnvNames.POLLING_CONCURRENCY] = 1;
+      dvrAccessor.findSpaceIdsWithDvr.mockResolvedValue(['space-a']);
+      cameraAccessor.findPollableBySpace.mockResolvedValue([
+        buildCamera('camera-1'),
+        buildCamera('camera-2'),
+      ]);
+      let running = 0;
+      let peak = 0;
+      snapshotService.capture.mockImplementation(async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await Promise.resolve();
+        running -= 1;
+        return buildData(capturedImage);
+      });
+
+      await scheduler.tick();
+
+      expect(peak).toBe(1);
+      expect(snapshotService.capture).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -141,6 +141,17 @@ export const envValidationSchema = Joi.object({
   [EnvNames.POLLING_PASSIVE_SECONDS]: pollCadenceSeconds(15),
   [EnvNames.POLLING_ACTIVE_SECONDS]: pollCadenceSeconds(10),
   [EnvNames.POLLING_DETECTION_SECONDS]: pollCadenceSeconds(5),
+  // How many cameras one tick polls at a time. The tick used to await each
+  // camera in turn, so a cycle cost the sum of every camera's poll and the
+  // cadences above became unreachable well before the recorder was saturated.
+  // Bounded rather than unbounded because every poll is one ISAPI capture on
+  // the space's recorder plus one detection POST upstream, and a whole estate
+  // firing at once is how both get knocked over. `1` restores the serial tick.
+  [EnvNames.POLLING_CONCURRENCY]: Joi.number()
+    .integer()
+    .min(1)
+    .max(64)
+    .default(4),
   [EnvNames.SNAPSHOT_TIMEOUT_MS]: Joi.number().default(5000),
   [EnvNames.SNAPSHOT_MAX_BYTES]: Joi.number()
     .integer()

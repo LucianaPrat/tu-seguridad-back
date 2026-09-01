@@ -1,5 +1,5 @@
 import { AxiosError, AxiosHeaders } from 'axios';
-import { of, throwError } from 'rxjs';
+import { from, of, throwError } from 'rxjs';
 import { ErrorCode } from '../../cross/common/constants';
 import { FaceAuthClientService } from './face-auth-client.service';
 
@@ -225,6 +225,30 @@ describe('FaceAuthClientService', () => {
 
     await service.detectPersons(Buffer.from('img'), 'a.jpg');
     await service.detectPersons(Buffer.from('img'), 'b.jpg');
+
+    expect(postCalls().filter(isAuthorize)).toHaveLength(1);
+    expect(detectCalls()).toHaveLength(2);
+  });
+
+  it('authorizes once when several frames arrive on a cold cache', async () => {
+    // The poll runs cameras in parallel, so a cold cache is hit by a whole
+    // batch at once. An authorize that does not settle synchronously is what
+    // makes the second caller arrive before the first has cached anything.
+    respondTo(
+      of({ data: EMPTY_DETECTION }),
+      from(
+        new Promise((resolve) =>
+          setImmediate(() =>
+            resolve({ data: { isAuth: true, token: SESSION_TOKEN } }),
+          ),
+        ),
+      ),
+    );
+
+    await Promise.all([
+      service.detectPersons(Buffer.from('img'), 'a.jpg'),
+      service.detectPersons(Buffer.from('img'), 'b.jpg'),
+    ]);
 
     expect(postCalls().filter(isAuthorize)).toHaveLength(1);
     expect(detectCalls()).toHaveLength(2);

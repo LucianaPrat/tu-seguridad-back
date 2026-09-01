@@ -32,6 +32,12 @@ export class FaceAuthClientService {
    * upstream rejects it, and a rejection is what triggers the next exchange.
    */
   private sessionToken: string | null = null;
+  /**
+   * The exchange in flight, if one is. The poll runs cameras in parallel, so
+   * without this every camera in a batch that finds the cache empty — cold
+   * start, or a 403 that just cleared it — fires its own `/auth/authorize`.
+   */
+  private authorizing: Promise<string> | null = null;
   private readonly breaker: CircuitBreaker<
     [Buffer, string],
     DetectPersonsResponse
@@ -135,11 +141,20 @@ export class FaceAuthClientService {
   }
 
   /** The cached session token, exchanging the client token for one if needed. */
-  private async authorizedToken(): Promise<string> {
+  private authorizedToken(): Promise<string> {
     if (this.sessionToken) {
-      return this.sessionToken;
+      return Promise.resolve(this.sessionToken);
     }
 
+    // Single-flight. Cleared once settled, so a failed exchange is retried by
+    // the next caller instead of being cached as a rejection.
+    this.authorizing ??= this.exchangeToken().finally(() => {
+      this.authorizing = null;
+    });
+    return this.authorizing;
+  }
+
+  private async exchangeToken(): Promise<string> {
     const response = await firstValueFrom(
       this.httpService.post<AuthorizeResponse>(
         `${this.apiUrl()}/api/v1/auth/authorize`,
