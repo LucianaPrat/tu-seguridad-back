@@ -45,6 +45,8 @@ describe('PollingScheduler', () => {
   let pipelineService: { processImage: jest.Mock };
   let statusRegistry: { record: jest.Mock; incrementSkipped: jest.Mock };
   let schedulerRegistry: { addInterval: jest.Mock; deleteInterval: jest.Mock };
+  let pollTotal: { inc: jest.Mock };
+  let pollDuration: { observe: jest.Mock };
   let cadenceEngine: CadenceEngine;
   let scheduler: PollingScheduler;
 
@@ -75,6 +77,8 @@ describe('PollingScheduler', () => {
     };
     statusRegistry = { record: jest.fn(), incrementSkipped: jest.fn() };
     schedulerRegistry = { addInterval: jest.fn(), deleteInterval: jest.fn() };
+    pollTotal = { inc: jest.fn() };
+    pollDuration = { observe: jest.fn() };
     // Real engine: which ticks a camera sits out is the behaviour under test,
     // and a mock that answers "due" to everything would test nothing.
     cadenceEngine = new CadenceEngine(PASSIVE, ACTIVE, DETECTION);
@@ -87,6 +91,8 @@ describe('PollingScheduler', () => {
       statusRegistry as never,
       cadenceEngine,
       schedulerRegistry as never,
+      pollTotal as never,
+      pollDuration as never,
     );
   });
 
@@ -186,6 +192,96 @@ describe('PollingScheduler', () => {
 
       expect(statusRegistry.incrementSkipped).toHaveBeenCalledWith('camera-a1');
       expect(snapshotService.capture).toHaveBeenCalledTimes(1);
+
+      release?.();
+      await inFlight;
+    });
+
+    it('times and counts a successful poll under its camera id', async () => {
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pollDuration.observe).toHaveBeenCalledWith(
+        { cameraId: 'camera-a1' },
+        expect.any(Number),
+      );
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'success',
+      });
+    });
+
+    it('counts a capture failure as an error and still times it', async () => {
+      snapshotService.capture.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR snapshot fetch timed out'),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'error',
+      });
+      expect(pollDuration.observe).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts a detection failure as an error', async () => {
+      pipelineService.processImage.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'face-auth circuit open'),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'error',
+      });
+    });
+
+    it('still counts a poll a successful one when only the thumbnail write failed', async () => {
+      snapshotService.store.mockResolvedValue(
+        buildError(
+          ErrorCode.VALIDATION_ERROR,
+          'Snapshot is larger than 1 byte',
+        ),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'success',
+      });
+    });
+
+    it('counts an unexpected throw as an error', async () => {
+      snapshotService.capture.mockRejectedValueOnce(new Error('socket closed'));
+
+      await expect(
+        scheduler.pollOnce('space-a', buildCamera('camera-a1')),
+      ).rejects.toThrow('socket closed');
+
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'error',
+      });
+    });
+
+    it('counts a skipped poll without timing it', async () => {
+      let release: (() => void) | undefined;
+      snapshotService.capture.mockReturnValue(
+        new Promise((resolve) => {
+          release = () => resolve(buildData(capturedImage));
+        }),
+      );
+
+      const inFlight = scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(pollTotal.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-a1',
+        status: 'skipped',
+      });
+      expect(pollDuration.observe).not.toHaveBeenCalled();
 
       release?.();
       await inFlight;

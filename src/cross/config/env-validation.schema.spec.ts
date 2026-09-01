@@ -23,6 +23,7 @@ const productionEnv = {
   // 32 bytes, and deliberately not the all-zero placeholder the dev default carries.
   [EnvNames.DVR_PASSWORD_ENCRYPTION_KEY]:
     'dGVuYW50LWFsZXJ0LXRlc3Qta2V5LTMyLWJ5dGVzISE=',
+  [EnvNames.METRICS_TOKEN]: 'production-metrics-token',
 };
 
 describe('envValidationSchema', () => {

@@ -6,8 +6,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Camera } from '@prisma/client';
+import { Counter, Histogram } from 'prom-client';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { MetricNames } from '../../cross/metrics/metric-names';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
@@ -50,6 +53,10 @@ export class PollingScheduler
     private readonly statusRegistry: CameraStatusRegistry,
     private readonly cadenceEngine: CadenceEngine,
     private readonly schedulerRegistry: SchedulerRegistry,
+    @InjectMetric(MetricNames.PIPELINE_POLL_TOTAL)
+    private readonly pollTotal: Counter<string>,
+    @InjectMetric(MetricNames.PIPELINE_POLL_DURATION_SECONDS)
+    private readonly pollDuration: Histogram<string>,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -132,10 +139,20 @@ export class PollingScheduler
     if (this.inFlight.has(camera.id)) {
       this.statusRegistry.incrementSkipped(camera.id);
       this.cadenceEngine.rearm(camera.id, Date.now());
+      // Counted, but never timed: a skip did no work, and folding a zero into
+      // the histogram would drag the percentiles of the polls that did toward
+      // nothing. A camera skipping steadily is the signal that its cycle no
+      // longer fits inside its cadence, which is what the counter is for.
+      this.pollTotal.inc({ cameraId: camera.id, status: 'skipped' });
       return;
     }
 
     this.inFlight.add(camera.id);
+    const startedAt = Date.now();
+    // Pessimistic on purpose. Anything thrown past here is caught by `tick`,
+    // which records INTERNAL_ERROR on the camera — so an unexpected failure
+    // counts as an error instead of going uncounted.
+    let status: 'success' | 'error' = 'error';
     try {
       await withSpan(
         'poll.camera',
@@ -161,6 +178,7 @@ export class PollingScheduler
           } else {
             this.cadenceEngine.rearm(camera.id, Date.now());
           }
+          status = analysis.ok ? 'success' : 'error';
 
           // The poll refreshes the camera's live frame, so the grid has a
           // thumbnail and the zone editor a backdrop for a camera that never
@@ -207,6 +225,16 @@ export class PollingScheduler
       );
     } finally {
       this.inFlight.delete(camera.id);
+      // Timed around the whole poll, recorder request included, which is what
+      // `CameraStatusRegistry.lastLatencyMs` never covered: that one starts
+      // after the frame is already in hand. A failed live-frame write leaves
+      // this a success — the poll detected, and the thumbnail is recorded on
+      // the camera's own status.
+      this.pollDuration.observe(
+        { cameraId: camera.id },
+        (Date.now() - startedAt) / 1000,
+      );
+      this.pollTotal.inc({ cameraId: camera.id, status });
     }
   }
 

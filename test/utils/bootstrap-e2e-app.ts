@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
+import { register as promRegister } from 'prom-client';
 import { createHash } from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import { Server } from 'http';
@@ -181,6 +182,12 @@ export interface E2eContext {
  * along for free from Test.createTestingModule.
  */
 export async function bootstrapE2eApp(): Promise<E2eContext> {
+  // prom-client's default registry is module state, and registering the same
+  // metric twice throws. Jest gives each spec file its own module registry, so
+  // this only bites a file that boots the app more than once - which is cheap
+  // to make impossible rather than to remember.
+  promRegister.clear();
+
   const fakeFaceAuthClient = new FakeFaceAuthClientService();
   const fakeDvrClient = new FakeDvrClientService();
   const fakeCredentialDelivery = new FakeCredentialDeliveryService();
