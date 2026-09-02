@@ -16,6 +16,8 @@ const camera = (overrides: Partial<Camera> = {}): Camera =>
     isEnabled: true,
     monitorMode: 'full',
     alertType: 'intrusion',
+    confidenceThreshold: null,
+    minPollSeconds: null,
     lastSnapshotAt: null,
     deletedAt: null,
     createdAt: new Date(),

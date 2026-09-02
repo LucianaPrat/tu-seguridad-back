@@ -23,6 +23,13 @@ import { PipelineService } from './pipeline.service';
 const INTERVAL_NAME = 'camera-poll';
 
 /**
+ * The camera's own floor, or none. Read at every arm rather than cached: an
+ * operator raising it has to take effect on the next poll, not on the next
+ * restart.
+ */
+const pollFloor = (camera: Camera): number => camera.minPollSeconds ?? 0;
+
+/**
  * Pulls a frame from every pollable camera that is due for one.
  *
  * One interval for the whole process, not one per camera: cameras still carry
@@ -156,7 +163,7 @@ export class PollingScheduler
       });
       // Same reason as every other failure path: a camera left un-armed is
       // due again on the very next tick.
-      this.cadenceEngine.rearm(camera.id, Date.now());
+      this.cadenceEngine.rearm(camera.id, Date.now(), pollFloor(camera));
     }
   }
 
@@ -173,7 +180,7 @@ export class PollingScheduler
   async pollOnce(spaceId: string, camera: Camera): Promise<void> {
     if (this.inFlight.has(camera.id)) {
       this.statusRegistry.incrementSkipped(camera.id);
-      this.cadenceEngine.rearm(camera.id, Date.now());
+      this.cadenceEngine.rearm(camera.id, Date.now(), pollFloor(camera));
       // Counted, but never timed: a skip did no work, and folding a zero into
       // the histogram would drag the percentiles of the polls that did toward
       // nothing. A camera skipping steadily is the signal that its cycle no
@@ -199,7 +206,7 @@ export class PollingScheduler
               lastErrorAt: new Date(),
               lastErrorCode: captured.code,
             });
-            this.cadenceEngine.rearm(camera.id, Date.now());
+            this.cadenceEngine.rearm(camera.id, Date.now(), pollFloor(camera));
             return;
           }
 
@@ -209,9 +216,9 @@ export class PollingScheduler
             captured.data,
           );
           if (analysis.ok) {
-            this.applyCadence(camera.id, analysis.data);
+            this.applyCadence(camera, analysis.data);
           } else {
-            this.cadenceEngine.rearm(camera.id, Date.now());
+            this.cadenceEngine.rearm(camera.id, Date.now(), pollFloor(camera));
           }
           status = analysis.ok ? 'success' : 'error';
 
@@ -278,11 +285,13 @@ export class PollingScheduler
    * landed. Logged only when the level actually moved: one line per real
    * transition is readable, one per poll is not.
    */
-  private applyCadence(cameraId: string, analysis: AnalysisResult): void {
+  private applyCadence(camera: Camera, analysis: AnalysisResult): void {
+    const cameraId = camera.id;
     const { level, seconds, changed } = this.cadenceEngine.record(
       cameraId,
       analysis,
       Date.now(),
+      pollFloor(camera),
     );
     this.statusRegistry.record(cameraId, {
       pollLevel: level,

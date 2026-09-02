@@ -50,6 +50,15 @@ export class PipelineService {
    * deleted), which is also what keeps both maps from holding rows for cameras
    * that no longer exist.
    */
+  /**
+   * The shortest interval the scheduler can honour. Exposed so the camera
+   * update route can refuse a per-camera floor below it instead of accepting a
+   * number that would quietly do nothing.
+   */
+  get basePollSeconds(): number {
+    return this.cadenceEngine.tickSeconds;
+  }
+
   resetCameraState(cameraId: string): void {
     this.occupancyEngine.reset(cameraId);
     this.cadenceEngine.reset(cameraId);
@@ -85,8 +94,15 @@ export class PipelineService {
       return detection;
     }
 
+    // The camera's own threshold when it has one. A camera pointed at a street
+    // and one pointed at a hallway need different numbers, and until this
+    // existed tuning one detuned the other.
+    const threshold =
+      camera.confidenceThreshold === null
+        ? PipelineDefaults.CONFIDENCE_THRESHOLD
+        : Number(camera.confidenceThreshold);
     const persons = detection.data.persons.filter(
-      (person) => person.detScore >= PipelineDefaults.CONFIDENCE_THRESHOLD,
+      (person) => person.detScore >= threshold,
     );
     const anchors: AnchorWithScore[] = persons.map((person) => ({
       anchor: toPercentPoint(person.anchor),

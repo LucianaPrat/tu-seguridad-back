@@ -185,20 +185,28 @@ model Dvr {
 }
 
 model Camera {
-  id             String       @id @default(uuid())
-  dvrId          String       @map("dvr_id")
-  externalId     String       @map("external_id")
-  name           String
-  location       String?
-  status         CameraStatus @default(offline)
-  isConfigured   Boolean      @default(false) @map("is_configured")
-  isEnabled      Boolean      @default(true) @map("is_enabled")
-  monitorMode    MonitorMode  @default(full) @map("monitor_mode")
-  alertType      AlertType?   @map("alert_type")
-  lastSnapshotAt DateTime?    @map("last_snapshot_at")
-  deletedAt      DateTime?    @map("deleted_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  id                  String       @id @default(uuid())
+  dvrId               String       @map("dvr_id")
+  externalId          String       @map("external_id")
+  name                String
+  location            String?
+  status              CameraStatus @default(offline)
+  isConfigured        Boolean      @default(false) @map("is_configured")
+  isEnabled           Boolean      @default(true) @map("is_enabled")
+  monitorMode         MonitorMode  @default(full) @map("monitor_mode")
+  alertType           AlertType?   @map("alert_type")
+  /// Detection score a person must reach on this camera's frames. Null means
+  /// the global default: a camera pointed at a street and one pointed at a
+  /// hallway need different numbers, and tuning one used to detune the other.
+  confidenceThreshold Decimal?     @map("confidence_threshold") @db.Decimal(4, 3)
+  /// Floor on how often this camera is polled, in seconds. Null means the
+  /// cadence ladder's own rungs decide. Raises the floor only — it can never
+  /// make a camera poll faster than the ladder would.
+  minPollSeconds      Int?         @map("min_poll_seconds")
+  lastSnapshotAt      DateTime?    @map("last_snapshot_at")
+  deletedAt           DateTime?    @map("deleted_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
 
   dvr          Dvr           @relation(fields: [dvrId], references: [id], onDelete: Restrict)
   monitorZones MonitorZone[]

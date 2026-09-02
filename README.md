@@ -193,6 +193,8 @@ Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit brea
 
 `PollingScheduler` drives steps 1–6 automatically when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable, then polling the due ones `POLLING_CONCURRENCY` at a time rather than one after another (see [Poll cadence](#poll-cadence)). A camera whose previous poll is still in flight is counted as skipped, not queued behind it, and one that throws unexpectedly is logged and recorded on its own status rather than ending the tick — otherwise a single bad camera would stop every remaining camera and space from being monitored. After detection has run, the tick refreshes that camera's live frame — at most once per `SNAPSHOT_LIVE_WRITE_SECONDS`, see [Snapshot storage](#snapshot-storage); the write is deliberately last and its failure only recorded on the camera's status — a thumbnail must never be able to suppress an alert. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
 
+The score a person must reach to count is `PipelineDefaults.CONFIDENCE_THRESHOLD` (`0.45`) unless the camera carries its own `confidenceThreshold`, set on `PUT /cameras/:id` and stored to three decimals. A camera pointed at a street and one pointed at a hallway need different numbers, and until the column existed tuning one detuned the other. `null` restores the deployment default.
+
 ### Poll cadence
 
 How often a camera is polled follows what its last frame showed, so a quiet camera is cheap and an interesting one is fast. `CadenceEngine` (`src/modules/pipeline/cadence.engine.ts`) holds a level per camera:
@@ -212,6 +214,8 @@ The level goes **up on the raw sighting and down on the confirmed one**. A perso
 A poll that fails — unreachable recorder, upstream detection error, or a skip because the previous poll is still in flight — re-arms the camera at the level it already had. The frame said nothing about how fast to go, and dropping an unreachable recorder back onto the base tick would hammer exactly the thing already struggling.
 
 A `monitorMode = full` camera never sees `active`: its whole frame is the monitored area, so any person it detects is already a detection. The current level is on `GET /cameras/:id/status` as `pollLevel` / `pollIntervalSeconds`, and each real transition logs one line.
+
+A camera can also carry a **floor of its own**, `minPollSeconds` on `PUT /cameras/:id`. It raises that camera's interval and nothing else: the effective wait is the larger of the ladder's rung and the floor, so a floor can only ever slow one camera down. A value under the ladder's shortest rung is refused rather than clamped — accepted, it would do nothing, and an operator who set `2` where the ladder already polls at `5` deserves to be told. `null` puts the camera back on the ladder alone.
 
 ## Alert emails
 

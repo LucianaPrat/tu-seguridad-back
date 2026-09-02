@@ -21,6 +21,13 @@ export function toCameraDto(
     isEnabled: camera.isEnabled,
     monitorMode: camera.monitorMode,
     alertType: camera.alertType,
+    // Prisma hands `Decimal(4,3)` back as its own type; the contract carries the
+    // plain 0..1 number, the same conversion the alert mail already makes.
+    confidenceThreshold:
+      camera.confidenceThreshold === null
+        ? null
+        : Number(camera.confidenceThreshold),
+    minPollSeconds: camera.minPollSeconds,
     lastSnapshotAt: camera.lastSnapshotAt,
     latestSnapshotUrl: latestSnapshotId ? snapshotUrl(latestSnapshotId) : null,
     createdAt: camera.createdAt,

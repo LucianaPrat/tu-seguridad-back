@@ -82,6 +82,21 @@ export class CamerasService {
       );
     }
 
+    // Refused rather than clamped. A floor under the ladder's fastest rung
+    // would be accepted and then do nothing, and an operator who set 2 where
+    // the ladder already polls at 5 deserves to be told, not ignored.
+    const basePollSeconds = this.pipelineService.basePollSeconds;
+    if (
+      dto.minPollSeconds !== undefined &&
+      dto.minPollSeconds !== null &&
+      dto.minPollSeconds < basePollSeconds
+    ) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        `minPollSeconds must be at least ${basePollSeconds}, the shortest interval the scheduler runs at`,
+      );
+    }
+
     const isConfigured = await this.resolveIsConfigured(
       spaceId,
       camera.id,
@@ -95,6 +110,8 @@ export class CamerasService {
       monitorMode,
       alertType,
       isConfigured,
+      confidenceThreshold: dto.confidenceThreshold,
+      minPollSeconds: dto.minPollSeconds,
     });
     if (!updated) {
       return buildError(ErrorCode.NOT_FOUND, `Camera ${id} not found`);

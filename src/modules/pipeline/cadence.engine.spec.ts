@@ -161,4 +161,46 @@ describe('CadenceEngine', () => {
       expect(engine.isDue('camera-2', now)).toBe(false);
     });
   });
+
+  describe('per-camera poll floor', () => {
+    const empty = {
+      persons: [],
+      zoneResults: [],
+      alerts: [],
+      occupancyPending: false,
+    };
+
+    it('raises a camera above the rung the ladder chose', () => {
+      const engine = new CadenceEngine(15, 10, 5);
+
+      const decision = engine.record('camera-a', empty, 0, 60);
+
+      expect(decision.level).toBe('passive');
+      expect(decision.seconds).toBe(60);
+      expect(engine.isDue('camera-a', 59_000)).toBe(false);
+      expect(engine.isDue('camera-a', 60_000)).toBe(true);
+    });
+
+    /** A floor can only slow a camera down; it never outruns the ladder. */
+    it('does nothing when it is below the rung', () => {
+      const engine = new CadenceEngine(15, 10, 5);
+
+      expect(engine.record('camera-a', empty, 0, 3).seconds).toBe(15);
+    });
+
+    it('leaves every other camera on the ladder', () => {
+      const engine = new CadenceEngine(15, 10, 5);
+
+      engine.record('camera-a', empty, 0, 60);
+      expect(engine.record('camera-b', empty, 0).seconds).toBe(15);
+    });
+
+    it('applies the floor to a re-arm after a failed poll too', () => {
+      const engine = new CadenceEngine(15, 10, 5);
+
+      engine.rearm('camera-a', 0, 60);
+
+      expect(engine.isDue('camera-a', 59_000)).toBe(false);
+    });
+  });
 });

@@ -62,10 +62,11 @@ export class CadenceEngine {
     cameraId: string,
     result: AnalysisResult,
     now: number,
+    minSeconds = 0,
   ): CadenceDecision {
     const previous = this.cameras.get(cameraId)?.level;
     const level = levelFor(result);
-    const seconds = this.secondsFor(level);
+    const seconds = this.secondsFor(level, minSeconds);
     this.cameras.set(cameraId, { level, dueAt: now + seconds * 1000 });
     // First sight counts as a change: one line per camera on the first tick
     // after boot is what confirms the ladder is actually running.
@@ -78,11 +79,11 @@ export class CadenceEngine {
    * camera whose recorder is down stays due on every tick and retries at the
    * base cadence, which is the opposite of what a dead recorder needs.
    */
-  rearm(cameraId: string, now: number): void {
+  rearm(cameraId: string, now: number, minSeconds = 0): void {
     const level = this.level(cameraId);
     this.cameras.set(cameraId, {
       level,
-      dueAt: now + this.secondsFor(level) * 1000,
+      dueAt: now + this.secondsFor(level, minSeconds) * 1000,
     });
   }
 
@@ -95,7 +96,19 @@ export class CadenceEngine {
     this.cameras.delete(cameraId);
   }
 
-  private secondsFor(level: CadenceLevel): number {
+  /**
+   * The rung, raised to the camera's own floor when it has one.
+   *
+   * `Math.max`, so a floor can only ever slow a camera down. A knob that could
+   * make one poll faster than the ladder's shortest rung would be a knob that
+   * outruns the scheduler's interval, and the camera would simply miss the
+   * ticks it asked for.
+   */
+  private secondsFor(level: CadenceLevel, minSeconds = 0): number {
+    return Math.max(this.baseSecondsFor(level), minSeconds);
+  }
+
+  private baseSecondsFor(level: CadenceLevel): number {
     switch (level) {
       case 'detection':
         return this.detectionSeconds;

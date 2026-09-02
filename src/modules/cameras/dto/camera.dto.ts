@@ -41,6 +41,24 @@ export class CameraDto {
   alertType!: AlertType | null;
 
   @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'Detection score a person must reach on this camera; null means the ' +
+      'deployment default',
+  })
+  confidenceThreshold!: number | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'Floor on how often this camera is polled, in seconds; null means the ' +
+      'cadence ladder decides',
+  })
+  minPollSeconds!: number | null;
+
+  @ApiPropertyOptional({
     type: Date,
     nullable: true,
     description: 'When the recorder last handed over a frame',

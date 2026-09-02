@@ -20,6 +20,8 @@ function buildCamera(overrides: Partial<Camera> = {}): Camera {
     isEnabled: true,
     monitorMode: 'full',
     alertType: 'intruder',
+    confidenceThreshold: null,
+    minPollSeconds: null,
     lastSnapshotAt: null,
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -516,6 +518,60 @@ describe('PipelineService', () => {
 
       expect(result.ok && result.data.alerts).toHaveLength(1);
       expect(alertsSuppressed.inc).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('per-camera confidence threshold', () => {
+    /**
+     * A street and a hallway need different numbers, and until the column
+     * existed tuning one detuned the other.
+     */
+    it('uses the camera threshold over the deployment default', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(detection(undefined, 0.4));
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({
+          monitorMode: 'full',
+          alertType: 'suspicious',
+          confidenceThreshold: new Prisma.Decimal('0.300'),
+        }),
+        image,
+      );
+
+      expect(result.ok && result.data.persons).toHaveLength(1);
+    });
+
+    it('drops a person below the camera threshold', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(detection(undefined, 0.4));
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({
+          monitorMode: 'full',
+          alertType: 'suspicious',
+          confidenceThreshold: new Prisma.Decimal('0.900'),
+        }),
+        image,
+      );
+
+      expect(result.ok && result.data.persons).toHaveLength(0);
+      expect(result.ok && result.data.alerts).toHaveLength(0);
+    });
+
+    it('falls back to the deployment default when the camera has none', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(detection(undefined, 0.4));
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera({ monitorMode: 'full', alertType: 'suspicious' }),
+        image,
+      );
+
+      // 0.4 is under the shipped default of 0.45, so a camera with no
+      // threshold of its own still drops the person. Same score as the two
+      // tests above: only the threshold changed between them.
+      expect(result.ok && result.data.persons).toHaveLength(0);
     });
   });
 });
