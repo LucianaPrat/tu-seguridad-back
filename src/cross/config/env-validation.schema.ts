@@ -171,6 +171,16 @@ export const envValidationSchema = Joi.object({
   [EnvNames.ENTER_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(2),
   [EnvNames.EXIT_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(3),
 
+  // Seconds before the same camera, zone and alert type can raise a second
+  // alert. Ships at `0`, the pre-cooldown behaviour, so nothing an operator
+  // already tuned changes under them: the honest window is a product decision
+  // about how often a person is willing to be told the same thing.
+  [EnvNames.ALERT_COOLDOWN_SECONDS]: Joi.number()
+    .integer()
+    .min(0)
+    .max(3600)
+    .default(0),
+
   [EnvNames.THROTTLE_TTL_SECONDS]: Joi.number().default(1),
   [EnvNames.THROTTLE_LIMIT]: Joi.number().default(10),
 
