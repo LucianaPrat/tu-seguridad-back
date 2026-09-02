@@ -92,6 +92,20 @@ Two properties this inherits rather than adds: a replayed link is a no-op, becau
 
 `EventDelivery.error` is served by `GET /events/:id/deliveries`, which every member of the space can read, so what a relay chose to say ends up in an API response. The stored reason is capped at 500 characters and the log keeps the whole thing. The cap is about a `TEXT` column and an unbounded upstream string, not about secrecy: an SMTP rejection can name the relay host, and in a single-tenant space whose members the owner invited, that is accepted rather than scrubbed — the same call the HLS URL gets under [Live streaming](README.md#live-streaming).
 
+## Retention
+
+Nothing deleted a row until `RetentionService` (`src/modules/retention/`). Consumed and expired `auth_tokens`, settled `invitations`, and every evidence frame ever captured accumulated on the same MySQL instance that serves every query — and a `MEDIUMBLOB` per alert is the one of those with no ceiling. [`docs/decisions/001-mysql-snapshot-storage.md`](docs/decisions/001-mysql-snapshot-storage.md) said retention had to arrive before the table's growth became material; this is it, and it does not replace the object-storage move that ADR still defers.
+
+One nightly job for three sweeps, not three jobs: it is the same question — what is old enough to go — asked of three tables, and three cron entries would be three things to notice had stopped. It is off unless `RETENTION_ENABLED` says otherwise, the opposite default from every other switch here, because a developer who pulls the branch must not find their local history pruned because the process happened to be up at three in the morning.
+
+Three properties are load-bearing:
+
+- **Every sweep is capped.** Prisma cannot put a `LIMIT` on `deleteMany`, so each accessor selects `RETENTION_BATCH_SIZE` ids and deletes those. The first run after this ships has every row the system ever wrote to get through, and one unbounded `DELETE` on that holds a lock for as long as it takes. What the cap leaves behind goes on the next night's run.
+- **A swept frame nulls its alert, and the alert stays.** `AlertEvent.snapshotId` is `SET NULL`, so an event whose evidence is past the window keeps its row and loses its bytes. That is the intended outcome rather than a side effect noticed later: the event is the record of what happened, and the label, alert type and detection metrics it copied at detection time are what make the history readable once the frame is gone. It is also why the sweep carries no "still referenced?" clause — events and their frames age together, so a frame past the window is only ever pointed at by an event past it too.
+- **Live frames are never swept.** They are one row per camera, rewritten in place, and a camera whose thumbnail was deleted would show a hole in the grid until its next poll.
+
+A sweep that throws is logged and the next one still runs: the three are independent, and a snapshot table that will not delete is no reason to leave expired credentials in place for another day. Each publishes `retention_rows_deleted_total{sweep}`, because a sweep that silently stops deleting is otherwise indistinguishable from one with nothing left to delete.
+
 ## Testing layers
 
 - **Unit** (`*.spec.ts`): root jest config, `testRegex: ".*\\.spec\\.ts$"`. Does NOT match `*.int-spec.ts` (different suffix shape: `-spec` not `.spec`) — no DB, no network.

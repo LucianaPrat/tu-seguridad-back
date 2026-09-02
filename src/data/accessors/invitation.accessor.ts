@@ -217,6 +217,30 @@ export class InvitationAccessorService {
     });
   }
 
+  /**
+   * Retention sweep. An invitation is settled once it has expired or been
+   * accepted; both keep their row for the window before it goes. The accepted
+   * ones are the reason the window is not zero — `createdUserId` is how a space
+   * owner answers "who invited this member", and that question outlives the
+   * invitation.
+   */
+  async deleteSettledBefore(before: Date, limit: number): Promise<number> {
+    const doomed = await this.prisma.invitation.findMany({
+      where: {
+        OR: [{ expiresAt: { lt: before } }, { acceptedAt: { lt: before } }],
+      },
+      select: { id: true },
+      take: limit,
+    });
+    if (doomed.length === 0) {
+      return 0;
+    }
+    const { count } = await this.prisma.invitation.deleteMany({
+      where: { id: { in: doomed.map((row) => row.id) } },
+    });
+    return count;
+  }
+
   private withoutHash({
     tokenHash: _tokenHash,
     ...invitation

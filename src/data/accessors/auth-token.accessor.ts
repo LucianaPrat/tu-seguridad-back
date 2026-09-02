@@ -204,6 +204,42 @@ export class AuthTokenAccessorService {
     });
   }
 
+  /**
+   * Retention sweep. Deletes tokens that can no longer be used — expired, spent
+   * or revoked — and only once they have been dead for the full window, so a
+   * support question about a link someone clicked yesterday still has a row to
+   * look at.
+   *
+   * Capped rather than a bare `deleteMany`: the first run after this ships has
+   * every token the system ever issued to get through, and one unbounded
+   * DELETE on that is a lock held for as long as it takes. Prisma cannot put a
+   * LIMIT on `deleteMany`, so the ids are selected first.
+   *
+   * `rotatedFromId` is `SetNull`, so deleting a token an active session was
+   * rotated from breaks nothing: the successor loses its back-pointer, which is
+   * an audit trail, not a credential.
+   */
+  async deleteSpentBefore(before: Date, limit: number): Promise<number> {
+    const doomed = await this.prisma.authToken.findMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: before } },
+          { usedAt: { lt: before } },
+          { revokedAt: { lt: before } },
+        ],
+      },
+      select: { id: true },
+      take: limit,
+    });
+    if (doomed.length === 0) {
+      return 0;
+    }
+    const { count } = await this.prisma.authToken.deleteMany({
+      where: { id: { in: doomed.map((row) => row.id) } },
+    });
+    return count;
+  }
+
   private withoutHash({
     tokenHash: _tokenHash,
     ...authToken

@@ -184,6 +184,26 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.boolean().default(true),
   }),
 
+  // Retention deletes rows, so it is off unless an operator turns it on — the
+  // opposite default from every other switch here. A developer who pulls this
+  // branch must not find their local history pruned because the process
+  // happened to be running at three in the morning.
+  [EnvNames.RETENTION_ENABLED]: Joi.boolean().default(false),
+  [EnvNames.RETENTION_TOKEN_DAYS]: Joi.number().integer().min(1).default(30),
+  [EnvNames.RETENTION_INVITATION_DAYS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(30),
+  [EnvNames.RETENTION_SNAPSHOT_DAYS]: Joi.number().integer().min(1).default(90),
+  // Rows per sweep per run. The first run after this ships has every row the
+  // system ever wrote to get through, and an unbounded DELETE on that holds a
+  // lock for as long as it takes.
+  [EnvNames.RETENTION_BATCH_SIZE]: Joi.number()
+    .integer()
+    .min(1)
+    .max(10000)
+    .default(500),
+
   [EnvNames.OTEL_ENABLED]: Joi.boolean().default(false),
   [EnvNames.OTEL_EXPORTER_OTLP_ENDPOINT]: Joi.string().default(
     'http://localhost:4318',

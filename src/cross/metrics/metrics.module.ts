@@ -39,6 +39,14 @@ const metricProviders = [
     labelNames: ['cameraId'],
     buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   }),
+  // Labelled by sweep, three series. A sweep that silently stops deleting is
+  // indistinguishable from one with nothing left to delete unless the counter
+  // is there to flatten.
+  makeCounterProvider({
+    name: MetricNames.RETENTION_ROWS_DELETED_TOTAL,
+    help: 'Total rows removed by the retention sweeps, by sweep',
+    labelNames: ['sweep'],
+  }),
 ];
 
 const metricTokens = Object.values(MetricNames).map((name) => getToken(name));
