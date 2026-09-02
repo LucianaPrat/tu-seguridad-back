@@ -214,6 +214,24 @@ export const envValidationSchema = Joi.object({
     .max(10000)
     .default(500),
 
+  // Retrying a send is the one sweep that touches the outside world, so it is
+  // opt-in like the rest: a developer with a real relay configured must not
+  // discover it by having yesterday's failed alerts arrive.
+  [EnvNames.DELIVERY_RETRY_ENABLED]: Joi.boolean().default(false),
+  // How long a row is left alone before it counts as stuck rather than in
+  // flight. The first pass is fire-and-forget, so a row written seconds ago
+  // may still have a send running against it.
+  [EnvNames.DELIVERY_RETRY_DELAY_SECONDS]: Joi.number()
+    .integer()
+    .min(30)
+    .max(86400)
+    .default(300),
+  [EnvNames.DELIVERY_RETRY_MAX_ATTEMPTS]: Joi.number()
+    .integer()
+    .min(1)
+    .max(10)
+    .default(3),
+
   [EnvNames.OTEL_ENABLED]: Joi.boolean().default(false),
   [EnvNames.OTEL_EXPORTER_OTLP_ENDPOINT]: Joi.string().default(
     'http://localhost:4318',

@@ -423,6 +423,8 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `RETENTION_ENABLED` | `false` | Runs the nightly retention sweep. Off by default — it is the only thing here that deletes rows, and a developer running the app locally must not lose their history to it. See [Retention](ARCHITECTURE.md#retention). |
 | `RETENTION_TOKEN_DAYS` / `RETENTION_INVITATION_DAYS` / `RETENTION_SNAPSHOT_DAYS` | `30` / `30` / `90` | How long a dead credential, a settled invitation and an evidence frame are kept. An alert whose frame is swept keeps its row and loses its `snapshotId`. |
 | `RETENTION_BATCH_SIZE` | `500` | Rows removed per sweep per run, `1`–`10000`. What the cap leaves behind goes on the next run. |
+| `DELIVERY_RETRY_ENABLED` | `false` | Retries alert emails the first pass left `failed`, and drains `pending` rows a crash stranded. Off by default: it is the one sweep that reaches outside the process. `call` and `whatsapp` rows are never picked up — they are `pending` because no sender exists. |
+| `DELIVERY_RETRY_DELAY_SECONDS` / `DELIVERY_RETRY_MAX_ATTEMPTS` | `300` / `3` | How long a row is left alone before it counts as stuck rather than in flight, and how many attempts it gets in total. A row at the cap stays `failed`; `GET /events/:id/deliveries` is where that shows. |
 | `OTEL_ENABLED` | `false` | Opt-in OpenTelemetry tracing. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector. The default is the sidecar in [`ops/otel-collector/`](ops/otel-collector/README.md), which listens on loopback and forwards to Grafana Cloud. With nothing listening there the exporter retries into the log. |
 | `OTEL_SERVICE_NAME` | `tu-seguridad-back` | Reported service name. |

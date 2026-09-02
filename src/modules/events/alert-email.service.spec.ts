@@ -31,6 +31,7 @@ function buildDelivery(overrides: Partial<EventDelivery> = {}): EventDelivery {
     channel: 'email',
     recipientUserId: 1,
     status: 'pending',
+    attempts: 0,
     correlationId: 'correlation-secret-1',
     sentAt: null,
     deliveredAt: null,

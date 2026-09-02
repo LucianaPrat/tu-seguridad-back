@@ -25,6 +25,6 @@ import { EventsGateway } from './events.gateway';
     AlertEmailService,
     EventAckTokenService,
   ],
-  exports: [AlertEventsService],
+  exports: [AlertEventsService, AlertEmailService],
 })
 export class EventsModule {}
