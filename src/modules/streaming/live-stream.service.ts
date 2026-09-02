@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Camera } from '@prisma/client';
@@ -41,6 +41,8 @@ const AUTHORIZATION_MEMO_MAX_ENTRIES = 1_000;
 
 @Injectable()
 export class LiveStreamService {
+  private readonly logger = new Logger(LiveStreamService.name);
+
   constructor(
     private readonly cameraAccessor: CameraAccessorService,
     private readonly dvrAccessor: DvrAccessorService,
@@ -174,6 +176,31 @@ export class LiveStreamService {
 
     this.rememberAuthorization(memoKey);
     return buildData({ authorized: true });
+  }
+
+  /**
+   * Everything this service remembers about a camera, dropped when the camera
+   * is. The memo entry would expire on its own within seconds; the media-server
+   * path would not, and would sit in its config for as long as the process
+   * lives.
+   *
+   * Best-effort by construction. The camera is gone from the API either way and
+   * a leftover path admits nobody, so a media server that refuses this is
+   * logged and nothing more — never a reason to fail the delete the operator
+   * actually asked for.
+   */
+  async forget(spaceId: string, cameraId: string): Promise<void> {
+    this.recentAuthorizations.delete(`${spaceId}\u0000${cameraId}`);
+
+    if (!this.configService.get<boolean>(EnvNames.MEDIAMTX_ENABLED)) {
+      return;
+    }
+    const removed = await this.publisher.unpublish(cameraId);
+    if (!removed.ok) {
+      this.logger.warn(
+        `could not remove the media server path for camera ${cameraId}: ${removed.message}`,
+      );
+    }
   }
 
   private wasRecentlyAuthorized(key: string): boolean {

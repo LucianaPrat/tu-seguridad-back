@@ -35,7 +35,7 @@ describe('LiveStreamService', () => {
   let cameraAccessor: { findById: jest.Mock };
   let dvrAccessor: { findCredentialsBySpaceId: jest.Mock };
   let dvrClient: { streamUrl: jest.Mock };
-  let publisher: { publish: jest.Mock };
+  let publisher: { publish: jest.Mock; unpublish: jest.Mock };
   let jwtService: { verify: jest.Mock };
   let configService: { get: jest.Mock };
   let service: LiveStreamService;
@@ -57,6 +57,7 @@ describe('LiveStreamService', () => {
         ),
     };
     publisher = {
+      unpublish: jest.fn().mockResolvedValue(buildData(null)),
       publish: jest.fn().mockResolvedValue(
         buildData({
           protocol: 'hls',
@@ -307,6 +308,39 @@ describe('LiveStreamService', () => {
       await service.authorize(request);
 
       expect(cameraAccessor.findById).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('forget', () => {
+    it('removes the media server path for the deleted camera', async () => {
+      await service.forget('space-uuid', 'camera-uuid');
+
+      expect(publisher.unpublish).toHaveBeenCalledWith('camera-uuid');
+    });
+
+    /**
+     * The camera is gone from the API either way and a path nobody can read
+     * admits nobody, so a media server that refuses this must not turn a
+     * successful delete into a failed one.
+     */
+    it('does not throw when the media server refuses', async () => {
+      publisher.unpublish.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'Stream unpublish failed'),
+      );
+
+      await expect(
+        service.forget('space-uuid', 'camera-uuid'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('contacts no media server when streaming is off', async () => {
+      configService.get.mockImplementation((name: string) =>
+        name === EnvNames.MEDIAMTX_ENABLED ? false : 'jwt-secret',
+      );
+
+      await service.forget('space-uuid', 'camera-uuid');
+
+      expect(publisher.unpublish).not.toHaveBeenCalled();
     });
   });
 });

@@ -26,6 +26,7 @@ import { RequestSessionContext } from '../../cross/decorators/session-context.de
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { AccessTokenDto } from '../auth/dto/access-token.dto';
 import { CredentialTokenDto } from '../auth/dto/credential-token.dto';
 import { RefreshCookieService } from '../auth/refresh-cookie.service';
@@ -96,6 +97,7 @@ export class InvitationsController {
 
   /** Public: the invitee has no session yet — the token is the credential. */
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('accept')
   @ApiOperation({

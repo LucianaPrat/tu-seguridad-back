@@ -20,14 +20,12 @@ const CLOSE_AFTER = '10s';
  * exists, and the second viewer of a camera is the normal case, not an error.
  * Replace creates it when absent and overwrites when present, so the call is
  * idempotent without a read first.
- *
- * ponytail: nothing ever deletes a path, so a logically deleted camera leaves
- * one behind. It is inert — the authorization hook refuses every reader whose
- * camera no longer resolves — but the entries accumulate in the media server's
- * config. Delete on camera removal if that ever grows teeth.
  */
 const replacePath = (name: string) =>
   `/v3/config/paths/replace/${encodeURIComponent(name)}`;
+
+const deletePath = (name: string) =>
+  `/v3/config/paths/delete/${encodeURIComponent(name)}`;
 
 @Injectable()
 export class MediaMtxStreamPublisherService extends StreamPublisherPort {
@@ -78,5 +76,26 @@ export class MediaMtxStreamPublisherService extends StreamPublisherPort {
       protocol: 'hls',
       url: `${publicUrl}/${encodeURIComponent(pathName)}/index.m3u8`,
     });
+  }
+
+  /**
+   * A path the media server does not have is the outcome this asks for, so a
+   * 404 is success. Anything else is mapped and handed back for the caller to
+   * log — no request body here, so unlike `publish` there is nothing in the
+   * error that could carry the recorder password.
+   */
+  async unpublish(pathName: string): Promise<Either<null>> {
+    const apiUrl = this.configService.get<string>(EnvNames.MEDIAMTX_API_URL);
+    try {
+      await firstValueFrom(
+        this.httpService.delete(`${apiUrl}${deletePath(pathName)}`, {
+          timeout: this.configService.get<number>(EnvNames.MEDIAMTX_TIMEOUT_MS),
+          validateStatus: (status) => status < 400 || status === 404,
+        }),
+      );
+    } catch (error) {
+      return mapUpstreamError(error, 'Stream unpublish');
+    }
+    return buildData(null);
   }
 }

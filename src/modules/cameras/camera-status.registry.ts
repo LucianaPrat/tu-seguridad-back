@@ -47,6 +47,17 @@ const EMPTY_STATUS = (cameraId: string): CameraPipelineStatus => ({
 export class CameraStatusRegistry {
   private readonly statuses = new Map<string, CameraPipelineStatus>();
 
+  /**
+   * Drops everything remembered about a camera. Called when one is deleted: the
+   * map is small, so this is not about memory — it is that a camera id can come
+   * back (the recorder rediscovers a channel that was deleted and reconfigured)
+   * and would otherwise inherit the error, latency and poll level of the camera
+   * that used to hold it.
+   */
+  forget(cameraId: string): void {
+    this.statuses.delete(cameraId);
+  }
+
   get(cameraId: string): CameraPipelineStatus {
     return this.statuses.get(cameraId) ?? EMPTY_STATUS(cameraId);
   }

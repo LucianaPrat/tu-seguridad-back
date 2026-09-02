@@ -219,4 +219,23 @@ describe('Analyze pipeline (e2e)', () => {
 
     expect(res.status).toBe(400);
   });
+
+  /**
+   * The refusal has to come from multer, not from the service: past this size
+   * the service check would only run once the whole body was already resident.
+   * The answer is deliberately indistinguishable from the in-service one — same
+   * status, same code — so the caller never learns where the limit is enforced.
+   */
+  it('rejects an upload over the size limit before buffering it', async () => {
+    await configureCamera({ monitorMode: 'full', alertType: 'intruder' });
+    const maxBytes = Number(process.env.SNAPSHOT_MAX_BYTES ?? 2_000_000);
+
+    const res = await request(ctx.httpServer)
+      .post(`/api/v1/cameras/${camera.id}/analyze`)
+      .set(auth())
+      .attach('file', Buffer.alloc(maxBytes + 1, 0x41), 'huge.jpg');
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
+  });
 });

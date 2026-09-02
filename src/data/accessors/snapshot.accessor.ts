@@ -22,8 +22,9 @@ export class SnapshotAccessorService {
 
   /**
    * The camera's live frame: one row per camera, rewritten in place on every
-   * successful poll. In place rather than a fresh row per tick because nothing
-   * prunes snapshots yet, and separate from evidence rows because an alert's
+   * successful poll. In place rather than a fresh row per tick because the row
+   * count has to stay bounded whatever the retention window is, and separate
+   * from evidence rows because an alert's
    * frame must still show what the alert saw a week later.
    */
   async upsertLive(
@@ -112,5 +113,34 @@ export class SnapshotAccessorService {
         alertEvents: { some: { spaceId } },
       },
     });
+  }
+
+  /**
+   * Retention sweep, and the only thing in this repo that deletes a snapshot.
+   * Evidence frames only: `isLive` rows are one per camera, rewritten in place,
+   * and a camera whose thumbnail was swept would show a hole in the grid.
+   *
+   * An `AlertEvent` still pointing at a swept frame keeps its row and loses its
+   * `snapshotId` — the FK is `SetNull`, and that is the intended outcome rather
+   * than an accident: the event is the record of what happened, the frame is
+   * evidence with a shelf life. The event's copied `cameraLabel`, alert type and
+   * detection metrics are what make the history readable after the bytes go.
+   *
+   * No "is it still referenced" clause: events and their frames age together, so
+   * a frame past the window is only ever referenced by an event past it too.
+   */
+  async deleteEvidenceBefore(before: Date, limit: number): Promise<number> {
+    const doomed = await this.prisma.snapshot.findMany({
+      where: { isLive: false, capturedAt: { lt: before } },
+      select: { id: true },
+      take: limit,
+    });
+    if (doomed.length === 0) {
+      return 0;
+    }
+    const { count } = await this.prisma.snapshot.deleteMany({
+      where: { id: { in: doomed.map((row) => row.id) } },
+    });
+    return count;
   }
 }

@@ -4,4 +4,5 @@ export const MetricNames = {
   WEBSOCKET_CONNECTIONS_ACTIVE: 'websocket_connections_active',
   PIPELINE_POLL_TOTAL: 'pipeline_poll_total',
   PIPELINE_POLL_DURATION_SECONDS: 'pipeline_poll_duration_seconds',
+  RETENTION_ROWS_DELETED_TOTAL: 'retention_rows_deleted_total',
 } as const;

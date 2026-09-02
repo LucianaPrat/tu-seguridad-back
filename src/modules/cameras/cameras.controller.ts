@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   UploadedFile,
+  UseFilters,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -35,6 +36,7 @@ import { LiveStreamDto } from '../streaming/dto/live-stream.dto';
 import { LiveStreamService } from '../streaming/live-stream.service';
 import { CameraPipelineStatus } from './camera-status.registry';
 import { CamerasService } from './cameras.service';
+import { UploadTooLargeFilter } from './upload-too-large.filter';
 import { CameraDto } from './dto/camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 
@@ -275,6 +277,7 @@ export class CamerasController {
     description: 'Camera id. Resolved inside the caller space only.',
   })
   @UseInterceptors(FileInterceptor('file'))
+  @UseFilters(UploadTooLargeFilter)
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

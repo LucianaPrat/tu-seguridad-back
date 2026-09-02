@@ -39,6 +39,9 @@ export class AuthService {
   ): Promise<Either<TokenPairDto>> {
     const user = await this.userAccessor.findByEmail(normalizeEmail(email));
     if (!user) {
+      // Pays what a found account pays. The bodies were already identical; the
+      // clock was not, and that is what made login an enumeration oracle.
+      await this.passwordHash.verifyAgainstDummy(password);
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 

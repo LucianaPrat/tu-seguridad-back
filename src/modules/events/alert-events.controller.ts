@@ -21,6 +21,7 @@ import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { InboundThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { AcknowledgementDto } from '../auth/dto/acknowledgement.dto';
 import { AlertEventsService } from './alert-events.service';
 import { AlertEventPageDto } from './dto/alert-event-page.dto';
@@ -69,6 +70,7 @@ export class AlertEventsController {
    * answers `202 { accepted: true }`.
    */
   @Public()
+  @InboundThrottle()
   @HttpCode(HttpStatus.ACCEPTED)
   @Post('acknowledgements')
   @ApiOperation({

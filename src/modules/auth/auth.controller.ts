@@ -23,6 +23,7 @@ import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import type { SessionContext } from '../../cross/common/session-context.type';
 import { AllowIncompleteProfile } from '../../cross/decorators/allow-incomplete-profile.decorator';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
@@ -50,6 +51,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @ApiOperation({
@@ -82,6 +84,7 @@ export class AuthController {
   }
 
   @Public()
+  @CredentialThrottle()
   @HttpCode(HttpStatus.CREATED)
   @Post('register')
   @ApiOperation({

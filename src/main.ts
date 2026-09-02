@@ -49,7 +49,13 @@ async function bootstrap() {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.enableShutdownHooks();
 
-  setupSwagger(app);
+  // The docs are a full inventory of the routes, their bodies and their failure
+  // codes — what a developer needs, and what a stranger should not be handed.
+  // Default is off in production, on everywhere else; `scripts/export-openapi.ts`
+  // builds the document directly and is unaffected either way.
+  if (configService.get<boolean>(EnvNames.SWAGGER_ENABLED)) {
+    setupSwagger(app);
+  }
 
   const port = configService.get<number>(EnvNames.PORT, 3000);
   await app.listen(port);

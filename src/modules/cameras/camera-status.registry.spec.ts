@@ -1,3 +1,4 @@
+import { ErrorCode } from '../../cross/common/constants';
 import { CameraStatusRegistry } from './camera-status.registry';
 
 describe('CameraStatusRegistry', () => {
@@ -49,5 +50,13 @@ describe('CameraStatusRegistry', () => {
 
     expect(registry.get('camera_01').lastPersonsDetected).toBe(true);
     expect(registry.get('camera_02').lastPersonsDetected).toBe(false);
+  });
+
+  it('forgets a camera, so a returning id starts clean', () => {
+    registry.record('camera-uuid', { lastErrorCode: ErrorCode.UPSTREAM_ERROR });
+
+    registry.forget('camera-uuid');
+
+    expect(registry.get('camera-uuid').lastErrorCode).toBeNull();
   });
 });

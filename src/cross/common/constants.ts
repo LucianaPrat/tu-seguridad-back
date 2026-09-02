@@ -46,6 +46,14 @@ export const EnvNames = {
   THROTTLE_TTL_SECONDS: 'THROTTLE_TTL_SECONDS',
   THROTTLE_LIMIT: 'THROTTLE_LIMIT',
 
+  SWAGGER_ENABLED: 'SWAGGER_ENABLED',
+
+  RETENTION_ENABLED: 'RETENTION_ENABLED',
+  RETENTION_TOKEN_DAYS: 'RETENTION_TOKEN_DAYS',
+  RETENTION_INVITATION_DAYS: 'RETENTION_INVITATION_DAYS',
+  RETENTION_SNAPSHOT_DAYS: 'RETENTION_SNAPSHOT_DAYS',
+  RETENTION_BATCH_SIZE: 'RETENTION_BATCH_SIZE',
+
   OTEL_ENABLED: 'OTEL_ENABLED',
   OTEL_EXPORTER_OTLP_ENDPOINT: 'OTEL_EXPORTER_OTLP_ENDPOINT',
   OTEL_SERVICE_NAME: 'OTEL_SERVICE_NAME',
@@ -64,6 +72,30 @@ export const EnvNames = {
 } as const;
 
 export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
+
+/**
+ * Rate limits for the routes where the global allowance is the wrong shape.
+ *
+ * Constants rather than env vars for the same reason `CredentialTtl` is one:
+ * these are product rules, and the only two places allowed to read
+ * `process.env` are `main.ts` and `tracing.ts` — a `@Throttle` decorator is
+ * evaluated at module load and could not read config anyway.
+ *
+ * `CREDENTIAL` covers every route that takes an email address or a one-time
+ * token and answers the same whether or not the account exists: login,
+ * password reset, magic link, invitation acceptance, face identity. The point
+ * is not to stop a determined attacker but to make credential stuffing and
+ * timing measurement cost something — the equal-cost lookup is the other half
+ * of that answer.
+ *
+ * `INBOUND` covers `POST /events/acknowledgements`, which is unauthenticated
+ * and whose caller is a notification provider or a person clicking a link in a
+ * mail: neither of them needs more than a handful of calls a minute.
+ */
+export const RouteThrottle = {
+  CREDENTIAL: { limit: 10, ttlSeconds: 60 },
+  INBOUND: { limit: 30, ttlSeconds: 60 },
+} as const;
 
 export enum ErrorCode {
   VALIDATION_ERROR = 'VALIDATION_ERROR',

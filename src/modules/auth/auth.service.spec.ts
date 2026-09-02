@@ -34,7 +34,11 @@ describe('AuthService', () => {
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
   let spaceMemberAccessor: { findByUserId: jest.Mock };
-  let passwordHash: { hash: jest.Mock; verify: jest.Mock };
+  let passwordHash: {
+    hash: jest.Mock;
+    verify: jest.Mock;
+    verifyAgainstDummy: jest.Mock;
+  };
   let sessionService: { issue: jest.Mock; loadActiveMembership: jest.Mock };
   let service: AuthService;
 
@@ -53,6 +57,7 @@ describe('AuthService', () => {
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
       verify: jest.fn().mockResolvedValue(true),
+      verifyAgainstDummy: jest.fn().mockResolvedValue(undefined),
     };
     sessionService = {
       issue: jest.fn().mockResolvedValue(TOKEN_PAIR),
@@ -78,6 +83,9 @@ describe('AuthService', () => {
         code: ErrorCode.UNAUTHORIZED,
         message: 'Invalid email or password',
       });
+      // The branch that found nothing still pays a bcrypt compare, so the
+      // answer takes as long as one for an address that exists.
+      expect(passwordHash.verifyAgainstDummy).toHaveBeenCalledWith('pw');
     });
 
     it('looks the account up by its normalized email', async () => {

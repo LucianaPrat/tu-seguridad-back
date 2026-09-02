@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import * as bcrypt from 'bcrypt';
 import { register as promRegister } from 'prom-client';
 import { createHash } from 'node:crypto';
@@ -113,6 +114,7 @@ export class FakeDvrClientService extends DvrClientPort {
  */
 export class FakeStreamPublisherService extends StreamPublisherPort {
   published: { pathName: string; sourceUrl: string }[] = [];
+  unpublished: string[] = [];
   reachable = true;
 
   publish(pathName: string, sourceUrl: string): Promise<Either<LiveStream>> {
@@ -128,6 +130,16 @@ export class FakeStreamPublisherService extends StreamPublisherPort {
         url: `http://media.fake/${pathName}/index.m3u8`,
       }),
     );
+  }
+
+  unpublish(pathName: string): Promise<Either<null>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'Stream unpublish failed'),
+      );
+    }
+    this.unpublished.push(pathName);
+    return Promise.resolve(buildData(null));
   }
 }
 
@@ -174,6 +186,16 @@ export interface E2eContext {
   fakeStreamPublisher: FakeStreamPublisherService;
 }
 
+export interface E2eBootstrapOptions {
+  /**
+   * Leaves the real rate limiter in place. Off by default: the limiter runs in
+   * every environment now, every spec calls from 127.0.0.1, and a suite that
+   * shares one tracker with itself would spend its assertions on 429s. The one
+   * spec that is *about* the limiter turns it back on.
+   */
+  throttling?: boolean;
+}
+
 /**
  * Boots the real AppModule end-to-end (HTTP + WebSocket + the test
  * database), with FaceAuthClientService replaced by a fake. Mirrors
@@ -181,7 +203,9 @@ export interface E2eContext {
  * INestApplication instance, not on AppModule itself, so they don't come
  * along for free from Test.createTestingModule.
  */
-export async function bootstrapE2eApp(): Promise<E2eContext> {
+export async function bootstrapE2eApp(
+  options: E2eBootstrapOptions = {},
+): Promise<E2eContext> {
   // prom-client's default registry is module state, and registering the same
   // metric twice throws. Jest gives each spec file its own module registry, so
   // this only bites a file that boots the app more than once - which is cheap
@@ -193,7 +217,7 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
   const fakeCredentialDelivery = new FakeCredentialDeliveryService();
   const fakeStreamPublisher = new FakeStreamPublisherService();
 
-  const moduleRef = await Test.createTestingModule({
+  const builder = Test.createTestingModule({
     imports: [AppModule],
   })
     .overrideProvider(FaceAuthClientService)
@@ -203,15 +227,33 @@ export async function bootstrapE2eApp(): Promise<E2eContext> {
     .overrideProvider(CredentialDeliveryPort)
     .useValue(fakeCredentialDelivery)
     .overrideProvider(StreamPublisherPort)
-    .useValue(fakeStreamPublisher)
-    .compile();
+    .useValue(fakeStreamPublisher);
+
+  if (!options.throttling) {
+    // The storage, not the guard: the guard is registered under APP_GUARD
+    // alongside three others, so overriding it by class replaces nothing and
+    // overriding the token would take the authentication guards with it. A
+    // counter that never counts leaves the real guard in the chain and every
+    // request under every limit.
+    builder.overrideProvider(ThrottlerStorage).useValue({
+      increment: () =>
+        Promise.resolve({
+          totalHits: 0,
+          timeToExpire: 0,
+          isBlocked: false,
+          timeToBlockExpire: 0,
+        }),
+    });
+  }
+
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();
 
   // The refresh route reads its token off req.cookies, so the parser is not
   // optional here the way the other main.ts middleware is.
   app.use(cookieParser());
-  app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)'] });
+  app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)', 'metrics'] });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(
     new ValidationPipe({
