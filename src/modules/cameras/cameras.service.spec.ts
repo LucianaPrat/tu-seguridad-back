@@ -17,6 +17,8 @@ function buildCamera(overrides: Partial<Camera> = {}): Camera {
     isEnabled: true,
     monitorMode: 'full',
     alertType: 'intruder',
+    confidenceThreshold: null,
+    minPollSeconds: null,
     lastSnapshotAt: new Date('2026-01-01T00:00:00Z'),
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -40,7 +42,11 @@ describe('CamerasService', () => {
     captureAndStore: jest.Mock;
   };
   let statusRegistry: { get: jest.Mock; forget: jest.Mock };
-  let pipelineService: { processImage: jest.Mock; resetCameraState: jest.Mock };
+  let pipelineService: {
+    processImage: jest.Mock;
+    resetCameraState: jest.Mock;
+    basePollSeconds: number;
+  };
   let configService: { getOrThrow: jest.Mock };
   let pollingScheduler: { forget: jest.Mock };
   let liveStreamService: { forget: jest.Mock };
@@ -59,7 +65,11 @@ describe('CamerasService', () => {
       captureAndStore: jest.fn(),
     };
     statusRegistry = { get: jest.fn(), forget: jest.fn() };
-    pipelineService = { processImage: jest.fn(), resetCameraState: jest.fn() };
+    pipelineService = {
+      processImage: jest.fn(),
+      resetCameraState: jest.fn(),
+      basePollSeconds: 5,
+    };
     configService = {
       getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
     };
@@ -127,6 +137,60 @@ describe('CamerasService', () => {
   });
 
   describe('update', () => {
+    /**
+     * Refused rather than clamped: a floor under the ladder's fastest rung
+     * would be accepted and then do nothing.
+     */
+    it('refuses a poll floor below the scheduler interval', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+
+      const result = await service.update(spaceId, 'camera-uuid', {
+        minPollSeconds: 4,
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(cameraAccessor.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts a poll floor at the scheduler interval', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      cameraAccessor.update.mockResolvedValue(
+        buildCamera({ minPollSeconds: 5 }),
+      );
+      cameraAccessor.countMonitorZones.mockResolvedValue(0);
+
+      const result = await service.update(spaceId, 'camera-uuid', {
+        minPollSeconds: 5,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        expect.objectContaining({ minPollSeconds: 5 }),
+      );
+    });
+
+    /** Null is how an operator gives a camera back the deployment default. */
+    it('passes a null threshold through, restoring the default', async () => {
+      cameraAccessor.findById.mockResolvedValue(buildCamera());
+      cameraAccessor.update.mockResolvedValue(buildCamera());
+      cameraAccessor.countMonitorZones.mockResolvedValue(0);
+
+      await service.update(spaceId, 'camera-uuid', {
+        confidenceThreshold: null,
+      });
+
+      expect(cameraAccessor.update).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        expect.objectContaining({ confidenceThreshold: null }),
+      );
+    });
+
     it('rejects full-frame monitoring without an alert level', async () => {
       cameraAccessor.findById.mockResolvedValue(
         buildCamera({ alertType: null, monitorMode: 'partial' }),

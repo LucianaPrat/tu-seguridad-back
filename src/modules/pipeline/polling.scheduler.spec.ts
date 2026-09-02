@@ -22,6 +22,8 @@ function buildCamera(id: string): Camera {
     isEnabled: true,
     monitorMode: 'full',
     alertType: 'intruder',
+    confidenceThreshold: null,
+    minPollSeconds: null,
     lastSnapshotAt: null,
     deletedAt: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),

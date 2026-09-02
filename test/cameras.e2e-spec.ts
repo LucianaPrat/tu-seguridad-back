@@ -18,6 +18,8 @@ interface CameraBody {
   isEnabled: boolean;
   monitorMode: string;
   alertType: string | null;
+  confidenceThreshold: number | null;
+  minPollSeconds: number | null;
   status: string;
   latestSnapshotUrl: string | null;
   lastSnapshotAt: string | null;
@@ -178,6 +180,55 @@ describe('DVR, cameras and snapshots (e2e)', () => {
       .put(`/api/v1/cameras/${camera.id}`)
       .set(auth())
       .send({ externalId: 'ch99', status: 'online' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('saves the per-camera detection tuning and serves it back', async () => {
+    await configureDvr();
+    const [camera] = await listCameras();
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/cameras/${camera.id}`)
+      .set(auth())
+      .send({
+        alertType: 'intruder',
+        confidenceThreshold: 0.6,
+        minPollSeconds: 30,
+      });
+
+    expect(res.status).toBe(200);
+    expect(typedBody<CameraBody>(res)).toMatchObject({
+      confidenceThreshold: 0.6,
+      minPollSeconds: 30,
+    });
+  });
+
+  /**
+   * Refused rather than clamped: the ladder's fastest rung is five seconds
+   * here, so a floor of one would be accepted and then do nothing.
+   */
+  it('refuses a poll floor the scheduler could never honour', async () => {
+    await configureDvr();
+    const [camera] = await listCameras();
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/cameras/${camera.id}`)
+      .set(auth())
+      .send({ alertType: 'intruder', minPollSeconds: 1 });
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
+  });
+
+  it('refuses a confidence threshold outside zero to one', async () => {
+    await configureDvr();
+    const [camera] = await listCameras();
+
+    const res = await request(ctx.httpServer)
+      .put(`/api/v1/cameras/${camera.id}`)
+      .set(auth())
+      .send({ alertType: 'intruder', confidenceThreshold: 1.5 });
 
     expect(res.status).toBe(400);
   });

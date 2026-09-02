@@ -5608,6 +5608,16 @@
             "nullable": true,
             "description": "Alert level for full-frame monitoring; zones carry their own"
           },
+          "confidenceThreshold": {
+            "type": "number",
+            "nullable": true,
+            "description": "Detection score a person must reach on this camera; null means the deployment default"
+          },
+          "minPollSeconds": {
+            "type": "number",
+            "nullable": true,
+            "description": "Floor on how often this camera is polled, in seconds; null means the cadence ladder decides"
+          },
           "lastSnapshotAt": {
             "format": "date-time",
             "type": "string",
@@ -5668,6 +5678,20 @@
               "suspicious"
             ],
             "description": "Required when monitorMode is full"
+          },
+          "confidenceThreshold": {
+            "type": "object",
+            "example": 0.6,
+            "minimum": 0.001,
+            "maximum": 1,
+            "nullable": true,
+            "description": "Detection score a person must reach on this camera. Null restores the deployment default. Three decimals; a street and a hallway need different numbers, and one used to detune the other."
+          },
+          "minPollSeconds": {
+            "type": "object",
+            "example": 30,
+            "nullable": true,
+            "description": "Floor on how often this camera is polled, in seconds. Null lets the cadence ladder decide. Raises the floor only: it can never make a camera poll faster than the ladder would, and it is refused below the ladder's fastest rung rather than silently ignored."
           }
         }
       },
