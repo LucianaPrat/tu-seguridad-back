@@ -48,6 +48,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        # `.standards/` is a submodule and every central rule lives in it. A
+        # checkout without this leaves the directory empty, so any check that
+        # reads a central rule passes by finding nothing.
+        with:
+          submodules: true
 
       - uses: actions/setup-node@v4
         with:
@@ -75,6 +80,11 @@ jobs:
       - run: npm run prisma:seed
 
       - run: npm run test:all
+
+      # The coverage threshold in package.json (lines: 80) was configured but
+      # nothing ran it, so it could not fail a build. This is the step that
+      # makes it a gate.
+      - run: npm run test:cov
 
       # Dependency audit + secret scan. Gate scope and why: see AGENTS.md "Checks".
       - run: npm run security
