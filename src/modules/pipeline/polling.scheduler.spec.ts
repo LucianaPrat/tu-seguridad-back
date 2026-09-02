@@ -384,6 +384,21 @@ describe('PollingScheduler', () => {
       expect(snapshotService.store).toHaveBeenCalledTimes(2);
     });
 
+    /**
+     * A camera id can come back — the recorder rediscovers a channel that was
+     * deleted and reconfigured — and must not sit out its first window on the
+     * deadline of the camera that used to hold it.
+     */
+    it('writes again immediately after the camera is forgotten', async () => {
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      expect(snapshotService.store).toHaveBeenCalledTimes(1);
+
+      scheduler.forget('camera-a1');
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(2);
+    });
+
     it('rewrites the live frame on every poll when the window is zero', async () => {
       config[EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS] = 0;
 

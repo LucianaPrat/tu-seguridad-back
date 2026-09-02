@@ -38,9 +38,8 @@ export class PollingScheduler
 {
   private readonly logger = new Logger(PollingScheduler.name);
   private readonly inFlight = new Set<string>();
-  // Absolute deadline per camera for the next live-frame write. An entry for a
-  // camera that later disappears is one number and the map never grows past the
-  // camera count, so nothing evicts them.
+  // Absolute deadline per camera for the next live-frame write. Bounded by the
+  // camera count, and `forget` drops an entry when its camera is deleted.
   private readonly liveWriteDueAt = new Map<string, number>();
   private registered = false;
 
@@ -86,6 +85,16 @@ export class PollingScheduler
     }
     // In-flight polls are left to finish; only new ticks are stopped.
     this.logger.log('polling scheduler stopped, no new ticks will start');
+  }
+
+  /**
+   * Drops the camera's live-frame deadline. Called when a camera is deleted:
+   * one number, so this is not about memory — it is that a camera id can come
+   * back and would otherwise sit out its first window on a deadline set for the
+   * camera that used to hold it.
+   */
+  forget(cameraId: string): void {
+    this.liveWriteDueAt.delete(cameraId);
   }
 
   /** One pass over every space that owns a recorder. Public so tests can drive it. */

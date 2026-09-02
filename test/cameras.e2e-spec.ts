@@ -495,6 +495,11 @@ describe('DVR, cameras and snapshots (e2e)', () => {
       .set(auth());
     expect(deleted.status).toBe(200);
 
+    // The media server keeps a path until it is told otherwise, and a path for
+    // a camera nobody can read would sit in its config for the life of the
+    // process.
+    expect(ctx.fakeStreamPublisher.unpublished).toContain(camera.id);
+
     const cameras = await listCameras();
     expect(cameras.map((entry) => entry.id)).not.toContain(camera.id);
     const detail = await request(ctx.httpServer)

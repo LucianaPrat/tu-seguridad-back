@@ -39,9 +39,11 @@ describe('CamerasService', () => {
     findLatestIds: jest.Mock;
     captureAndStore: jest.Mock;
   };
-  let statusRegistry: { get: jest.Mock };
+  let statusRegistry: { get: jest.Mock; forget: jest.Mock };
   let pipelineService: { processImage: jest.Mock; resetCameraState: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
+  let pollingScheduler: { forget: jest.Mock };
+  let liveStreamService: { forget: jest.Mock };
   let service: CamerasService;
 
   beforeEach(() => {
@@ -56,17 +58,21 @@ describe('CamerasService', () => {
       findLatestIds: jest.fn().mockResolvedValue(new Map()),
       captureAndStore: jest.fn(),
     };
-    statusRegistry = { get: jest.fn() };
+    statusRegistry = { get: jest.fn(), forget: jest.fn() };
     pipelineService = { processImage: jest.fn(), resetCameraState: jest.fn() };
     configService = {
       getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
     };
+    pollingScheduler = { forget: jest.fn() };
+    liveStreamService = { forget: jest.fn().mockResolvedValue(undefined) };
     service = new CamerasService(
       cameraAccessor as never,
       snapshotService as never,
       statusRegistry as never,
       pipelineService as never,
       configService as never,
+      pollingScheduler as never,
+      liveStreamService as never,
     );
   });
 
@@ -227,6 +233,37 @@ describe('CamerasService', () => {
         ok: true,
         data: null,
       });
+    });
+
+    /**
+     * A camera id can come back — the recorder rediscovers a channel that was
+     * deleted and reconfigured — and it must not inherit anything the process
+     * remembered about the camera that used to hold it.
+     */
+    it('forgets every piece of per-camera state the process holds', async () => {
+      cameraAccessor.softDelete.mockResolvedValue(true);
+
+      await service.delete(spaceId, 'camera-uuid');
+
+      expect(pipelineService.resetCameraState).toHaveBeenCalledWith(
+        'camera-uuid',
+      );
+      expect(statusRegistry.forget).toHaveBeenCalledWith('camera-uuid');
+      expect(pollingScheduler.forget).toHaveBeenCalledWith('camera-uuid');
+      expect(liveStreamService.forget).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+      );
+    });
+
+    it('forgets nothing when there was nothing to delete', async () => {
+      cameraAccessor.softDelete.mockResolvedValue(false);
+
+      await service.delete(spaceId, 'camera-uuid');
+
+      expect(statusRegistry.forget).not.toHaveBeenCalled();
+      expect(pollingScheduler.forget).not.toHaveBeenCalled();
+      expect(liveStreamService.forget).not.toHaveBeenCalled();
     });
   });
 

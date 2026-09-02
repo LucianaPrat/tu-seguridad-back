@@ -114,6 +114,7 @@ export class FakeDvrClientService extends DvrClientPort {
  */
 export class FakeStreamPublisherService extends StreamPublisherPort {
   published: { pathName: string; sourceUrl: string }[] = [];
+  unpublished: string[] = [];
   reachable = true;
 
   publish(pathName: string, sourceUrl: string): Promise<Either<LiveStream>> {
@@ -129,6 +130,16 @@ export class FakeStreamPublisherService extends StreamPublisherPort {
         url: `http://media.fake/${pathName}/index.m3u8`,
       }),
     );
+  }
+
+  unpublish(pathName: string): Promise<Either<null>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'Stream unpublish failed'),
+      );
+    }
+    this.unpublished.push(pathName);
+    return Promise.resolve(buildData(null));
   }
 }
 

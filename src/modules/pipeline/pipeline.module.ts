@@ -43,6 +43,6 @@ import { PollingScheduler } from './polling.scheduler';
         ),
     },
   ],
-  exports: [PipelineService],
+  exports: [PipelineService, PollingScheduler],
 })
 export class PipelineModule {}
