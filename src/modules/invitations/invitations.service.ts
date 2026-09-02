@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { CredentialTtl, ErrorCode } from '../../cross/common/constants';
 import { normalizeEmail } from '../../cross/common/normalize-email';
 import { SessionContext } from '../../cross/common/session-context.type';
@@ -108,6 +109,27 @@ export class InvitationsService {
     token: string,
     context: SessionContext,
   ): Promise<Either<TokenPairDto>> {
+    // Two clicks on the same link, close enough together that both pass the
+    // usability check before either has consumed the invitation. The database
+    // is what actually settles it — the unique index on the account's email, or
+    // on the membership's user — and the loser used to surface as a 500.
+    try {
+      return await this.acceptOnce(token, context);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return buildError(
+          ErrorCode.CONFLICT,
+          'This invitation has already been accepted',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async acceptOnce(
+    token: string,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
     const invitation = await this.invitationAccessor.findUsableByToken(token);
     if (!invitation) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_INVITATION_MESSAGE);
@@ -168,4 +190,16 @@ export class InvitationsService {
       await this.sessionService.issue(user, accepted.member, context),
     );
   }
+}
+
+/**
+ * The race the invitation flow can actually lose. `P2002` here means another
+ * request got there first, which is a conflict rather than a fault: answering
+ * `500` told the invitee something had broken when nothing had.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
 }
