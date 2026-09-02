@@ -91,6 +91,7 @@ export class PollingScheduler
   /** One pass over every space that owns a recorder. Public so tests can drive it. */
   async tick(): Promise<void> {
     const now = Date.now();
+    const due: { spaceId: string; camera: Camera }[] = [];
     const spaceIds = await this.dvrAccessor.findSpaceIdsWithDvr();
     for (const spaceId of spaceIds) {
       const cameras = await this.cameraAccessor.findPollableBySpace(spaceId);
@@ -98,30 +99,55 @@ export class PollingScheduler
         // Cheapest thing in the loop, and deliberately first: a camera on the
         // passive cadence costs nothing on the ticks it sits out — no recorder
         // request, no detection call, no live-frame write.
-        if (!this.cadenceEngine.isDue(camera.id, now)) {
-          continue;
-        }
-
-        // One camera must not be able to end the tick. `pollOnce` maps every
-        // failure it expects onto the camera's status, so anything reaching
-        // here is unexpected — and letting it propagate would silently stop
-        // monitoring every remaining camera and every remaining space.
-        try {
-          await this.pollOnce(spaceId, camera);
-        } catch (error) {
-          this.logger.error(
-            `poll failed for camera ${camera.id}`,
-            error instanceof Error ? error.stack : String(error),
-          );
-          this.statusRegistry.record(camera.id, {
-            lastErrorAt: new Date(),
-            lastErrorCode: ErrorCode.INTERNAL_ERROR,
-          });
-          // Same reason as every other failure path: a camera left un-armed is
-          // due again on the very next tick.
-          this.cadenceEngine.rearm(camera.id, Date.now());
+        if (this.cadenceEngine.isDue(camera.id, now)) {
+          due.push({ spaceId, camera });
         }
       }
+    }
+
+    // The polls themselves run several at a time. Awaiting each in turn made a
+    // cycle cost the sum of every camera's poll, so one slow recorder pushed
+    // every other camera past its cadence and the ladder above stopped meaning
+    // anything. Bounded, not `Promise.all`: each poll is an ISAPI capture on
+    // the space's recorder plus a detection POST upstream, and the whole
+    // estate firing at once is how those fall over.
+    //
+    // A plain worker pool because that is the entire requirement — the list is
+    // known up front, the work is independent, and nothing needs the results.
+    const limit = this.configService.getOrThrow<number>(
+      EnvNames.POLLING_CONCURRENCY,
+    );
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(limit, due.length) }, async () => {
+        for (let i = next++; i < due.length; i = next++) {
+          await this.pollGuarded(due[i].spaceId, due[i].camera);
+        }
+      }),
+    );
+  }
+
+  /**
+   * One camera must not be able to end the tick. `pollOnce` maps every failure
+   * it expects onto the camera's status, so anything reaching here is
+   * unexpected — and letting it propagate would abandon the rest of this
+   * worker's share of the batch and reject the whole tick.
+   */
+  private async pollGuarded(spaceId: string, camera: Camera): Promise<void> {
+    try {
+      await this.pollOnce(spaceId, camera);
+    } catch (error) {
+      this.logger.error(
+        `poll failed for camera ${camera.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      this.statusRegistry.record(camera.id, {
+        lastErrorAt: new Date(),
+        lastErrorCode: ErrorCode.INTERNAL_ERROR,
+      });
+      // Same reason as every other failure path: a camera left un-armed is
+      // due again on the very next tick.
+      this.cadenceEngine.rearm(camera.id, Date.now());
     }
   }
 
