@@ -109,6 +109,9 @@ describe('HttpDvrClientService', () => {
     return new RegExp(`[ ,]${name}="?([^",]+)"?`).exec(header)?.[1];
   }
 
+  let captureTotal: { inc: jest.Mock };
+  let captureRetries: { inc: jest.Mock };
+
   beforeEach(() => {
     httpService = { get: jest.fn() };
     envValues = {
@@ -117,14 +120,19 @@ describe('HttpDvrClientService', () => {
       [EnvNames.SNAPSHOT_MAX_BYTES]: maxBytes,
       [EnvNames.DVR_RTSP_PORT]: 554,
       [EnvNames.DVR_RTSP_STREAM]: 'sub',
+      [EnvNames.DVR_CAPTURE_RETRIES]: 1,
     };
     configService = {
       get: jest.fn((key: string) => envValues[key]),
       getOrThrow: jest.fn((key: string) => envValues[key]),
     };
+    captureTotal = { inc: jest.fn() };
+    captureRetries = { inc: jest.fn() };
     client = new HttpDvrClientService(
       httpService as never,
       configService as never,
+      captureTotal as never,
+      captureRetries as never,
     );
   });
 
@@ -482,6 +490,125 @@ describe('HttpDvrClientService', () => {
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.VALIDATION_ERROR,
+      });
+    });
+  });
+
+  describe('challenge reuse', () => {
+    const jpeg = () =>
+      axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
+
+    it('signs the second capture straight away, with no second challenge', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(jpeg())
+        .mockReturnValueOnce(jpeg());
+
+      await client.captureSnapshot(connection, '3');
+      const afterFirst = httpService.get.mock.calls.length;
+      const second = await client.captureSnapshot(connection, '3');
+
+      expect(second.ok).toBe(true);
+      // First capture: challenge plus signed retry. Second: signed only.
+      expect(afterFirst).toBe(2);
+      expect(httpService.get).toHaveBeenCalledTimes(3);
+    });
+
+    /** `nc` must move for as long as one nonce is reused, or the server refuses. */
+    it('increments the nonce count on the reused challenge', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(jpeg())
+        .mockReturnValueOnce(jpeg());
+
+      await client.captureSnapshot(connection, '3');
+      await client.captureSnapshot(connection, '3');
+
+      expect(authField(1, 'nc')).toBe('00000001');
+      expect(authField(2, 'nc')).toBe('00000002');
+    });
+
+    it('re-challenges when the recorder refuses the cached nonce', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(jpeg())
+        // Second capture: the cached nonce is stale.
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(jpeg());
+
+      await client.captureSnapshot(connection, '3');
+      const second = await client.captureSnapshot(connection, '3');
+
+      expect(second.ok).toBe(true);
+      expect(httpService.get).toHaveBeenCalledTimes(5);
+      expect(authField(4, 'nc')).toBe('00000001');
+    });
+  });
+
+  describe('transient capture failures', () => {
+    const jpeg = () =>
+      axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
+
+    it('retries a dropped connection and returns the second frame', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosFailure(undefined, 'ECONNRESET'))
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(jpeg());
+
+      const result = await client.captureSnapshot(connection, '3');
+
+      expect(result.ok).toBe(true);
+      expect(captureRetries.inc).toHaveBeenCalledWith({ channel: '3' });
+    });
+
+    /** An answer is an answer. Asking again gets the same one. */
+    it('does not retry a credential rejection', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosFailure(401));
+
+      const result = await client.captureSnapshot(connection, '3');
+
+      expect(result).toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+      expect(captureRetries.inc).not.toHaveBeenCalled();
+    });
+
+    it('does not retry an error the recorder answered with', async () => {
+      httpService.get
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosFailure(500));
+
+      await client.captureSnapshot(connection, '3');
+
+      expect(captureRetries.inc).not.toHaveBeenCalled();
+    });
+
+    it('gives up at the configured cap and reports the last failure', async () => {
+      envValues[EnvNames.DVR_CAPTURE_RETRIES] = 2;
+      httpService.get.mockReturnValue(axiosFailure(undefined, 'ETIMEDOUT'));
+
+      const result = await client.captureSnapshot(connection, '3');
+
+      expect(result.ok).toBe(false);
+      expect(captureRetries.inc).toHaveBeenCalledTimes(2);
+      expect(captureTotal.inc).toHaveBeenCalledWith({
+        channel: '3',
+        outcome: 'error',
+      });
+    });
+
+    it('counts a capture that worked', async () => {
+      respondAfterChallenge(new ArrayBuffer(4), {
+        'content-type': 'image/jpeg',
+      });
+
+      await client.captureSnapshot(connection, '3');
+
+      expect(captureTotal.inc).toHaveBeenCalledWith({
+        channel: '3',
+        outcome: 'success',
       });
     });
   });

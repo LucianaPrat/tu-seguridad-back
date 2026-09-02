@@ -153,6 +153,14 @@ export const envValidationSchema = Joi.object({
     .max(64)
     .default(4),
   [EnvNames.SNAPSHOT_TIMEOUT_MS]: Joi.number().default(5000),
+  // Extra attempts at a capture whose connection died or timed out. Answers
+  // from the recorder are never retried, so this only ever costs time on a
+  // recorder that gave none. `0` restores the single-attempt behaviour.
+  [EnvNames.DVR_CAPTURE_RETRIES]: Joi.number()
+    .integer()
+    .min(0)
+    .max(5)
+    .default(1),
   [EnvNames.SNAPSHOT_MAX_BYTES]: Joi.number()
     .integer()
     .min(1024)

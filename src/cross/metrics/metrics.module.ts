@@ -39,6 +39,23 @@ const metricProviders = [
     labelNames: ['cameraId'],
     buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   }),
+  // The poll metrics time the whole cycle; these separate the recorder from
+  // the detector, which is the "is it the camera or the upstream" question
+  // nothing could answer before. Labelled by channel because that is what the
+  // client knows — a BNC port, eight of them.
+  //
+  // ponytail: per-channel labels on a fleet of eight. They come off if the
+  // estate ever grows past a few dozen.
+  makeCounterProvider({
+    name: MetricNames.DVR_CAPTURE_TOTAL,
+    help: 'Recorder snapshot captures by channel and outcome',
+    labelNames: ['channel', 'outcome'],
+  }),
+  makeCounterProvider({
+    name: MetricNames.DVR_CAPTURE_RETRY_TOTAL,
+    help: 'Recorder snapshot captures retried after a transient failure',
+    labelNames: ['channel'],
+  }),
   // An alert that never fired and left no trace is indistinguishable from a
   // detection that never happened, so suppression is counted rather than silent.
   makeCounterProvider({
