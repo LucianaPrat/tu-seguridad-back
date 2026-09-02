@@ -3,6 +3,7 @@ import {
   AlertChannel,
   EventDelivery,
   EventDeliveryStatus,
+  Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,12 +14,27 @@ export interface EventDeliveryDraft {
   correlationId: string;
 }
 
+/** A delivery the retry sweep picked up, with the event it belongs to. */
+export type RetryableDelivery = Prisma.EventDeliveryGetPayload<{
+  include: { event: true };
+}>;
+
 /** What an inbound provider callback resolved to, once and only once. */
 export interface InboundAcknowledgement {
   deliveryId: string;
   eventId: string;
   acknowledgedByUserId: number;
 }
+
+/**
+ * The statuses a send may still move away from. `delivered` and `sent` are
+ * terminal, and writing over either would lose an acknowledgement or claim a
+ * second send of one message.
+ */
+const RETRYABLE_STATUSES = [
+  EventDeliveryStatus.pending,
+  EventDeliveryStatus.failed,
+];
 
 @Injectable()
 export class EventDeliveryAccessorService {
@@ -74,10 +90,13 @@ export class EventDeliveryAccessorService {
   }
 
   /**
-   * Records a sent attempt. Guarded on `pending` rather than written blind: an
-   * inbound acknowledgement can land before the send call returns, and that
-   * callback already set the row `delivered` — overwriting it with `sent` would
-   * lose the acknowledgement the operator actually made.
+   * Records a sent attempt, and counts it.
+   *
+   * Guarded rather than written blind: an inbound acknowledgement can land
+   * before the send call returns, and that callback already set the row
+   * `delivered` — overwriting it with `sent` would lose the acknowledgement the
+   * operator actually made. `failed` is in the guard because a retry starts
+   * from there; `delivered` and `sent` never are.
    */
   async markSent(
     deliveryId: string,
@@ -85,11 +104,12 @@ export class EventDeliveryAccessorService {
     now = new Date(),
   ): Promise<boolean> {
     const updated = await this.prisma.eventDelivery.updateMany({
-      where: { id: deliveryId, status: EventDeliveryStatus.pending },
+      where: { id: deliveryId, status: { in: RETRYABLE_STATUSES } },
       data: {
         status: EventDeliveryStatus.sent,
         sentAt: now,
         providerMessageId,
+        attempts: { increment: 1 },
       },
     });
     return updated.count === 1;
@@ -105,10 +125,48 @@ export class EventDeliveryAccessorService {
    */
   async markFailed(deliveryId: string, error: string): Promise<boolean> {
     const updated = await this.prisma.eventDelivery.updateMany({
-      where: { id: deliveryId, status: EventDeliveryStatus.pending },
-      data: { status: EventDeliveryStatus.failed, error },
+      where: { id: deliveryId, status: { in: RETRYABLE_STATUSES } },
+      data: {
+        status: EventDeliveryStatus.failed,
+        error,
+        attempts: { increment: 1 },
+      },
     });
     return updated.count === 1;
+  }
+
+  /**
+   * Deliveries the retry sweep should try again.
+   *
+   * `email` only, and that filter is what keeps `call` and `whatsapp` out: their
+   * rows are `pending` because nobody ever built a sender, and picking them up
+   * would spin on them forever. No column distinguishes "pending because the
+   * send did not finish" from "pending because no sender exists" — the channel
+   * already does, so no migration was needed for it.
+   *
+   * `pending` as well as `failed`: a crash between planning the row and
+   * finishing the send leaves it `pending` with nothing else coming for it.
+   *
+   * `attempts` caps how long a relay that will never accept the message costs
+   * anything, and `updatedAt` is the delay — a row touched moments ago is still
+   * in flight.
+   */
+  findRetryable(
+    before: Date,
+    maxAttempts: number,
+    limit: number,
+  ): Promise<RetryableDelivery[]> {
+    return this.prisma.eventDelivery.findMany({
+      where: {
+        channel: AlertChannel.email,
+        status: { in: RETRYABLE_STATUSES },
+        attempts: { lt: maxAttempts },
+        updatedAt: { lt: before },
+      },
+      include: { event: true },
+      orderBy: { updatedAt: 'asc' },
+      take: limit,
+    });
   }
 
   /**

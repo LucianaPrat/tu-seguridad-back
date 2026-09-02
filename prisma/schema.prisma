@@ -308,6 +308,11 @@ model EventDelivery {
   channel           AlertChannel
   recipientUserId   Int                 @map("recipient_user_id")
   status            EventDeliveryStatus @default(pending)
+  /// Send attempts recorded against this row, incremented by every terminal
+  /// mark. The retry sweep stops looking at a row once it reaches the cap, so
+  /// a relay that will never accept the message costs a bounded number of
+  /// tries rather than one per sweep forever.
+  attempts          Int                 @default(0)
   correlationId     String              @unique @map("correlation_id")
   sentAt            DateTime?           @map("sent_at")
   deliveredAt       DateTime?           @map("delivered_at")

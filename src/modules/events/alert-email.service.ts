@@ -92,27 +92,52 @@ export class AlertEmailService {
    * The frame and the time zone are read once per event, not once per
    * recipient: every message about one alert shows the same picture.
    *
-   * ponytail: serial, no retry, no queue. A relay that rejects one message
-   * fails that one row and the loop continues; a process restart mid-fan-out
-   * leaves the rest `pending` forever. Add a worker that drains `pending` when
-   * a missed alert stops being acceptable.
+   * Serial, and still the first attempt only: a relay that rejects one message
+   * fails that one row and the loop continues. What picks the failure back up
+   * is `DeliveryRetryService`, which calls `resend` below.
    */
-  async dispatch(
+  dispatch(
     event: AlertEvent,
     deliveries: EventDelivery[],
     recipients: AlertRecipientRecord[],
   ): Promise<void> {
-    const pending = deliveries.filter(
-      (delivery) =>
-        delivery.channel === AlertChannel.email &&
-        delivery.status === EventDeliveryStatus.pending,
+    return this.send(
+      event,
+      deliveries.filter(
+        (delivery) => delivery.status === EventDeliveryStatus.pending,
+      ),
+      recipients,
     );
-    if (pending.length === 0) {
+  }
+
+  /**
+   * A second attempt at rows the first pass left behind — `failed`, or
+   * `pending` because a restart interrupted the fan-out. Same send, same
+   * recording; the only difference from `dispatch` is that the row's current
+   * status is not what decides whether to try.
+   */
+  resend(
+    event: AlertEvent,
+    deliveries: EventDelivery[],
+    recipients: AlertRecipientRecord[],
+  ): Promise<void> {
+    return this.send(event, deliveries, recipients);
+  }
+
+  private async send(
+    event: AlertEvent,
+    deliveries: EventDelivery[],
+    recipients: AlertRecipientRecord[],
+  ): Promise<void> {
+    const outgoing = deliveries.filter(
+      (delivery) => delivery.channel === AlertChannel.email,
+    );
+    if (outgoing.length === 0) {
       return;
     }
     if (!this.enabled) {
       this.logger.debug(
-        `MAIL_ENABLED is off; ${pending.length} email deliveries for event ${event.id} stay pending`,
+        `MAIL_ENABLED is off; ${outgoing.length} email deliveries for event ${event.id} stay pending`,
       );
       return;
     }
@@ -122,7 +147,7 @@ export class AlertEmailService {
       this.loadTimezone(event.spaceId),
     ]);
 
-    for (const delivery of pending) {
+    for (const delivery of outgoing) {
       await this.sendOne(
         event,
         delivery,
