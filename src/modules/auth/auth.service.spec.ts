@@ -34,7 +34,11 @@ describe('AuthService', () => {
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
   let spaceMemberAccessor: { findByUserId: jest.Mock };
-  let passwordHash: { hash: jest.Mock; verify: jest.Mock };
+  let passwordHash: {
+    hash: jest.Mock;
+    verify: jest.Mock;
+    verifyAgainstDummy: jest.Mock;
+  };
   let sessionService: { issue: jest.Mock; loadActiveMembership: jest.Mock };
   let service: AuthService;
 
