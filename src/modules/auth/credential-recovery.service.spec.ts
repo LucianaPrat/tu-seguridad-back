@@ -61,11 +61,21 @@ describe('CredentialRecoveryService', () => {
     jest.restoreAllMocks();
   });
 
+  /**
+   * The request routes answer before the issuance runs, so an assertion about
+   * what was written or delivered has to wait for the detached work to settle.
+   */
+  const flushIssuance = () =>
+    new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+
   describe('requestPasswordReset', () => {
     it('stores only the hash of a freshly generated token and delivers the raw one', async () => {
       const result = await service.requestPasswordReset('Owner@Example.com');
 
       expect(result).toEqual({ ok: true, data: { accepted: true } });
+      await flushIssuance();
       expect(userAccessor.findByEmail).toHaveBeenCalledWith(
         'owner@example.com',
       );
@@ -91,6 +101,7 @@ describe('CredentialRecoveryService', () => {
       const result = await service.requestPasswordReset('ghost@example.com');
 
       expect(result).toEqual({ ok: true, data: { accepted: true } });
+      await flushIssuance();
       expect(authTokenAccessor.create).not.toHaveBeenCalled();
       expect(delivery.deliver).not.toHaveBeenCalled();
     });
@@ -101,6 +112,7 @@ describe('CredentialRecoveryService', () => {
       const result = await service.requestPasswordReset(user.email);
 
       expect(result).toEqual({ ok: true, data: { accepted: true } });
+      await flushIssuance();
       expect(authTokenAccessor.create).not.toHaveBeenCalled();
     });
   });
@@ -136,6 +148,7 @@ describe('CredentialRecoveryService', () => {
   describe('requestMagicLink', () => {
     it('issues a magic-link token with its own lifetime', async () => {
       await service.requestMagicLink(user.email);
+      await flushIssuance();
 
       expect(authTokenAccessor.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -145,6 +158,21 @@ describe('CredentialRecoveryService', () => {
           ),
         }),
       );
+    });
+
+    /**
+     * The point of detaching the issuance. A registered address pays a token
+     * write and an SMTP round trip; an unregistered one pays nothing, and no
+     * dummy work imitates those cheaply, so the answer is given before any of
+     * it runs. A relay that never answers must not hold the response open —
+     * which is the same reason the failure is only logged.
+     */
+    it('answers without waiting for the delivery', async () => {
+      delivery.deliver.mockReturnValue(new Promise(() => {}));
+
+      const result = await service.requestMagicLink(user.email);
+
+      expect(result).toEqual({ ok: true, data: { accepted: true } });
     });
   });
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { CredentialTtl, ErrorCode } from '../../cross/common/constants';
 import { normalizeEmail } from '../../cross/common/normalize-email';
 import { SessionContext } from '../../cross/common/session-context.type';
@@ -23,6 +23,8 @@ const ACCEPTED: AcknowledgementDto = { accepted: true };
  */
 @Injectable()
 export class CredentialRecoveryService {
+  private readonly logger = new Logger(CredentialRecoveryService.name);
+
   constructor(
     private readonly userAccessor: UserAccessorService,
     private readonly authTokenAccessor: AuthTokenAccessorService,
@@ -32,15 +34,13 @@ export class CredentialRecoveryService {
     private readonly delivery: CredentialDeliveryPort,
   ) {}
 
-  async requestPasswordReset(
-    email: string,
-  ): Promise<Either<AcknowledgementDto>> {
-    await this.issueOneTimeCredential(
+  requestPasswordReset(email: string): Promise<Either<AcknowledgementDto>> {
+    this.issueDetached(
       email,
       'password_reset',
       CredentialTtl.PASSWORD_RESET_MINUTES,
     );
-    return buildData(ACCEPTED);
+    return Promise.resolve(buildData(ACCEPTED));
   }
 
   /**
@@ -63,13 +63,9 @@ export class CredentialRecoveryService {
     return buildData(ACCEPTED);
   }
 
-  async requestMagicLink(email: string): Promise<Either<AcknowledgementDto>> {
-    await this.issueOneTimeCredential(
-      email,
-      'magic_link',
-      CredentialTtl.MAGIC_LINK_MINUTES,
-    );
-    return buildData(ACCEPTED);
+  requestMagicLink(email: string): Promise<Either<AcknowledgementDto>> {
+    this.issueDetached(email, 'magic_link', CredentialTtl.MAGIC_LINK_MINUTES);
+    return Promise.resolve(buildData(ACCEPTED));
   }
 
   async consumeMagicLink(
@@ -101,6 +97,31 @@ export class CredentialRecoveryService {
     await this.userAccessor.recordLogin(session.user.id);
     return buildData(
       await this.sessionService.issue(session.user, session.member, context),
+    );
+  }
+
+  /**
+   * Answers before the work starts, so a registered and an unregistered address
+   * cost the same. Awaiting it would not have been fixable with a dummy hash the
+   * way login's branch was: what an existing account pays here is a token write
+   * and an SMTP round trip, and nothing cheap imitates those.
+   *
+   * Detached, so a relay outage cannot surface as a rejection either — the same
+   * rule `AlertEmailService` follows for the same reason. The failure is logged
+   * and goes no further: this route owes an identical answer whatever happened,
+   * and the person who asked for the link will ask again.
+   */
+  private issueDetached(
+    email: string,
+    purpose: 'magic_link' | 'password_reset',
+    ttlMinutes: number,
+  ): void {
+    void this.issueOneTimeCredential(email, purpose, ttlMinutes).catch(
+      (error: unknown) =>
+        this.logger.error(
+          `${purpose} credential issuance failed`,
+          error instanceof Error ? error.stack : String(error),
+        ),
     );
   }
 
