@@ -6,11 +6,16 @@ import { RequestWithUser } from '../guards/jwt-auth.guard';
 
 describe('HitInterceptor', () => {
   let hitAccessor: { create: jest.Mock };
+  let httpDuration: { observe: jest.Mock };
   let interceptor: HitInterceptor;
 
   beforeEach(() => {
     hitAccessor = { create: jest.fn().mockResolvedValue({}) };
-    interceptor = new HitInterceptor(hitAccessor as never);
+    httpDuration = { observe: jest.fn() };
+    interceptor = new HitInterceptor(
+      hitAccessor as never,
+      httpDuration as never,
+    );
   });
 
   function contextFor(
@@ -116,6 +121,59 @@ describe('HitInterceptor', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(hitAccessor.create).not.toHaveBeenCalled();
+  });
+
+  it('skips /metrics entirely, hit row and histogram alike', async () => {
+    const request: Partial<RequestWithUser> = {
+      method: 'GET',
+      path: '/metrics',
+    };
+    const response = fakeResponse(200);
+    const handler = { handle: () => of('ok') };
+
+    interceptor.intercept(contextFor(request, response), handler).subscribe();
+    response.emit('finish');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(hitAccessor.create).not.toHaveBeenCalled();
+    expect(httpDuration.observe).not.toHaveBeenCalled();
+  });
+
+  it('observes the request duration against the matched route', async () => {
+    const request: Partial<RequestWithUser> = {
+      method: 'GET',
+      path: '/api/v1/cameras/camera-uuid',
+      route: { path: '/api/v1/cameras/:id' },
+    };
+    const response = fakeResponse(200);
+    const handler = { handle: () => of('ok') };
+
+    interceptor.intercept(contextFor(request, response), handler).subscribe();
+    response.emit('finish');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(httpDuration.observe).toHaveBeenCalledWith(
+      { method: 'GET', route: '/api/v1/cameras/:id', status: '200' },
+      expect.any(Number),
+    );
+  });
+
+  it('falls back to the concrete path when no route matched', async () => {
+    const request: Partial<RequestWithUser> = {
+      method: 'GET',
+      path: '/api/v1/nope',
+    };
+    const response = fakeResponse(404);
+    const handler = { handle: () => of('ok') };
+
+    interceptor.intercept(contextFor(request, response), handler).subscribe();
+    response.emit('finish');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(httpDuration.observe).toHaveBeenCalledWith(
+      { method: 'GET', route: '/api/v1/nope', status: '404' },
+      expect.any(Number),
+    );
   });
 
   it('does not break the response when the sink fails', async () => {

@@ -27,6 +27,23 @@
         ]
       }
     },
+    "/metrics": {
+      "get": {
+        "operationId": "MetricsController_index",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
     "/api/v1/alert-routings": {
       "get": {
         "description": "The full alert type x channel grid the /channels screen renders, always six cells even for a space that never wrote any of them.",

@@ -171,6 +171,15 @@ export const envValidationSchema = Joi.object({
 
   [EnvNames.SENTRY_DSN]: Joi.string().optional(),
 
+  // Shared secret gating GET /metrics. Required in production (there is no
+  // reverse proxy in front to restrict it); unset in dev leaves the endpoint
+  // open, which is what a local scraper expects.
+  [EnvNames.METRICS_TOKEN]: Joi.string().when(EnvNames.NODE_ENV, {
+    is: 'production',
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional(),
+  }),
+
   // Live streaming is opt-in and a clean refusal when off, same posture as
   // OTEL_ENABLED and MAIL_ENABLED: no media server on the network means
   // `GET /cameras/:id/live` answers CONFLICT, and nothing else changes.
