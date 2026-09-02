@@ -99,6 +99,26 @@ describe('Invitations (e2e)', () => {
     expect(typedBody<ErrorBody>(res).code).toBe('FORBIDDEN');
   });
 
+  /**
+   * Two clicks on the same link, close enough that both pass the usability
+   * check before either has consumed the invitation. The database settles it;
+   * the loser is a conflict, not a fault, and used to surface as a 500.
+   */
+  it('answers the loser of a concurrent accept with a conflict, never a fault', async () => {
+    await invite('racing@example.com');
+    const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');
+
+    const [first, second] = await Promise.all([
+      accept(inviteToken),
+      accept(inviteToken),
+    ]);
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+
+    expect(statuses).not.toContain(500);
+    expect(statuses[0]).toBe(200);
+    expect([401, 409]).toContain(statuses[1]);
+  });
+
   it('accepts the delivered token, creates one membership in the inviting space and opens a session', async () => {
     await invite('new-member@example.com');
     const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');

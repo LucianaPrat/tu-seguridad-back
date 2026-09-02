@@ -1,0 +1,24 @@
+# Who has to review what. Handles, not teams: this repo has two contributors.
+#
+# Adjust the handles if that changes — an owner who cannot review blocks every
+# pull request touching their paths.
+
+# Default owner for everything.
+*                                   @LucianaPrat @danielfrascarelli
+
+# Authentication, credentials, crypto and the guards. A mistake here is not a
+# bug, it is a way in.
+/src/modules/auth/                  @LucianaPrat @danielfrascarelli
+/src/cross/crypto/                  @LucianaPrat @danielfrascarelli
+/src/cross/guards/                  @LucianaPrat @danielfrascarelli
+
+# The list both egress channels read. A field missing from it leaks in logs.
+/src/cross/common/sensitive-fields.ts  @LucianaPrat @danielfrascarelli
+
+# The tenant boundary. Every accessor is what keeps one space out of another.
+/src/data/accessors/                @LucianaPrat @danielfrascarelli
+/prisma/                            @LucianaPrat @danielfrascarelli
+
+# Gates and deploys.
+/.github/                           @LucianaPrat @danielfrascarelli
+/ecosystem.config.js                @LucianaPrat @danielfrascarelli

@@ -1,15 +1,10 @@
-import {
-  INestApplication,
-  ValidationPipe,
-  VersioningType,
-} from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import * as bcrypt from 'bcrypt';
 import { register as promRegister } from 'prom-client';
 import { createHash } from 'node:crypto';
-import cookieParser from 'cookie-parser';
 import { Server } from 'http';
 import { AddressInfo } from 'net';
 import { AppModule } from '../../src/app.module';
@@ -17,9 +12,9 @@ import {
   ALERT_ROUTING_DEFAULTS,
   ErrorCode,
 } from '../../src/cross/common/constants';
+import { configureApp } from '../../src/cross/config/configure-app';
 import { setupSwagger } from '../../src/cross/config/swagger.config';
 import { buildData, buildError, Either } from '../../src/cross/errors/either';
-import { validationExceptionFactory } from '../../src/cross/errors/validation-exception.factory';
 import { PrismaService } from '../../src/data/prisma/prisma.service';
 import {
   CredentialDelivery,
@@ -198,10 +193,10 @@ export interface E2eBootstrapOptions {
 
 /**
  * Boots the real AppModule end-to-end (HTTP + WebSocket + the test
- * database), with FaceAuthClientService replaced by a fake. Mirrors
- * main.ts's bootstrap - global prefix/versioning/pipes live on the
- * INestApplication instance, not on AppModule itself, so they don't come
- * along for free from Test.createTestingModule.
+ * database), with FaceAuthClientService replaced by a fake. The prefix,
+ * versioning and pipes come from `configureApp`, the same function main.ts
+ * calls: none of it comes free from AppModule, and a harness that replayed it
+ * by hand booted a subtly different app than production.
  */
 export async function bootstrapE2eApp(
   options: E2eBootstrapOptions = {},
@@ -250,19 +245,7 @@ export async function bootstrapE2eApp(
 
   const app = moduleRef.createNestApplication();
 
-  // The refresh route reads its token off req.cookies, so the parser is not
-  // optional here the way the other main.ts middleware is.
-  app.use(cookieParser());
-  app.setGlobalPrefix('api', { exclude: ['docs', 'health/(.*)', 'metrics'] });
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-      exceptionFactory: validationExceptionFactory,
-    }),
-  );
+  configureApp(app);
   setupSwagger(app);
 
   await app.init();
