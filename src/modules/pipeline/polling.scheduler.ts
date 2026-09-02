@@ -11,6 +11,7 @@ import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
+import { withSpan } from '../../observability/tracing.helpers';
 import { SnapshotService } from '../snapshots/snapshot.service';
 import { AnalysisResult } from './analysis-result';
 import { CadenceEngine } from './cadence.engine';
@@ -34,6 +35,10 @@ export class PollingScheduler
 {
   private readonly logger = new Logger(PollingScheduler.name);
   private readonly inFlight = new Set<string>();
+  // Absolute deadline per camera for the next live-frame write. An entry for a
+  // camera that later disappears is one number and the map never grows past the
+  // camera count, so nothing evicts them.
+  private readonly liveWriteDueAt = new Map<string, number>();
   private registered = false;
 
   constructor(
@@ -132,47 +137,74 @@ export class PollingScheduler
 
     this.inFlight.add(camera.id);
     try {
-      const captured = await this.snapshotService.capture(spaceId, camera);
-      if (!captured.ok) {
-        this.statusRegistry.record(camera.id, {
-          lastErrorAt: new Date(),
-          lastErrorCode: captured.code,
-        });
-        this.cadenceEngine.rearm(camera.id, Date.now());
-        return;
-      }
+      await withSpan(
+        'poll.camera',
+        { cameraId: camera.id, spaceId },
+        async () => {
+          const captured = await this.snapshotService.capture(spaceId, camera);
+          if (!captured.ok) {
+            this.statusRegistry.record(camera.id, {
+              lastErrorAt: new Date(),
+              lastErrorCode: captured.code,
+            });
+            this.cadenceEngine.rearm(camera.id, Date.now());
+            return;
+          }
 
-      const analysis = await this.pipelineService.processImage(
-        spaceId,
-        camera,
-        captured.data,
-      );
-      if (analysis.ok) {
-        this.applyCadence(camera.id, analysis.data);
-      } else {
-        this.cadenceEngine.rearm(camera.id, Date.now());
-      }
+          const analysis = await this.pipelineService.processImage(
+            spaceId,
+            camera,
+            captured.data,
+          );
+          if (analysis.ok) {
+            this.applyCadence(camera.id, analysis.data);
+          } else {
+            this.cadenceEngine.rearm(camera.id, Date.now());
+          }
 
-      // Every successful poll refreshes the camera's live frame, so the grid
-      // has a thumbnail and the zone editor a backdrop for a camera that never
-      // alerted. One row per camera, overwritten in place: the alternative was
-      // a BLOB per tick with no retention to clean it up.
-      //
-      // Written after detection, and its failure only recorded: a thumbnail
-      // write must never suppress an alert, and a silent failure would show up
-      // as a thumbnail that stops refreshing with nothing pointing at why.
-      const live = await this.snapshotService.store(
-        spaceId,
-        camera.id,
-        captured.data,
-        true,
+          // The poll refreshes the camera's live frame, so the grid has a
+          // thumbnail and the zone editor a backdrop for a camera that never
+          // alerted. One row per camera, overwritten in place: the alternative
+          // was a BLOB per tick with no retention to clean it up.
+          //
+          // Written after detection, and its failure only recorded: a thumbnail
+          // write must never suppress an alert, and a silent failure would show up
+          // as a thumbnail that stops refreshing with nothing pointing at why.
+          //
+          // Throttled, because the row count being bounded never made the write
+          // volume bounded: every tick rewrote the whole JPEG. The deadline only
+          // moves on a write that succeeded, so a failed one is retried on the
+          // next poll instead of being silenced for a whole window.
+          //
+          // ponytail: one window for every camera, whatever the frame showed. A
+          // camera at the detection rung gets as stale a thumbnail as an idle
+          // one; per-level windows only if the grid actually needs them.
+          const writeSeconds = this.configService.getOrThrow<number>(
+            EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS,
+          );
+          const writeDueAt = this.liveWriteDueAt.get(camera.id) ?? 0;
+          const writtenAt = Date.now();
+          if (writeSeconds === 0 || writeDueAt <= writtenAt) {
+            const live = await this.snapshotService.store(
+              spaceId,
+              camera.id,
+              captured.data,
+              true,
+            );
+            if (!live.ok) {
+              this.statusRegistry.record(camera.id, {
+                lastErrorAt: new Date(),
+                lastErrorCode: live.code,
+              });
+            } else {
+              this.liveWriteDueAt.set(
+                camera.id,
+                writtenAt + writeSeconds * 1000,
+              );
+            }
+          }
+        },
       );
-      if (!live.ok) {
-        this.statusRegistry.record(camera.id, {
-          lastErrorAt: new Date(),
-          lastErrorCode: live.code,
-        });
-      }
     } finally {
       this.inFlight.delete(camera.id);
     }

@@ -7,6 +7,7 @@ import { PollingScheduler } from './polling.scheduler';
 const PASSIVE = 15;
 const ACTIVE = 10;
 const DETECTION = 5;
+const LIVE_WRITE = 300;
 
 function buildCamera(id: string): Camera {
   return {
@@ -50,6 +51,7 @@ describe('PollingScheduler', () => {
   beforeEach(() => {
     config = {
       [EnvNames.POLLING_ENABLED]: true,
+      [EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS]: LIVE_WRITE,
     };
     configService = {
       get: jest.fn((key: string) => config[key]),
@@ -189,7 +191,7 @@ describe('PollingScheduler', () => {
       await inFlight;
     });
 
-    it('refreshes the live frame on every successful poll, alert or not', async () => {
+    it('refreshes the live frame on the first poll of a camera, alert or not', async () => {
       await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
 
       expect(snapshotService.store).toHaveBeenCalledWith(
@@ -198,6 +200,46 @@ describe('PollingScheduler', () => {
         capturedImage,
         true,
       );
+    });
+
+    it('polls but does not rewrite the live frame inside the write window', async () => {
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.capture).toHaveBeenCalledTimes(2);
+      expect(pipelineService.processImage).toHaveBeenCalledTimes(2);
+      expect(snapshotService.store).toHaveBeenCalledTimes(1);
+    });
+
+    it('rewrites the live frame once the write window has elapsed', async () => {
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(Date.now() + LIVE_WRITE * 1000 + 1);
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(2);
+    });
+
+    it('rewrites the live frame on every poll when the window is zero', async () => {
+      config[EnvNames.SNAPSHOT_LIVE_WRITE_SECONDS] = 0;
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries the live write on the next poll when it failed', async () => {
+      snapshotService.store.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'live frame write failed'),
+      );
+
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+      await scheduler.pollOnce('space-a', buildCamera('camera-a1'));
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(2);
     });
 
     it('records a failed live write and still runs detection', async () => {
