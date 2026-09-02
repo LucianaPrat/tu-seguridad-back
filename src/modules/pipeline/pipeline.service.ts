@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Camera, MonitorMode } from '@prisma/client';
+import { Counter } from 'prom-client';
 import { ErrorCode, PipelineDefaults } from '../../cross/common/constants';
+import { MetricNames } from '../../cross/metrics/metric-names';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
 import { CameraStatusRegistry } from '../cameras/camera-status.registry';
@@ -13,6 +16,7 @@ import { SnapshotService } from '../snapshots/snapshot.service';
 import { toZoneArea } from '../zones/zone.mapper';
 import { containsPoint, FULL_FRAME, toPercentPoint } from '../zones/rectangle';
 import { AlertCandidate } from './alert-candidate';
+import { AlertCooldown } from './alert-cooldown';
 import { annotateDetections } from './annotate-frame';
 import { AnalysisResult, ZoneResult } from './analysis-result';
 import { CadenceEngine } from './cadence.engine';
@@ -24,6 +28,8 @@ import {
 
 @Injectable()
 export class PipelineService {
+  private readonly logger = new Logger(PipelineService.name);
+
   constructor(
     private readonly faceAuthClient: FaceAuthClientService,
     private readonly zoneAccessor: MonitorZoneAccessorService,
@@ -32,6 +38,9 @@ export class PipelineService {
     private readonly occupancyEngine: OccupancyEngine,
     private readonly cadenceEngine: CadenceEngine,
     private readonly alertEvents: AlertEventsService,
+    private readonly alertCooldown: AlertCooldown,
+    @InjectMetric(MetricNames.PIPELINE_ALERTS_SUPPRESSED_TOTAL)
+    private readonly alertsSuppressed: Counter<string>,
   ) {}
 
   /**
@@ -44,6 +53,7 @@ export class PipelineService {
   resetCameraState(cameraId: string): void {
     this.occupancyEngine.reset(cameraId);
     this.cadenceEngine.reset(cameraId);
+    this.alertCooldown.reset(cameraId);
   }
 
   /**
@@ -89,9 +99,31 @@ export class PipelineService {
       zones,
       anchors,
     );
-    const entries = transitions.filter(
-      (transition) => transition.kind === 'entered',
-    );
+    const now = Date.now();
+    // Consulted before the frame is stored, not after: a suppressed candidate
+    // must not cost a MEDIUMBLOB write either, and repeat alerts are exactly
+    // where that volume comes from.
+    const entries = transitions
+      .filter((transition) => transition.kind === 'entered')
+      .filter((transition) => {
+        if (
+          this.alertCooldown.admit(
+            camera.id,
+            transition.zoneId,
+            transition.alertType,
+            now,
+          )
+        ) {
+          return true;
+        }
+        // Counted, never silent: an alert that never fired and left no trace is
+        // indistinguishable from a detection that never happened.
+        this.alertsSuppressed.inc({ cameraId: camera.id });
+        this.logger.debug(
+          `alert suppressed for camera ${camera.id} zone ${transition.zoneId ?? 'full frame'} inside its ${transition.alertType} cooldown`,
+        );
+        return false;
+      });
     // Read after `evaluate`, so it reflects the state this frame just produced.
     const occupancyPending = this.occupancyEngine.hasPendingOccupancy(
       camera.id,

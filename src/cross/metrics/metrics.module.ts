@@ -39,6 +39,13 @@ const metricProviders = [
     labelNames: ['cameraId'],
     buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   }),
+  // An alert that never fired and left no trace is indistinguishable from a
+  // detection that never happened, so suppression is counted rather than silent.
+  makeCounterProvider({
+    name: MetricNames.PIPELINE_ALERTS_SUPPRESSED_TOTAL,
+    help: 'Alert candidates suppressed by the per-zone cooldown, by camera',
+    labelNames: ['cameraId'],
+  }),
   // Labelled by sweep, three series. A sweep that silently stops deleting is
   // indistinguishable from one with nothing left to delete unless the counter
   // is there to flatten.

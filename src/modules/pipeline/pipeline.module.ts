@@ -5,6 +5,7 @@ import { EnvNames } from '../../cross/common/constants';
 import { EventsModule } from '../events/events.module';
 import { FaceAuthClientModule } from '../face-auth-client/face-auth-client.module';
 import { SnapshotsModule } from '../snapshots/snapshots.module';
+import { AlertCooldown } from './alert-cooldown';
 import { CadenceEngine } from './cadence.engine';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
@@ -30,6 +31,14 @@ import { PollingScheduler } from './polling.scheduler';
         new OccupancyEngine(
           config.getOrThrow<number>(EnvNames.ENTER_CONSECUTIVE_POLLS),
           config.getOrThrow<number>(EnvNames.EXIT_CONSECUTIVE_POLLS),
+        ),
+    },
+    {
+      provide: AlertCooldown,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        new AlertCooldown(
+          config.getOrThrow<number>(EnvNames.ALERT_COOLDOWN_SECONDS),
         ),
     },
     {

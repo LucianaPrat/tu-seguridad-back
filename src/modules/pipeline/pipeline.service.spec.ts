@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
 import { CapturedImage } from '../dvr/dvr-client.port';
+import { AlertCooldown } from './alert-cooldown';
 import { CadenceEngine } from './cadence.engine';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
@@ -81,6 +82,8 @@ describe('PipelineService', () => {
   let snapshotService: { store: jest.Mock };
   let statusRegistry: { record: jest.Mock };
   let alertEvents: { record: jest.Mock };
+  let alertsSuppressed: { inc: jest.Mock };
+  let alertCooldown: AlertCooldown;
   let service: PipelineService;
 
   beforeEach(() => {
@@ -91,7 +94,16 @@ describe('PipelineService', () => {
     };
     statusRegistry = { record: jest.fn() };
     alertEvents = { record: jest.fn().mockResolvedValue([]) };
-    service = new PipelineService(
+    alertsSuppressed = { inc: jest.fn() };
+    // Off by default: every test outside the cooldown block must see the
+    // pre-cooldown answer, and a real instance with a zero window is that.
+    alertCooldown = new AlertCooldown(0);
+    service = buildService();
+  });
+
+  /** Rebuilt by the cooldown block, which needs a non-zero window. */
+  function buildService(): PipelineService {
+    return new PipelineService(
       faceAuthClient as never,
       zoneAccessor as never,
       snapshotService as never,
@@ -101,8 +113,10 @@ describe('PipelineService', () => {
       new OccupancyEngine(1, 1),
       new CadenceEngine(15, 10, 5),
       alertEvents as never,
+      alertCooldown,
+      alertsSuppressed as never,
     );
-  });
+  }
 
   describe('cameras it refuses to process', () => {
     it('rejects a soft-deleted camera', async () => {
@@ -412,5 +426,96 @@ describe('PipelineService', () => {
       'camera-uuid',
       expect.objectContaining({ lastErrorCode: ErrorCode.UPSTREAM_TIMEOUT }),
     );
+  });
+
+  /**
+   * The hysteresis already collapses a flickering detection into one cycle, so
+   * a repeat needs a real exit and re-entry: person present, frame empty,
+   * person present again. That is the sequence a cooldown exists for — at the
+   * detection cadence it is a mail every couple of minutes, and the recipient
+   * stops reading them.
+   */
+  describe('alert cooldown', () => {
+    const camera = () =>
+      buildCamera({ monitorMode: 'full', alertType: 'suspicious' });
+
+    const emptyFrame = () =>
+      buildData({
+        personsDetected: false,
+        imageWidth: 1920,
+        imageHeight: 1080,
+        persons: [],
+      });
+
+    /** Present, gone, present again. Answers the alerts of the last frame. */
+    async function enterLeaveReturn() {
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      await service.processImage(spaceId, camera(), image);
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+      await service.processImage(spaceId, camera(), image);
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      return service.processImage(spaceId, camera(), image);
+    }
+
+    beforeEach(() => {
+      alertCooldown = new AlertCooldown(60);
+      service = buildService();
+    });
+
+    it('raises one alert for a re-entry inside the window', async () => {
+      const result = await enterLeaveReturn();
+
+      expect(result.ok && result.data.alerts).toHaveLength(0);
+      expect(alertEvents.record).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts what it suppressed', async () => {
+      await enterLeaveReturn();
+
+      expect(alertsSuppressed.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-uuid',
+      });
+    });
+
+    /**
+     * The point of consulting the cooldown before the frame is stored: a
+     * suppressed candidate must not cost a MEDIUMBLOB write either.
+     */
+    it('stores no evidence frame for a suppressed candidate', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      await service.processImage(spaceId, camera(), image);
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+      await service.processImage(spaceId, camera(), image);
+      snapshotService.store.mockClear();
+
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      await service.processImage(spaceId, camera(), image);
+
+      expect(snapshotService.store).not.toHaveBeenCalled();
+    });
+
+    it('raises again once the window has elapsed', async () => {
+      const startedAt = Date.now();
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      await service.processImage(spaceId, camera(), image);
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+      await service.processImage(spaceId, camera(), image);
+
+      jest.spyOn(Date, 'now').mockReturnValue(startedAt + 61_000);
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+      const later = await service.processImage(spaceId, camera(), image);
+
+      expect(later.ok && later.data.alerts).toHaveLength(1);
+    });
+
+    it('is off entirely at a zero window', async () => {
+      alertCooldown = new AlertCooldown(0);
+      service = buildService();
+
+      const result = await enterLeaveReturn();
+
+      expect(result.ok && result.data.alerts).toHaveLength(1);
+      expect(alertsSuppressed.inc).not.toHaveBeenCalled();
+    });
   });
 });
