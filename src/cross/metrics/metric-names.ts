@@ -5,5 +5,7 @@ export const MetricNames = {
   PIPELINE_POLL_TOTAL: 'pipeline_poll_total',
   PIPELINE_POLL_DURATION_SECONDS: 'pipeline_poll_duration_seconds',
   PIPELINE_ALERTS_SUPPRESSED_TOTAL: 'pipeline_alerts_suppressed_total',
+  DVR_CAPTURE_TOTAL: 'dvr_capture_total',
+  DVR_CAPTURE_RETRY_TOTAL: 'dvr_capture_retry_total',
   RETENTION_ROWS_DELETED_TOTAL: 'retention_rows_deleted_total',
 } as const;

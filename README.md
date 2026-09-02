@@ -418,6 +418,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `MEDIAMTX_PUBLIC_URL` | `http://127.0.0.1:8888` | HLS base the browser reaches. Not the same address as above: one is reached by this process, the other by the operator's laptop. |
 | `MEDIAMTX_TIMEOUT_MS` | `5000` | Control API request timeout. |
 | `SNAPSHOT_TIMEOUT_MS` | `5000` | DVR snapshot fetch timeout. |
+| `DVR_CAPTURE_RETRIES` | `1` | Extra attempts at a capture whose connection dropped or timed out, `0`–`5`. Answers from the recorder — `401`, `404`, `5xx` — are never retried: asking again gets the same one while the camera waits out another cadence interval. `0` restores the single-attempt behaviour. |
 | `SNAPSHOT_MAX_BYTES` | `2000000` | Largest frame accepted for storage or analysis, `1024`–`16777215`. The ceiling is MySQL's `MEDIUMBLOB` limit: a frame the column cannot hold is refused up front rather than after the recorder round trip and the detection call are already paid for. See [Snapshot storage](#snapshot-storage). |
 | `SNAPSHOT_LIVE_WRITE_SECONDS` | `300` | Floor between two live-frame writes for one camera on the poll path, `0`–`3600`. The row count was always bounded; this bounds the write volume, because every tick used to rewrite the whole JPEG. `0` writes on every poll, the pre-throttle behaviour. The manual capture route is never throttled. See [Snapshot storage](#snapshot-storage). |
 | `ENTER_CONSECUTIVE_POLLS` / `EXIT_CONSECUTIVE_POLLS` | `2` / `3` | Occupancy hysteresis thresholds. |

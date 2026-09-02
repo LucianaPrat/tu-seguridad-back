@@ -1,11 +1,15 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
+import { Counter } from 'prom-client';
 import { CameraStatus } from '@prisma/client';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { createHash, randomBytes } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { MetricNames } from '../../cross/metrics/metric-names';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { mapUpstreamError } from '../../cross/errors/upstream-error';
 import {
@@ -62,20 +66,62 @@ const CHANNEL_BLOCK = /<VideoInputChannel[\s>][\s\S]*?<\/VideoInputChannel>/g;
  */
 const MAX_LISTING_BYTES = 1_000_000;
 
+/** A recorder's outstanding digest challenge and the nonce count spent on it. */
+interface Challenge {
+  header: string;
+  count: number;
+}
+
 /** Marks the one failure axios cannot describe on its own: no usable challenge. */
 const DIGEST_UNSUPPORTED = 'EDVRDIGEST';
 const DIGEST_HASHES: Record<string, string> = {
   MD5: 'md5',
   'SHA-256': 'sha256',
 };
-/** Every request carries a freshly challenged nonce, so the count never moves. */
-const NONCE_COUNT = '00000001';
+/**
+ * `nc` in the RFC 7616 sense: eight hex digits, strictly increasing for as long
+ * as one nonce is reused. It only moves because the challenge is cached now —
+ * a fresh challenge per request would leave it at one forever.
+ */
+const nonceCount = (count: number) => count.toString(16).padStart(8, '0');
+
+/**
+ * Failures worth a second attempt: the connection died, or nothing came back in
+ * time. Deliberately no status codes — a recorder that answered `401`, `404` or
+ * `500` gave an answer, and asking it the same question again gets the same
+ * one while the camera waits out another cadence interval for nothing.
+ */
+const TRANSIENT_CODES = new Set([
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+
+/** Short and linear. The next poll is the real backoff; this covers a blip. */
+const RETRY_BACKOFF_MS = 250;
+
+const isTransient = (error: unknown): boolean =>
+  axios.isAxiosError(error) &&
+  error.response === undefined &&
+  TRANSIENT_CODES.has(error.code ?? '');
 
 @Injectable()
 export class HttpDvrClientService extends DvrClientPort {
+  /**
+   * The last digest challenge each recorder handed out, and how many requests
+   * have been signed with it. One entry per recorder — a space has exactly one
+   * — so nothing evicts them.
+   */
+  private readonly challenges = new Map<string, Challenge>();
+
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    @InjectMetric(MetricNames.DVR_CAPTURE_TOTAL)
+    private readonly captureTotal: Counter<string>,
+    @InjectMetric(MetricNames.DVR_CAPTURE_RETRY_TOTAL)
+    private readonly captureRetries: Counter<string>,
   ) {
     super();
   }
@@ -121,16 +167,10 @@ export class HttpDvrClientService extends DvrClientPort {
     const maxBytes = this.maxSnapshotBytes();
 
     try {
-      const response = await this.get<ArrayBuffer>(
+      const response = await this.captureWithRetries(
         connection,
-        snapshotPath(externalId),
-        {
-          responseType: 'arraybuffer',
-          timeout: this.configService.get<number>(EnvNames.SNAPSHOT_TIMEOUT_MS),
-          // Aborts the transfer mid-stream instead of buffering an
-          // oversized image just to reject it after the fact.
-          maxContentLength: maxBytes,
-        },
+        externalId,
+        maxBytes,
       );
 
       const mimeType = (response.headers['content-type'] as string | undefined)
@@ -151,6 +191,7 @@ export class HttpDvrClientService extends DvrClientPort {
         );
       }
 
+      this.captureTotal.inc({ channel: externalId, outcome: 'success' });
       return buildData({
         data,
         mimeType,
@@ -159,7 +200,50 @@ export class HttpDvrClientService extends DvrClientPort {
         capturedAt: new Date(),
       });
     } catch (error) {
+      this.captureTotal.inc({ channel: externalId, outcome: 'error' });
       return this.mapError(error, 'DVR snapshot fetch');
+    }
+  }
+
+  /**
+   * One capture, with a bounded second chance at the failures that say nothing
+   * about the recorder's answer.
+   *
+   * Without it a single dropped connection costs the camera a whole cadence
+   * interval, which at the passive rung is fifteen seconds of nothing for a
+   * recorder that was fine. With it, only the transient classes are retried: a
+   * `401`, a `404` or a `500` is an answer, and asking again gets the same one.
+   */
+  private async captureWithRetries(
+    connection: DvrConnection,
+    externalId: string,
+    maxBytes: number,
+  ): Promise<AxiosResponse<ArrayBuffer>> {
+    const retries = this.configService.getOrThrow<number>(
+      EnvNames.DVR_CAPTURE_RETRIES,
+    );
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.get<ArrayBuffer>(
+          connection,
+          snapshotPath(externalId),
+          {
+            responseType: 'arraybuffer',
+            timeout: this.configService.get<number>(
+              EnvNames.SNAPSHOT_TIMEOUT_MS,
+            ),
+            // Aborts the transfer mid-stream instead of buffering an
+            // oversized image just to reject it after the fact.
+            maxContentLength: maxBytes,
+          },
+        );
+      } catch (error) {
+        if (attempt >= retries || !isTransient(error)) {
+          throw error;
+        }
+        this.captureRetries.inc({ channel: externalId });
+        await delay(RETRY_BACKOFF_MS * (attempt + 1));
+      }
     }
   }
 
@@ -199,13 +283,16 @@ export class HttpDvrClientService extends DvrClientPort {
   }
 
   /**
-   * ISAPI answers only to HTTP digest, so every call is the 401 challenge
-   * followed by the signed retry. The nonce is deliberately not cached:
-   * reusing one means tracking its expiry and a nonce counter per recorder,
-   * and on a LAN that state costs more than the extra round trip.
+   * ISAPI answers only to HTTP digest. The challenge is cached per recorder, so
+   * the usual call is one signed request rather than the 401 handshake plus the
+   * signed retry — at one poll per camera per cadence interval, that second
+   * round trip was doubling the request count against the slowest thing in the
+   * loop.
    *
-   * ponytail: one challenge per request; cache the nonce per connection if
-   * snapshot polling ever makes the second round trip show up in the numbers.
+   * The state it costs is one header and one counter per recorder. A nonce the
+   * recorder has expired, or a recorder that restarted, answers `401` to the
+   * signed request; that drops the entry and falls through to a fresh
+   * challenge, so the stale case costs what every case used to.
    */
   private async get<T>(
     connection: DvrConnection,
@@ -213,6 +300,36 @@ export class HttpDvrClientService extends DvrClientPort {
     overrides: AxiosRequestConfig,
   ): Promise<AxiosResponse<T>> {
     const url = this.endpoint(connection, path);
+    const key = challengeKey(connection);
+    const target = requestTarget(url);
+
+    const cached = this.challenges.get(key);
+    if (cached) {
+      cached.count += 1;
+      const authorization = buildAuthorization(
+        cached.header,
+        connection,
+        target,
+        cached.count,
+      );
+      if (authorization) {
+        const signed = await firstValueFrom(
+          this.httpService.get<T>(url, {
+            ...overrides,
+            headers: { ...overrides.headers, Authorization: authorization },
+            validateStatus: (status) =>
+              status === 401 || (status >= 200 && status < 300),
+          }),
+        );
+        if (signed.status !== 401) {
+          return signed;
+        }
+      }
+      // Expired nonce, restarted recorder, or a challenge this build cannot
+      // sign any more. Either way the cached one is worthless.
+      this.challenges.delete(key);
+    }
+
     const challenge = await firstValueFrom(
       this.httpService.get<T>(url, {
         ...overrides,
@@ -224,17 +341,17 @@ export class HttpDvrClientService extends DvrClientPort {
       return challenge;
     }
 
-    const authorization = buildAuthorization(
-      challenge.headers['www-authenticate'] as string | undefined,
-      connection,
-      requestTarget(url),
-    );
+    const header = challenge.headers['www-authenticate'] as string | undefined;
+    const authorization = buildAuthorization(header, connection, target, 1);
     // Nothing to sign means the password can never be presented at all, which
     // is a different problem from a password the recorder looked at and
     // refused. Saying so beats reporting a credential rejection that did not
     // happen and sending the operator to re-type a password that was fine.
     if (!authorization) {
       throw new AxiosError('no supported digest challenge', DIGEST_UNSUPPORTED);
+    }
+    if (header) {
+      this.challenges.set(key, { header, count: 1 });
     }
 
     return firstValueFrom(
@@ -336,6 +453,7 @@ function buildAuthorization(
   header: string | undefined,
   connection: DvrConnection,
   uri: string,
+  count: number,
 ): string | undefined {
   const digest = /(?:^|,)\s*Digest\s+(.*)$/i.exec(header ?? '');
   if (!digest) {
@@ -358,8 +476,9 @@ function buildAuthorization(
     ?.split(',')
     .map((option) => option.trim())
     .includes('auth');
+  const nc = nonceCount(count);
   const response = qop
-    ? hash(`${ha1}:${nonce}:${NONCE_COUNT}:${cnonce}:auth:${ha2}`)
+    ? hash(`${ha1}:${nonce}:${nc}:${cnonce}:auth:${ha2}`)
     : hash(`${ha1}:${nonce}:${ha2}`);
 
   // realm, nonce and opaque came out of quoted strings, so they cannot carry a
@@ -373,7 +492,7 @@ function buildAuthorization(
     `response="${response}"`,
   ];
   if (qop) {
-    fields.push('qop=auth', `nc=${NONCE_COUNT}`, `cnonce="${cnonce}"`);
+    fields.push('qop=auth', `nc=${nc}`, `cnonce="${cnonce}"`);
   }
   if (params.opaque) {
     fields.push(`opaque="${params.opaque}"`);
@@ -382,6 +501,15 @@ function buildAuthorization(
     fields.push(`algorithm=${params.algorithm}`);
   }
   return `Digest ${fields.join(', ')}`;
+}
+
+/**
+ * One recorder, one entry. The username is in the key because the signature is
+ * built from it: a credential change has to invalidate the cached challenge,
+ * and it does by simply not finding it.
+ */
+function challengeKey(connection: DvrConnection): string {
+  return `${connection.url}\u0000${connection.username}`;
 }
 
 /**
