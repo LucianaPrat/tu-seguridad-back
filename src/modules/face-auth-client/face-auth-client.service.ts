@@ -23,6 +23,18 @@ interface AuthorizeResponse {
 /** Upstream answer to a session token it no longer accepts. */
 const FORBIDDEN = 403;
 
+/** Upstream answer to too many calls from this address. */
+const TOO_MANY_REQUESTS = 429;
+
+/**
+ * How long detection is parked when a `429` arrives without a `Retry-After`.
+ * The upstream is IP-throttled and, measured on 2026-09-02, holds a penalty
+ * window of 15–45 s after a burst — but it documents neither the limit nor the
+ * header, so this is deliberately short: a park that outlives the throttle
+ * costs alerts, and the next `429` simply parks again.
+ */
+const DEFAULT_THROTTLE_MS = 5000;
+
 @Injectable()
 export class FaceAuthClientService {
   private readonly logger = new Logger(FaceAuthClientService.name);
@@ -38,6 +50,13 @@ export class FaceAuthClientService {
    * start, or a 403 that just cleared it — fires its own `/auth/authorize`.
    */
   private authorizing: Promise<string> | null = null;
+  /**
+   * Epoch millis until which the upstream said it will refuse us. Detection
+   * short-circuits while it stands, which is the whole point: a throttled
+   * upstream answers a burst with more `429`s, and every one of those would
+   * otherwise be one camera's poll spent learning nothing.
+   */
+  private throttledUntil = 0;
   private readonly breaker: CircuitBreaker<
     [Buffer, string],
     DetectPersonsResponse
@@ -54,6 +73,13 @@ export class FaceAuthClientService {
         timeout,
         errorThresholdPercentage: 50,
         resetTimeout: 30000,
+        // A throttle is not an outage. Without this filter a burst of `429`s
+        // trips the breaker and every camera's detection short-circuits for
+        // `resetTimeout`, reported as an upstream failure — which is both wrong
+        // and a much longer outage than the throttle itself. The park in
+        // `detectPersons` is what backs off instead.
+        errorFilter: (error: unknown) =>
+          this.isStatus(error, TOO_MANY_REQUESTS),
       },
     );
     this.breaker.on('open', () =>
@@ -79,6 +105,14 @@ export class FaceAuthClientService {
     filename: string,
   ): Promise<Either<DetectPersonsResponse>> {
     return withSpan('face-auth.detect', { filename }, async () => {
+      const parkedFor = this.throttledUntil - Date.now();
+      if (parkedFor > 0) {
+        return buildError(
+          ErrorCode.UPSTREAM_THROTTLED,
+          `face-auth detect throttled, retrying in ${Math.ceil(parkedFor / 1000)}s`,
+        );
+      }
+
       try {
         const data = await this.breaker.fire(image, filename);
         return buildData(data);
@@ -205,6 +239,21 @@ export class FaceAuthClientService {
       return buildError(ErrorCode.UPSTREAM_ERROR, 'face-auth circuit open');
     }
 
+    // Parked here rather than in a caller because every caller would have to
+    // remember to: the client owns the session token and now owns the window
+    // the upstream refuses us for.
+    if (this.isStatus(error, TOO_MANY_REQUESTS)) {
+      const backoffMs = retryAfterMs(error) ?? DEFAULT_THROTTLE_MS;
+      this.throttledUntil = Date.now() + backoffMs;
+      this.logger.warn(
+        `face-auth throttled the detect call, parking it for ${Math.ceil(backoffMs / 1000)}s`,
+      );
+      return buildError(
+        ErrorCode.UPSTREAM_THROTTLED,
+        'face-auth detect was rate limited',
+      );
+    }
+
     // The circuit breaker's own timeout is not an axios error, so the shared
     // mapper never sees it.
     if (this.isCode(error, 'ETIMEDOUT')) {
@@ -224,4 +273,30 @@ export class FaceAuthClientService {
       (error as { code?: string }).code === code
     );
   }
+}
+
+/**
+ * `Retry-After` in millis, or `null` when the upstream sent none it can be
+ * read from. RFC 9110 allows both a delay in seconds and an HTTP date, and this
+ * upstream documents neither, so both are accepted and anything else is treated
+ * as absent rather than as zero.
+ */
+function retryAfterMs(error: unknown): number | null {
+  const header = (error as { response?: { headers?: Record<string, unknown> } })
+    .response?.headers?.['retry-after'];
+  if (typeof header !== 'string' && typeof header !== 'number') {
+    return null;
+  }
+
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) {
+    return seconds > 0 ? seconds * 1000 : null;
+  }
+
+  const until = Date.parse(String(header));
+  if (Number.isNaN(until)) {
+    return null;
+  }
+  const delta = until - Date.now();
+  return delta > 0 ? delta : null;
 }

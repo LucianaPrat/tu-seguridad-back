@@ -1,8 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Camera, MonitorMode } from '@prisma/client';
 import { Counter } from 'prom-client';
-import { ErrorCode, PipelineDefaults } from '../../cross/common/constants';
+import {
+  EnvNames,
+  ErrorCode,
+  PipelineDefaults,
+} from '../../cross/common/constants';
 import { MetricNames } from '../../cross/metrics/metric-names';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { MonitorZoneAccessorService } from '../../data/accessors/zone.accessor';
@@ -31,6 +36,7 @@ export class PipelineService {
   private readonly logger = new Logger(PipelineService.name);
 
   constructor(
+    private readonly configService: ConfigService,
     private readonly faceAuthClient: FaceAuthClientService,
     private readonly zoneAccessor: MonitorZoneAccessorService,
     private readonly snapshotService: SnapshotService,
@@ -41,6 +47,8 @@ export class PipelineService {
     private readonly alertCooldown: AlertCooldown,
     @InjectMetric(MetricNames.PIPELINE_ALERTS_SUPPRESSED_TOTAL)
     private readonly alertsSuppressed: Counter<string>,
+    @InjectMetric(MetricNames.PIPELINE_PERSONS_DETECTED_TOTAL)
+    private readonly personsDetected: Counter<string>,
   ) {}
 
   /**
@@ -104,6 +112,14 @@ export class PipelineService {
     const persons = detection.data.persons.filter(
       (person) => person.detScore >= threshold,
     );
+    // Counted here rather than derived downstream: a poll counted `success`
+    // says the pipeline ran, not that anybody was seen, and "the upstream found
+    // nobody" and "it found somebody this threshold dropped" are different
+    // problems with different owners.
+    this.personsDetected.inc({
+      cameraId: camera.id,
+      outcome: detectionOutcome(detection.data.persons.length, persons.length),
+    });
     const anchors: AnchorWithScore[] = persons.map((person) => ({
       anchor: toPercentPoint(person.anchor),
       detScore: person.detScore,
@@ -179,6 +195,15 @@ export class PipelineService {
       zones: zoneResults,
     });
 
+    // At info, and bounded by real presence: one line per poll that actually
+    // saw somebody. A sighting that confirms no area is the signal the entry
+    // window exists to close, and at debug nobody was ever going to see it.
+    if (persons.length > 0) {
+      this.logger.log(
+        `camera ${camera.id} saw ${persons.length} person(s), ${alerts.length} area(s) confirmed`,
+      );
+    }
+
     // History, routing and the socket broadcast happen here rather than in the
     // two callers (the poll tick and the manual analyze route): an alert that is
     // recorded on one path and not the other is the bug this centralizes away.
@@ -239,6 +264,23 @@ export class PipelineService {
       camera.id,
       evidence,
     );
+    // The untouched capture, when the deployment asked for it. The event still
+    // points at the annotated frame — this row exists so the upstream's recall
+    // can be re-measured on the pixels it actually answered, which the q88
+    // re-encode with boxes burned in is not. Its failure is logged and dropped:
+    // an audit copy must never cost an alert.
+    if (
+      stored.ok &&
+      evidence !== image &&
+      this.configService.get<boolean>(EnvNames.SNAPSHOT_KEEP_RAW)
+    ) {
+      const raw = await this.snapshotService.store(spaceId, camera.id, image);
+      if (!raw.ok) {
+        this.logger.warn(
+          `raw evidence copy for camera ${camera.id} was not stored: ${raw.code}`,
+        );
+      }
+    }
     if (stored.ok) {
       return stored.data.id;
     }
@@ -269,4 +311,20 @@ export class PipelineService {
     }
     return undefined;
   }
+}
+
+/**
+ * Which of the three things the detector did. `filtered` is deliberately
+ * distinct from `empty`: the first is this camera's threshold rejecting a
+ * sighting the upstream reported, the second is the upstream reporting nothing
+ * at all — and only the second is out of our hands.
+ */
+function detectionOutcome(
+  reported: number,
+  kept: number,
+): 'persons' | 'empty' | 'filtered' {
+  if (reported === 0) {
+    return 'empty';
+  }
+  return kept === 0 ? 'filtered' : 'persons';
 }

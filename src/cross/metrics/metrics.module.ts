@@ -63,6 +63,17 @@ const metricProviders = [
     help: 'Alert candidates suppressed by the per-zone cooldown, by camera',
     labelNames: ['cameraId'],
   }),
+  // What the detector answered, which no other metric could distinguish: a poll
+  // counted `success` says the pipeline ran, not that anybody was seen. The
+  // three outcomes separate "the upstream found nobody" from "it found somebody
+  // this camera's threshold then dropped", and the gap between `persons` and
+  // the alerts actually raised is the unconfirmed-sighting rate the occupancy
+  // window exists to close.
+  makeCounterProvider({
+    name: MetricNames.PIPELINE_PERSONS_DETECTED_TOTAL,
+    help: 'Detection outcomes by camera: persons, empty (upstream found none), filtered (all below threshold)',
+    labelNames: ['cameraId', 'outcome'],
+  }),
   // Labelled by sweep, three series. A sweep that silently stops deleting is
   // indistinguishable from one with nothing left to delete unless the counter
   // is there to flatten.

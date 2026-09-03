@@ -312,28 +312,103 @@ describe('FaceAuthClientService', () => {
     }
   });
 
-  it('maps a 429 to UPSTREAM_ERROR without leaking the token', async () => {
-    respondTo(
-      throwError(() =>
-        axiosError({
-          message: 'Request failed with status code 429',
-          response: {
-            status: 429,
-            statusText: 'Too Many Requests',
-            data: {},
-            headers: new AxiosHeaders(),
-            config: { headers: new AxiosHeaders() } as never,
-          },
-        }),
-      ),
+  /** A `429`, optionally carrying the header this upstream does not document. */
+  function throttled(retryAfter?: string) {
+    const headers = new AxiosHeaders();
+    if (retryAfter !== undefined) {
+      headers.set('retry-after', retryAfter);
+    }
+    return throwError(() =>
+      axiosError({
+        message: 'Request failed with status code 429',
+        response: {
+          status: 429,
+          statusText: 'Too Many Requests',
+          data: {},
+          headers,
+          config: { headers: new AxiosHeaders() } as never,
+        },
+      }),
     );
+  }
+
+  it('maps a 429 to UPSTREAM_THROTTLED without leaking the token', async () => {
+    respondTo(throttled());
 
     const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
 
-    expect(result).toMatchObject({ ok: false, code: ErrorCode.UPSTREAM_ERROR });
+    expect(result).toMatchObject({
+      ok: false,
+      code: ErrorCode.UPSTREAM_THROTTLED,
+    });
     if (!result.ok) {
-      expect(result.message).toContain('429');
       expect(result.message).not.toContain(SECRET_TOKEN);
+    }
+  });
+
+  it('parks the next call instead of spending it on a throttled upstream', async () => {
+    respondTo(throttled('5'));
+    await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    httpService.post.mockClear();
+    const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+    expect(httpService.post).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: false,
+      code: ErrorCode.UPSTREAM_THROTTLED,
+    });
+  });
+
+  it('honours Retry-After and calls again once it has elapsed', async () => {
+    jest.useFakeTimers();
+    service = new FaceAuthClientService(
+      httpService as never,
+      configService as never,
+    );
+    try {
+      respondTo(throttled('5'));
+      await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+      jest.advanceTimersByTime(4000);
+      httpService.post.mockClear();
+      await service.detectPersons(Buffer.from('img'), 'a.jpg');
+      expect(httpService.post).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(1500);
+      respondTo(of({ data: EMPTY_DETECTION }));
+      const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+
+      expect(httpService.post).toHaveBeenCalled();
+      expect(result).toMatchObject({ ok: true });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the circuit closed through a throttle burst', async () => {
+    // Ten `429`s that actually reach the upstream — the clock is advanced past
+    // each park so none of them is short-circuited locally. Twice what a run of
+    // 500s needs to open the breaker, and it must stay closed: a throttle is
+    // not an outage, and opening here would stop detection on every camera for
+    // the whole reset window.
+    jest.useFakeTimers();
+    service = new FaceAuthClientService(
+      httpService as never,
+      configService as never,
+    );
+    try {
+      respondTo(throttled('1'));
+      for (let i = 0; i < 10; i++) {
+        const result = await service.detectPersons(Buffer.from('img'), 'a.jpg');
+        expect(result).toMatchObject({ code: ErrorCode.UPSTREAM_THROTTLED });
+        jest.advanceTimersByTime(1500);
+      }
+
+      expect(service.circuitState).toBe('closed');
+      expect(httpService.post).toHaveBeenCalledTimes(11);
+    } finally {
+      jest.useRealTimers();
     }
   });
 

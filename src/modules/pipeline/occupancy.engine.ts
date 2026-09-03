@@ -2,12 +2,17 @@ import { AlertType } from '@prisma/client';
 import { PipelineDefaults } from '../../cross/common/constants';
 import { containsPoint, Point, ZoneArea } from '../zones/rectangle';
 
-type OccupancyStateName =
-  'Outside' | 'CandidateInside' | 'Inside' | 'CandidateOutside';
-
 interface ZoneOccupancyState {
-  state: OccupancyStateName;
-  consecutiveCount: number;
+  /** The area is confirmed occupied — an `ENTER` has fired and no `EXIT` yet. */
+  inside: boolean;
+  /**
+   * The last `enterWindowPolls` observations while the area is not yet
+   * confirmed, oldest first, `true` when the frame put an anchor inside. Empty
+   * once the area is `inside`: the window's whole job is deciding entry.
+   */
+  window: boolean[];
+  /** Consecutive frames with nothing inside, counted only while `inside`. */
+  misses: number;
 }
 
 export interface ZoneInput {
@@ -31,23 +36,46 @@ export interface OccupancyTransition {
   personsInZone: number;
 }
 
-const OUTSIDE: ZoneOccupancyState = { state: 'Outside', consecutiveCount: 0 };
-const INSIDE: ZoneOccupancyState = { state: 'Inside', consecutiveCount: 0 };
+const OUTSIDE: ZoneOccupancyState = { inside: false, window: [], misses: 0 };
+const INSIDE: ZoneOccupancyState = { inside: true, window: [], misses: 0 };
 const FULL_FRAME_KEY = 'full-frame';
 
 /**
- * Per (camera, zone) occupancy state machine with hysteresis: a person has to
- * be seen inside for N consecutive polls before an entry counts, and missing
- * for M before an exit does. Pure domain logic, no I/O — which is what lets the
- * poll transport stay undecided.
+ * Per (camera, zone) occupancy state machine with hysteresis: an area is
+ * entered once `enterHitsRequired` of the last `enterWindowPolls` frames put a
+ * person inside it, and exited after `exitConsecutivePolls` frames with nobody.
+ * Pure domain logic, no I/O — which is what lets the poll transport stay
+ * undecided.
+ *
+ * Entry is a window rather than a run of consecutive hits because the upstream
+ * detector drops frames of a subject that never moved: measured on 2026-09-02
+ * at one detection in 33 frames of an IR night scene with a person standing in
+ * it, which makes two consecutive hits a ~0.1% event and that camera unable to
+ * alert at all. See `plans/05.detection-quality.md`. Setting
+ * `enterHitsRequired === enterWindowPolls` reproduces the old consecutive rule
+ * exactly, which is the way back if the detector ever stops needing this.
+ *
+ * Exit stays consecutive on purpose. A premature exit costs nothing — the area
+ * simply re-arms — while a lingering one suppresses the next real alert, and a
+ * single frame that sees the person again resets the miss count to zero.
  */
 export class OccupancyEngine {
   private readonly states = new Map<string, ZoneOccupancyState>();
 
   constructor(
-    private readonly enterConsecutivePolls: number = PipelineDefaults.ENTER_CONSECUTIVE_POLLS,
+    private readonly enterHitsRequired: number = PipelineDefaults.ENTER_HITS_REQUIRED,
+    private readonly enterWindowPolls: number = PipelineDefaults.ENTER_WINDOW_POLLS,
     private readonly exitConsecutivePolls: number = PipelineDefaults.EXIT_CONSECUTIVE_POLLS,
-  ) {}
+  ) {
+    // A window shorter than the hits it must contain can never confirm an
+    // entry, so the camera would poll forever and never alert. Joi rejects the
+    // pair at boot; this is here so a direct construction cannot bypass it.
+    if (enterHitsRequired > enterWindowPolls) {
+      throw new Error(
+        `enterHitsRequired (${enterHitsRequired}) cannot exceed enterWindowPolls (${enterWindowPolls})`,
+      );
+    }
+  }
 
   evaluate(
     cameraId: string,
@@ -94,14 +122,18 @@ export class OccupancyEngine {
   }
 
   /**
-   * True while any zone of this camera sits past `Outside` — an entry or an
-   * exit is still unconfirmed. What the poll cadence keys on: the camera has
-   * unfinished business in a zone, whatever the latest frame happened to show.
+   * True while any area of this camera has unfinished business: a sighting
+   * inside its entry window, or a confirmed occupancy whose exit is not settled
+   * yet. What the poll cadence keys on, so the camera speeds up on the raw
+   * sighting and only slows down once the window has slid past it.
    */
   hasPendingOccupancy(cameraId: string): boolean {
     const prefix = `${cameraId}:`;
     for (const [key, occupancy] of this.states) {
-      if (key.startsWith(prefix) && occupancy.state !== 'Outside') {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      if (occupancy.inside || occupancy.window.includes(true)) {
         return true;
       }
     }
@@ -126,44 +158,23 @@ export class OccupancyEngine {
     current: ZoneOccupancyState,
     hasAnyInside: boolean,
   ): { state: ZoneOccupancyState; transition?: 'ENTER' | 'EXIT' } {
-    switch (current.state) {
-      case 'Outside':
-        return hasAnyInside ? this.advanceTowardEnter(0) : { state: OUTSIDE };
-
-      case 'CandidateInside':
-        return hasAnyInside
-          ? this.advanceTowardEnter(current.consecutiveCount)
-          : { state: OUTSIDE };
-
-      case 'Inside':
-        return hasAnyInside ? { state: INSIDE } : this.advanceTowardExit(0);
-
-      case 'CandidateOutside':
-        return hasAnyInside
-          ? { state: INSIDE }
-          : this.advanceTowardExit(current.consecutiveCount);
+    if (!current.inside) {
+      const window = [...current.window, hasAnyInside].slice(
+        -this.enterWindowPolls,
+      );
+      const hits = window.filter(Boolean).length;
+      return hits >= this.enterHitsRequired
+        ? { state: INSIDE, transition: 'ENTER' }
+        : { state: { inside: false, window, misses: 0 } };
     }
-  }
 
-  private advanceTowardEnter(previousCount: number): {
-    state: ZoneOccupancyState;
-    transition?: 'ENTER';
-  } {
-    const count = previousCount + 1;
-    if (count >= this.enterConsecutivePolls) {
-      return { state: INSIDE, transition: 'ENTER' };
+    if (hasAnyInside) {
+      return { state: INSIDE };
     }
-    return { state: { state: 'CandidateInside', consecutiveCount: count } };
-  }
 
-  private advanceTowardExit(previousCount: number): {
-    state: ZoneOccupancyState;
-    transition?: 'EXIT';
-  } {
-    const count = previousCount + 1;
-    if (count >= this.exitConsecutivePolls) {
-      return { state: OUTSIDE, transition: 'EXIT' };
-    }
-    return { state: { state: 'CandidateOutside', consecutiveCount: count } };
+    const misses = current.misses + 1;
+    return misses >= this.exitConsecutivePolls
+      ? { state: OUTSIDE, transition: 'EXIT' }
+      : { state: { inside: true, window: [], misses } };
   }
 }
