@@ -15,6 +15,7 @@ import { MetricsThrottlerGuard } from './cross/metrics/metrics-throttler.guard';
 import { MetricsModule } from './cross/metrics/metrics.module';
 import { DataModule } from './data/data.module';
 import { AlertRoutingsModule } from './modules/alert-routings/alert-routings.module';
+import { AssistantModule } from './modules/assistant/assistant.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CameraStatusModule } from './modules/cameras/camera-status.module';
 import { CamerasModule } from './modules/cameras/cameras.module';
@@ -62,6 +63,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     EventsModule,
     RetentionModule,
     FaceAuthClientModule,
+    AssistantModule,
   ],
   controllers: [AppController],
   providers: [

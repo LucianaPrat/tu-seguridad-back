@@ -22,3 +22,11 @@ export const InboundThrottle = () =>
       ttl: seconds(RouteThrottle.INBOUND.ttlSeconds),
     },
   });
+
+export const AssistantThrottle = () =>
+  Throttle({
+    default: {
+      limit: RouteThrottle.ASSISTANT.limit,
+      ttl: seconds(RouteThrottle.ASSISTANT.ttlSeconds),
+    },
+  });

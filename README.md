@@ -29,6 +29,7 @@ Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md),
 | Error tracking | `@sentry/node`, opt-in via `SENTRY_DSN`, unexpected 500s only, secrets scrubbed |
 | Metrics | `@willsoto/nestjs-prometheus` — `GET /metrics`, token-gated, HTTP/throttler/WebSocket/poll metrics |
 | Live video | MediaMTX sidecar restreams the recorder RTSP as HLS, on demand, no transcoding — opt-in via `MEDIAMTX_ENABLED` |
+| Help assistant | Chat against an OpenAI-compatible LLM gateway with a curated product context — opt-in via `ASSISTANT_ENABLED` |
 | Resilience | `opossum` circuit breaker around face-auth upstream (in-memory, no infra) |
 | API contract | committed `openapi.json`, exported by `scripts/export-openapi.ts`, diff-checked in CI |
 | Supply chain | `npm audit` gate (prod deps, critical) + Dependabot (weekly, targets `develop`) |
@@ -128,6 +129,7 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `GET /api/v1/events/:id/deliveries` | The outbound attempts planned for that event, one row per channel per recipient. Never returns the delivery `correlationId`. `email` rows carry their real outcome — `sent` with the relay's message id, or `failed` with the reason; `call` and `whatsapp` stay `pending` until those channels get a sender. |
 | `POST /api/v1/events/acknowledgements` | Public. Body carries exactly one credential, and which one says who is calling: `{ correlationId }` from a notification provider, or `{ token }` from the acknowledge link of an alert email. Answers `202 { accepted: true }` for a match, a repeat, an unknown id and a token that fails its signature alike, so it reveals no event. Both credentials at once, or neither, is `400`. Idempotent: the first call acknowledges the event, later ones change nothing. |
 | `POST /api/v1/streaming/authorize` | Public media-server hook, called for the HLS playlist and **every** segment. The reader bearer token arrives in the body, validated by the same verifier the bearer guard uses. Only `read` over `hls`, only a camera inside the space the token names — a granted `publish` would let someone feed fake video to the dashboard. |
+| `POST /api/v1/assistant/chat` | Bearer, any member. Answers a question about using the product. The client sends the whole conversation as `messages` — nothing is stored — and may only use the `user` and `assistant` roles: the product context is the one `system` message and this side writes it. Answers in the language it was asked in. `CONFLICT` when `ASSISTANT_ENABLED` is off. See [Help assistant](#help-assistant). |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
 | `GET /health/dependencies` | Public. Separate from `ready`: short-timeout reachability check against face-auth upstream. Degraded upstream reports here **without** marking whole app not-ready (camera/zone CRUD still works). |
 | `GET /metrics` | Prometheus exposition. No JWT; gated by the `X-Metrics-Token` header, which is required in production and unset in dev. Leaves no `hits` row — a scraper on a fixed interval is not an operator. |
@@ -242,6 +244,36 @@ That page is implemented in `tu-seguridad-front` and sends nothing until its but
 
 Whoever clicks first wins: the acknowledgement records that recipient, and later clicks — from another recipient, another channel, or the same link twice — change nothing.
 
+## Help assistant
+
+`POST /api/v1/assistant/chat` proxies one question to an OpenAI-compatible LLM gateway
+(`ASSISTANT_API_URL`) and answers `{ reply, model }`. It is the in-app answer to "how do I point the
+recorder at this", which until now existed only in these engineering docs.
+
+- **The context is curated, not these files.** `src/modules/assistant/assistant-context.ts` carries a
+  product document written for an operator: the words the screens use, the setup order, what an alert
+  means, and what honestly does not work yet. `README.md` and `ARCHITECTURE.md` are deliberately
+  *not* sent — they are about thirty-five thousand tokens paid on every message, and they name
+  `JWT_SECRET`, `DVR_PASSWORD_ENCRYPTION_KEY`, source paths and internal decisions to anyone with a
+  login. It is a `.ts` file and not a `.md` because `nest-cli.json` declares no `assets`, so a
+  Markdown file would be missing from `dist/` and the route would fail in production only.
+- **The client cannot write the system message.** The request DTO accepts `user` and `assistant`
+  roles only. A client allowed to send `system` could contradict or replace the product context and
+  use an authenticated help route as a general-purpose model on this project's bill. The 20-message
+  and 2000-character caps and a 20-a-minute rate limit are the rest of that answer — the global
+  allowance of ten a second is a billing problem, not a limit.
+- **Stateless.** The client replays every turn it wants remembered, so there is no table, no
+  migration, no retention sweep and nothing scoped to a space. Reloading the page starts a fresh
+  conversation.
+- **It answers in the language it was asked in**, and it is told to say it does not know rather than
+  invent a screen. It cannot see the caller's cameras, alerts or configuration and cannot change
+  anything.
+- **No circuit breaker**, unlike face-auth: that upstream is called by a scheduler several times a
+  second with nobody watching, this one is one interactive click behind a timeout and a rate limit.
+
+Keeping `assistant-context.ts` current is manual work. A feature that ships without a line there is a
+feature the assistant will confidently tell an operator does not exist.
+
 ## Snapshot storage
 
 Frame bytes live in MySQL, in a `snapshots` `MEDIUMBLOB` alongside their camera, MIME type, byte size, SHA-256 and capture time. Why MySQL and not object storage, and what that costs: [`docs/decisions/001-mysql-snapshot-storage.md`](docs/decisions/001-mysql-snapshot-storage.md).
@@ -349,6 +381,7 @@ Infra concerns handled by frameworks below. **Every external integration is opt-
 | Metrics | `@willsoto/nestjs-prometheus` + `prom-client` | `src/cross/metrics/` | `GET /metrics` (`VERSION_NEUTRAL`, `@Public()`, behind `MetricsTokenGuard`), Node default metrics plus four of this app's own: HTTP request duration by method/route/status (`HitInterceptor`), throttler 429s (`MetricsThrottlerGuard`, which is the global `APP_GUARD`), active authenticated WebSocket clients (`EventsGateway`, counted only past every handshake rejection), and camera poll count + duration labelled by `cameraId`. Always on; the token guard is what gates it, so an unset `METRICS_TOKEN` in dev leaves the route open. The route is excluded from the `api` global prefix and from `HitInterceptor`, so a scrape leaves no `hits` row. |
 | Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
 | Live video | MediaMTX (external) | `src/modules/streaming/` | Opt-in via `MEDIAMTX_ENABLED`. Off = one `CONFLICT`, nothing contacted. On = the path is registered through the Control API with `sourceOnDemand`, so the recorder RTSP is pulled only while somebody watches and dropped when the last reader leaves. This process never touches a media packet. See [`docs/decisions/002-hls-live-streaming.md`](docs/decisions/002-hls-live-streaming.md). |
+| Help assistant | An OpenAI-compatible LLM gateway | `src/modules/assistant/` | Opt-in via `ASSISTANT_ENABLED`. Off = one `CONFLICT`, no gateway contacted. On = one request per question, carrying `assistant-context.ts` as the system message. Stateless, so nothing is persisted and nothing is swept. See [Help assistant](#help-assistant). |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
 | Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
@@ -440,6 +473,11 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Both optional. Empty user means authentication is skipped entirely, which is what mailpit wants. Never a `smtp://user:pass@host` URL — separate values keep `secretlint` quiet and the password out of a loggable string. |
 | `MAIL_FROM` | `Tu Seguridad <no-reply@tu-seguridad.local>` | `From` header, address or `Name <address>` form. |
 | `APP_BASE_URL` | `http://localhost:5173` | Origin the emailed links point at — the frontend, not this API. A subpath (`https://host/app`) is preserved. Used by the credential links and by the `/events/:id` link in an alert email. |
+| `ASSISTANT_ENABLED` | `false` | Master switch for the in-app help assistant. Off = `POST /assistant/chat` answers `CONFLICT` and no gateway is contacted. |
+| `ASSISTANT_API_URL` | `https://llm.disier.net` | Base URL of the OpenAI-compatible gateway. `/v1/chat/completions` is appended. |
+| `ASSISTANT_API_TOKEN` | `change-me` | Bearer token for that gateway. Defaulted rather than required in production, for the same reason `APP_BASE_URL` is: a production boot with the assistant off must not be blocked by a variable that deployment does not use. The cost is that turning the switch on and forgetting the token boots fine and answers `UPSTREAM_ERROR` on the first question. |
+| `ASSISTANT_MODEL` | `DisierTECH/DeepSeek-V4-Flash-0731` | Model the gateway is asked for, and the value echoed back in the response. A variable because swapping models is a deployment decision. |
+| `ASSISTANT_TIMEOUT_MS` | `30000` | Gateway request timeout. Longer than every other timeout here — a model writing a paragraph is slow in a way a recorder capture is not. |
 
 ## Docs map
 

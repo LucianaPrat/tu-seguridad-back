@@ -92,6 +92,45 @@ Two properties this inherits rather than adds: a replayed link is a no-op, becau
 
 `EventDelivery.error` is served by `GET /events/:id/deliveries`, which every member of the space can read, so what a relay chose to say ends up in an API response. The stored reason is capped at 500 characters and the log keeps the whole thing. The cap is about a `TEXT` column and an unbounded upstream string, not about secrecy: an SMTP rejection can name the relay host, and in a single-tenant space whose members the owner invited, that is accepted rather than scrubbed — the same call the HLS URL gets under [Live streaming](README.md#live-streaming).
 
+## In-app help assistant
+
+`POST /assistant/chat` (`src/modules/assistant/`) is a thin proxy: prepend a system message, call an
+OpenAI-compatible gateway, unwrap `choices[0].message.content`. What is worth writing down is what it
+deliberately is not.
+
+- **The context is a curated document, not this repository's docs.** Sending `README.md` and this
+  file was the obvious implementation and is the wrong one twice over: they are roughly
+  thirty-five thousand tokens on every single message, and they name `JWT_SECRET`,
+  `DVR_PASSWORD_ENCRYPTION_KEY`, source paths, the plan history and the accessor rules — to anyone
+  holding a member's bearer token. `assistant-context.ts` is the operator's half of the same
+  knowledge, and the split is the point: a logged-in member is not an operator of this backend.
+- **That document is a `.ts` file, not a `.md`.** `nest-cli.json` declares no `assets` and nothing
+  else in `src/` does file IO, so a Markdown file would compile out of `dist/` and the route would
+  fail in production and nowhere else. `alert-email.template.ts` set the precedent — content with a
+  writing brief, kept beside the service that uses it and typechecked with it.
+- **The DTO's `role` excludes `system`, which the upstream accepts.** That single `@IsIn` is the
+  authorization boundary of the feature: with it, the product context is something only this process
+  writes; without it, an authenticated help route is a general-purpose model billed to this project.
+  The message and length caps and the 20-a-minute limit in `RouteThrottle.ASSISTANT` are the same
+  concern — the global allowance is ten requests a *second*, which for a paid upstream is a bill
+  rather than a limit.
+- **Stateless, so there is nothing to own.** The client replays the conversation. No table, no
+  migration, no `truncate-all.ts` entry, no retention sweep, no space scoping — the only thing the
+  route reads is its own body. Persistence was offered and declined; it can be added without moving
+  anything, because nothing else refers to a conversation.
+- **No circuit breaker and no retry**, unlike `FaceAuthClientService`. A breaker earns its place
+  there because a scheduler calls that upstream several times a second unattended, so an open circuit
+  saves real wall-clock. Here a person clicked once and is watching; a timeout bounds it and a
+  failure is visible to the one caller who cares.
+- **An unreadable answer is a failure, not an empty reply.** A body with no usable
+  `choices[0].message.content` maps to `UPSTREAM_ERROR` rather than reaching the screen as a blank
+  message, which would read as the assistant having nothing to say. Same posture as
+  `isDetectPersonsResponse` refusing a detection body it cannot read.
+
+Nothing was added to `SENSITIVE_FIELD_NAMES`: the gateway token exists only in a header this process
+builds, `mapUpstreamError` never logs the error it maps, and `pino-http` does not log request bodies
+— so neither the token nor a member's question reaches a log or Sentry.
+
 ## Retention
 
 Nothing deleted a row until `RetentionService` (`src/modules/retention/`). Consumed and expired `auth_tokens`, settled `invitations`, and every evidence frame ever captured accumulated on the same MySQL instance that serves every query — and a `MEDIUMBLOB` per alert is the one of those with no ceiling. [`docs/decisions/001-mysql-snapshot-storage.md`](docs/decisions/001-mysql-snapshot-storage.md) said retention had to arrive before the table's growth became material; this is it, and it does not replace the object-storage move that ADR still defers.
