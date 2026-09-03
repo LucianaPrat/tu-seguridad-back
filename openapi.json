@@ -5266,6 +5266,7 @@
               "CONFLICT",
               "UPSTREAM_ERROR",
               "UPSTREAM_TIMEOUT",
+              "UPSTREAM_THROTTLED",
               "INTERNAL_ERROR"
             ],
             "example": "NOT_FOUND",

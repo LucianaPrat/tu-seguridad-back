@@ -85,6 +85,8 @@ describe('PipelineService', () => {
   let statusRegistry: { record: jest.Mock };
   let alertEvents: { record: jest.Mock };
   let alertsSuppressed: { inc: jest.Mock };
+  let personsDetected: { inc: jest.Mock };
+  let configService: { get: jest.Mock };
   let alertCooldown: AlertCooldown;
   let service: PipelineService;
 
@@ -97,6 +99,9 @@ describe('PipelineService', () => {
     statusRegistry = { record: jest.fn() };
     alertEvents = { record: jest.fn().mockResolvedValue([]) };
     alertsSuppressed = { inc: jest.fn() };
+    personsDetected = { inc: jest.fn() };
+    // Every flag this service reads is off unless a test turns it on.
+    configService = { get: jest.fn().mockReturnValue(false) };
     // Off by default: every test outside the cooldown block must see the
     // pre-cooldown answer, and a real instance with a zero window is that.
     alertCooldown = new AlertCooldown(0);
@@ -106,17 +111,19 @@ describe('PipelineService', () => {
   /** Rebuilt by the cooldown block, which needs a non-zero window. */
   function buildService(): PipelineService {
     return new PipelineService(
+      configService as never,
       faceAuthClient as never,
       zoneAccessor as never,
       snapshotService as never,
       statusRegistry as never,
       // Real engine with a one-poll threshold: alert-level selection is the
       // behavior under test, and mocking it away would test nothing.
-      new OccupancyEngine(1, 1),
+      new OccupancyEngine(1, 1, 1),
       new CadenceEngine(15, 10, 5),
       alertEvents as never,
       alertCooldown,
       alertsSuppressed as never,
+      personsDetected as never,
     );
   }
 
@@ -518,6 +525,143 @@ describe('PipelineService', () => {
 
       expect(result.ok && result.data.alerts).toHaveLength(1);
       expect(alertsSuppressed.inc).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('what the detector answered', () => {
+    const emptyBody = () =>
+      buildData({
+        personsDetected: false,
+        imageWidth: 1920,
+        imageHeight: 1080,
+        persons: [],
+      });
+
+    it('counts a frame the upstream found somebody in', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(detection());
+
+      await service.processImage(spaceId, buildCamera(), image);
+
+      expect(personsDetected.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-uuid',
+        outcome: 'persons',
+      });
+    });
+
+    it('counts an empty answer apart from a filtered one', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(emptyBody());
+
+      await service.processImage(spaceId, buildCamera(), image);
+
+      expect(personsDetected.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-uuid',
+        outcome: 'empty',
+      });
+    });
+
+    it('counts a sighting this camera threw away as filtered, not empty', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(
+        detection({ x: 0.5, y: 0.5 }, 0.2),
+      );
+
+      await service.processImage(spaceId, buildCamera(), image);
+
+      expect(personsDetected.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-uuid',
+        outcome: 'filtered',
+      });
+    });
+
+    it('does not count a poll the detector never answered', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_THROTTLED, 'rate limited'),
+      );
+
+      await service.processImage(spaceId, buildCamera(), image);
+
+      expect(personsDetected.inc).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('keeping the raw evidence frame', () => {
+    /**
+     * A frame the annotator can actually decode and a box it can actually
+     * draw — without both, `annotateDetections` hands back the captured object
+     * and there is no second set of bytes for the raw copy to be about.
+     */
+    let decodable: CapturedImage;
+
+    beforeEach(async () => {
+      decodable = {
+        ...image,
+        data: await sharp({
+          create: {
+            width: 64,
+            height: 64,
+            channels: 3,
+            background: { r: 20, g: 20, b: 20 },
+          },
+        })
+          .jpeg()
+          .toBuffer(),
+      };
+      faceAuthClient.detectPersons.mockResolvedValue(
+        buildData({
+          personsDetected: true,
+          imageWidth: 64,
+          imageHeight: 64,
+          persons: [
+            {
+              detScore: 0.9,
+              bbox: {
+                topLeft: { x: 10, y: 10 },
+                bottomRight: { x: 40, y: 55 },
+              },
+              bboxNorm: {
+                topLeft: { x: 0.15, y: 0.15 },
+                bottomRight: { x: 0.62, y: 0.86 },
+              },
+              anchor: { x: 0.5, y: 0.5 },
+            },
+          ],
+        }),
+      );
+    });
+
+    it('stores only the annotated frame by default', async () => {
+      await service.processImage(spaceId, buildCamera(), decodable);
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(1);
+    });
+
+    it('stores the untouched capture as a second row when asked to', async () => {
+      configService.get.mockReturnValue(true);
+
+      await service.processImage(spaceId, buildCamera(), decodable);
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(2);
+      // The raw copy is the object handed in, not the annotated re-encode.
+      expect(snapshotService.store).toHaveBeenLastCalledWith(
+        spaceId,
+        'camera-uuid',
+        decodable,
+      );
+    });
+
+    it('never lets a failed raw copy cost the alert', async () => {
+      configService.get.mockReturnValue(true);
+      snapshotService.store
+        .mockResolvedValueOnce(buildData({ id: 'snapshot-uuid' }))
+        .mockResolvedValueOnce(buildError(ErrorCode.INTERNAL_ERROR, 'nope'));
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera(),
+        decodable,
+      );
+
+      expect(result).toMatchObject({ ok: true });
+      expect(alertEvents.record).toHaveBeenCalled();
     });
   });
 

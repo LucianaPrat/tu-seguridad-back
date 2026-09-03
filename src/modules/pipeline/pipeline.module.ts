@@ -29,7 +29,8 @@ import { PollingScheduler } from './polling.scheduler';
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
         new OccupancyEngine(
-          config.getOrThrow<number>(EnvNames.ENTER_CONSECUTIVE_POLLS),
+          config.getOrThrow<number>(EnvNames.ENTER_HITS_REQUIRED),
+          config.getOrThrow<number>(EnvNames.ENTER_WINDOW_POLLS),
           config.getOrThrow<number>(EnvNames.EXIT_CONSECUTIVE_POLLS),
         ),
     },

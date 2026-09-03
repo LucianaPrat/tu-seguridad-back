@@ -1,5 +1,5 @@
 import * as Joi from 'joi';
-import { EnvNames } from '../common/constants';
+import { EnvNames, PipelineDefaults } from '../common/constants';
 
 const stringRequiredInProduction = (devDefault: string) =>
   Joi.string().when(EnvNames.NODE_ENV, {
@@ -176,8 +176,31 @@ export const envValidationSchema = Joi.object({
     .min(0)
     .max(3600)
     .default(300),
-  [EnvNames.ENTER_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(2),
-  [EnvNames.EXIT_CONSECUTIVE_POLLS]: Joi.number().integer().min(1).default(3),
+  // Whether the raw capture is kept alongside the annotated evidence frame.
+  // Off by default: it doubles the blob volume of the highest-volume table, and
+  // the annotated frame is what the alert email and the dashboard read. On when
+  // the detector's own recall is under audit — re-running history against the
+  // upstream is only exact on the untouched pixels.
+  [EnvNames.SNAPSHOT_KEEP_RAW]: Joi.boolean().default(false),
+  // Entry confirmation: `ENTER_HITS_REQUIRED` of the last `ENTER_WINDOW_POLLS`
+  // frames must have put an anchor inside the area. A window rather than a run
+  // of consecutive hits because the upstream detector drops single frames of a
+  // subject that never left — measured at a 3% per-frame hit rate on an IR
+  // night scene, where two consecutive hits are unreachable. Equal values
+  // reproduce the old consecutive rule exactly.
+  [EnvNames.ENTER_HITS_REQUIRED]: Joi.number()
+    .integer()
+    .min(1)
+    .default(PipelineDefaults.ENTER_HITS_REQUIRED),
+  [EnvNames.ENTER_WINDOW_POLLS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(PipelineDefaults.ENTER_WINDOW_POLLS)
+    .min(Joi.ref(EnvNames.ENTER_HITS_REQUIRED)),
+  [EnvNames.EXIT_CONSECUTIVE_POLLS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(PipelineDefaults.EXIT_CONSECUTIVE_POLLS),
 
   // Seconds before the same camera, zone and alert type can raise a second
   // alert. Ships at `0`, the pre-cooldown behaviour, so nothing an operator

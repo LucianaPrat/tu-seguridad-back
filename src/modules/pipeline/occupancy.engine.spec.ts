@@ -28,13 +28,13 @@ describe('OccupancyEngine', () => {
 
   describe('entering a zone', () => {
     it('does not transition on the first poll', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       expect(engine.evaluate('camera-1', [zoneA], [insideA])).toEqual([]);
     });
 
     it('fires entered on the second consecutive poll, with the max score as confidence', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
       const secondPerson: AnchorWithScore = {
         anchor: { x: 20, y: 20 },
         detScore: 0.95,
@@ -58,20 +58,96 @@ describe('OccupancyEngine', () => {
       ]);
     });
 
-    it('resets the counter on an empty poll, so an interrupted run never enters', () => {
-      const engine = new OccupancyEngine(2, 3);
+    it('drops the interrupted run when the window is exactly the hits required', () => {
+      const engine = new OccupancyEngine(2, 2, 3);
 
-      engine.evaluate('camera-1', [zoneA], [insideA]); // 1/2
-      engine.evaluate('camera-1', [zoneA], []); // nobody -> back to Outside
-      const poll3 = engine.evaluate('camera-1', [zoneA], [insideA]); // 1/2 again
+      engine.evaluate('camera-1', [zoneA], [insideA]); // window [X]
+      engine.evaluate('camera-1', [zoneA], []); // window [X, .] -> 1 hit of 2
+      const poll3 = engine.evaluate('camera-1', [zoneA], [insideA]); // [., X]
 
       expect(poll3).toEqual([]);
     });
   });
 
+  describe('the entry window (K of N)', () => {
+    it('confirms K hits inside the window even when they are not consecutive', () => {
+      const engine = new OccupancyEngine(2, 4, 3);
+
+      engine.evaluate('camera-1', [zoneA], [insideA]); // [X]
+      engine.evaluate('camera-1', [zoneA], []); // [X, .]
+      const poll3 = engine.evaluate('camera-1', [zoneA], [insideA]); // [X, ., X]
+
+      expect(poll3).toEqual([
+        {
+          zoneId: 'zone-a',
+          alertType: AlertType.intruder,
+          kind: 'entered',
+          confidence: 0.9,
+          personsInZone: 1,
+        },
+      ]);
+    });
+
+    it('does not confirm a single hit, however wide the window', () => {
+      const engine = new OccupancyEngine(2, 4, 3);
+
+      engine.evaluate('camera-1', [zoneA], [insideA]);
+      engine.evaluate('camera-1', [zoneA], []);
+      engine.evaluate('camera-1', [zoneA], []);
+      const poll4 = engine.evaluate('camera-1', [zoneA], []);
+
+      expect(poll4).toEqual([]);
+    });
+
+    it('slides, so a hit older than the window stops counting', () => {
+      const engine = new OccupancyEngine(2, 3, 3);
+
+      engine.evaluate('camera-1', [zoneA], [insideA]); // [X]
+      engine.evaluate('camera-1', [zoneA], []); // [X, .]
+      engine.evaluate('camera-1', [zoneA], []); // [X, ., .]
+      // The first hit has now fallen out of a three-frame window, so this one
+      // is alone again and must not confirm.
+      const poll4 = engine.evaluate('camera-1', [zoneA], [insideA]); // [., ., X]
+
+      expect(poll4).toEqual([]);
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+    });
+
+    it('stops being pending once the window has slid past the last sighting', () => {
+      const engine = new OccupancyEngine(2, 2, 3);
+
+      engine.evaluate('camera-1', [zoneA], [insideA]);
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(true);
+
+      engine.evaluate('camera-1', [zoneA], []);
+      engine.evaluate('camera-1', [zoneA], []);
+
+      expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
+    });
+
+    it('behaves exactly like the consecutive rule when hits equal the window', () => {
+      const consecutive = new OccupancyEngine(3, 3, 3);
+
+      consecutive.evaluate('camera-1', [zoneA], [insideA]);
+      consecutive.evaluate('camera-1', [zoneA], []);
+      consecutive.evaluate('camera-1', [zoneA], [insideA]);
+      const interrupted = consecutive.evaluate('camera-1', [zoneA], [insideA]);
+      expect(interrupted).toEqual([]);
+
+      const third = consecutive.evaluate('camera-1', [zoneA], [insideA]);
+      expect(third).toHaveLength(1);
+    });
+
+    it('refuses a window narrower than the hits it must hold', () => {
+      expect(() => new OccupancyEngine(3, 2, 3)).toThrow(
+        'enterHitsRequired (3) cannot exceed enterWindowPolls (2)',
+      );
+    });
+  });
+
   describe('exiting a zone', () => {
     it('fires exited only after exitConsecutivePolls empty polls, with no confidence', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       engine.evaluate('camera-1', [zoneA], [insideA]); // 1/2
       engine.evaluate('camera-1', [zoneA], [insideA]); // 2/2 -> entered
@@ -96,7 +172,7 @@ describe('OccupancyEngine', () => {
 
   describe('full-frame camera (monitorMode = full)', () => {
     it('transitions the implicit zoneId: null zone the same way, without colliding with a real zone', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
       // Inside FULL_FRAME but outside zoneA's rectangle (0,0,50,50): only the
       // full-frame zone should progress towards entered.
       const outsideRealZone: AnchorWithScore = {
@@ -137,7 +213,7 @@ describe('OccupancyEngine', () => {
 
   describe('partial mode with two zones', () => {
     it('reports each zone at its own alertType level', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
       const zones = [zoneA, zoneB];
 
       engine.evaluate('camera-1', zones, [insideA, insideB]); // both 1/2
@@ -164,7 +240,7 @@ describe('OccupancyEngine', () => {
 
   describe('multiple cameras', () => {
     it('keeps independent state per camera for the same zone id', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       engine.evaluate('camera-2', [zoneA], [insideA]); // camera-2: 1/2
       const camera2Entered = engine.evaluate('camera-2', [zoneA], [insideA]); // camera-2: 2/2 -> entered
@@ -187,7 +263,7 @@ describe('OccupancyEngine', () => {
 
   describe('reset', () => {
     it('clears only the given camera state', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       engine.evaluate('camera-1', [zoneA], [insideA]); // camera-1: 1/2
       engine.evaluate('camera-2', [zoneA], [insideA]); // camera-2: 1/2
@@ -212,7 +288,7 @@ describe('OccupancyEngine', () => {
 
   describe('hasPendingOccupancy', () => {
     it('is false for a camera with nothing going on', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       expect(engine.hasPendingOccupancy('camera-1')).toBe(false);
 
@@ -221,7 +297,7 @@ describe('OccupancyEngine', () => {
     });
 
     it('is true from the first frame inside, before the entry is confirmed', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       engine.evaluate('camera-1', [zoneA], [insideA]); // CandidateInside
 
@@ -229,7 +305,7 @@ describe('OccupancyEngine', () => {
     });
 
     it('stays true through the unconfirmed exit and clears once the zone retires', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
       engine.evaluate('camera-1', [zoneA], [insideA]);
       engine.evaluate('camera-1', [zoneA], [insideA]); // Inside
 
@@ -243,7 +319,7 @@ describe('OccupancyEngine', () => {
     });
 
     it('is true while any one zone is pending, and never leaks across cameras', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
 
       engine.evaluate('camera-1', [zoneA, zoneB], [insideB]);
 
@@ -252,7 +328,7 @@ describe('OccupancyEngine', () => {
     });
 
     it('is false again after a reset', () => {
-      const engine = new OccupancyEngine(2, 3);
+      const engine = new OccupancyEngine(2, 2, 3);
       engine.evaluate('camera-1', [fullFrameZone], [insideA]);
 
       engine.reset('camera-1');

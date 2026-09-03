@@ -54,6 +54,28 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   `SNAPSHOT_MAX_BYTES` can be refused after annotation; the pipeline retries that write with the
   frame as captured rather than dropping the evidence.
 
+## Measuring detection recall
+
+- **`scripts/try-detect.ts` takes a directory, not just a file.**
+  `npx ts-node scripts/try-detect.ts <dir> [gapMs]` posts every `.jpg`/`.jpeg`/`.png` in it to the
+  upstream and prints one TSV row per frame plus a summary: how many frames came back with a
+  detection, and the `detScore` range. It boots Nest and goes out over the real
+  `FaceAuthClientService`, so the session-token exchange, the breaker and the throttle park are the
+  ones production uses, and the scores are the raw `persons[]` — the confidence filter lives in
+  `PipelineService`, not in the client.
+- **Pace it, or the measurement measures the rate limiter.** The upstream is IP-throttled: 250 ms
+  spacing drew a `429` after ~17 requests and then a 15–45 s penalty window, while 12 s ran 35
+  requests clean. The script clamps the gap to 5 s minimum and defaults to 12 s, and it is worth
+  remembering that the running app is already spending roughly one detect call every three seconds.
+- **Ground truth has to come from looking at the frames.** Recall is only meaningful against frames
+  where somebody is known to be present, so mark that by hand before trusting a percentage. The
+  measured baseline to compare against — 6/8 at close range in daylight, 0/11 on the street
+  cameras, 1/33 on an IR night scene — is in
+  [`plans/05.detection-quality.md`](../plans/05.detection-quality.md) §2.
+- **Evidence rows are the annotated re-encode.** Re-running history against the upstream is a lower
+  bound unless `SNAPSHOT_KEEP_RAW` was on when the alert fired, because the stored frame carries
+  burnt-in boxes and a q88 round trip.
+
 ## Observability (local)
 
 - Traces need a collector listening, and there is no container for it: it is a PM2 process from

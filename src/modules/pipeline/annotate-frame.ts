@@ -18,8 +18,10 @@ import { describeImage } from '../snapshots/snapshot.service';
  * so nothing depends on the upstream having reported the same pixel dimensions
  * the encoder actually produced.
  *
- * ponytail: the raw frame is not kept — the annotated one replaces it. Store
- * both when someone needs the untouched pixels as evidence.
+ * The annotated frame replaces the raw one by default. `SNAPSHOT_KEEP_RAW`
+ * stores the captured bytes as a second row when the untouched pixels are the
+ * evidence — re-measuring the upstream's recall against history is only exact
+ * on those, not on this q88 re-encode with boxes burned into it.
  */
 
 /** Loud enough to find on a grey night frame, and not a colour the scene produces. */
