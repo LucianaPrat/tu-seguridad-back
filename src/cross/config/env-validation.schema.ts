@@ -293,4 +293,30 @@ export const envValidationSchema = Joi.object({
   // it to stringRequiredInProduction when mail actually ships, and add it to the
   // schema spec's productionEnv fixture in the same change.
   [EnvNames.APP_BASE_URL]: Joi.string().uri().default('http://localhost:5173'),
+
+  // The in-app help assistant, opt-in like every other outbound integration
+  // here: off, `POST /assistant/chat` answers CONFLICT and no gateway is
+  // contacted. The URL and the model are the gateway's, and the model is a
+  // variable rather than a constant because swapping it is a deployment
+  // decision, not a code change.
+  [EnvNames.ASSISTANT_ENABLED]: Joi.boolean().default(false),
+  [EnvNames.ASSISTANT_API_URL]: Joi.string()
+    .uri()
+    .default('https://llm.disier.net'),
+  // ponytail: defaulted rather than secretRequiredInProduction, for the same
+  // reason APP_BASE_URL is — a production boot with ASSISTANT_ENABLED=false must
+  // not be blocked by a variable that deployment does not use, and there is no
+  // way to say "required only when that switch is on" here without nesting two
+  // `when`s. The cost is that a deployment which turns the assistant on and
+  // forgets the token boots fine and answers UPSTREAM_ERROR on the first
+  // question. Promote it to secretRequiredInProduction (and add it to the spec's
+  // productionEnv fixture in the same change) if the assistant ever becomes
+  // something a deployment is expected to have.
+  [EnvNames.ASSISTANT_API_TOKEN]: Joi.string().default('change-me'),
+  [EnvNames.ASSISTANT_MODEL]: Joi.string().default(
+    'DisierTECH/DeepSeek-V4-Flash-0731',
+  ),
+  // Longer than every other timeout here: a language model answering a
+  // paragraph is slow in a way a recorder capture and a detection call are not.
+  [EnvNames.ASSISTANT_TIMEOUT_MS]: Joi.number().default(30000),
 });

@@ -5018,6 +5018,183 @@
           "members"
         ]
       }
+    },
+    "/api/v1/assistant/chat": {
+      "post": {
+        "description": "Answers a question about using this product. Bearer, and open to any member — a member needs help as much as an admin does. The conversation is not stored: the client sends every turn it wants remembered, and the product context is prepended server-side as the system message, which is why a client may only send `user` and `assistant` roles. Answers in the language it was asked in. `CONFLICT` when the assistant is not enabled on the deployment.",
+        "operationId": "AssistantController_chat_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantChatRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantChatResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body — empty conversation, more than 20 messages, a message over 2000 characters, or a role other than `user`/`assistant`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The assistant is not enabled on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The assistant gateway refused the call or answered a body that carries no reply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The assistant gateway did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Ask the in-app help assistant",
+        "tags": [
+          "assistant"
+        ]
+      }
     }
   },
   "info": {
@@ -6206,6 +6383,59 @@
         },
         "required": [
           "receiveAlerts"
+        ]
+      },
+      "AssistantMessageDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "AssistantChatRequestDto": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "maxItems": 20,
+            "description": "The conversation so far, oldest first, ending with the new user message.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssistantMessageDto"
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      },
+      "AssistantChatResponseDto": {
+        "type": "object",
+        "properties": {
+          "reply": {
+            "type": "string",
+            "description": "The assistant's answer, as plain text."
+          },
+          "model": {
+            "type": "string",
+            "description": "The model that produced it, as the gateway reports it. Configured, not chosen per request — it is here so a changed deployment is visible in the answer rather than only in the environment."
+          }
+        },
+        "required": [
+          "reply",
+          "model"
         ]
       }
     }

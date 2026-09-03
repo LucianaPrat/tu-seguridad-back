@@ -75,6 +75,12 @@ export const EnvNames = {
   SMTP_PASSWORD: 'SMTP_PASSWORD',
   MAIL_FROM: 'MAIL_FROM',
   APP_BASE_URL: 'APP_BASE_URL',
+
+  ASSISTANT_ENABLED: 'ASSISTANT_ENABLED',
+  ASSISTANT_API_URL: 'ASSISTANT_API_URL',
+  ASSISTANT_API_TOKEN: 'ASSISTANT_API_TOKEN',
+  ASSISTANT_MODEL: 'ASSISTANT_MODEL',
+  ASSISTANT_TIMEOUT_MS: 'ASSISTANT_TIMEOUT_MS',
 } as const;
 
 export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
@@ -97,10 +103,16 @@ export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
  * `INBOUND` covers `POST /events/acknowledgements`, which is unauthenticated
  * and whose caller is a notification provider or a person clicking a link in a
  * mail: neither of them needs more than a handful of calls a minute.
+ *
+ * `ASSISTANT` covers `POST /assistant/chat`, and it is the one limit here that
+ * is about money rather than about an attacker: every call is a paid request to
+ * an LLM gateway, and the global allowance of ten a second would let one bored
+ * member run up a bill on a route that a person types into by hand.
  */
 export const RouteThrottle = {
   CREDENTIAL: { limit: 10, ttlSeconds: 60 },
   INBOUND: { limit: 30, ttlSeconds: 60 },
+  ASSISTANT: { limit: 20, ttlSeconds: 60 },
 } as const;
 
 export enum ErrorCode {
