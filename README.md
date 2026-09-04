@@ -29,7 +29,7 @@ Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md),
 | Error tracking | `@sentry/node`, opt-in via `SENTRY_DSN`, unexpected 500s only, secrets scrubbed |
 | Metrics | `@willsoto/nestjs-prometheus` — `GET /metrics`, token-gated, HTTP/throttler/WebSocket/poll metrics |
 | Live video | MediaMTX sidecar restreams the recorder RTSP as HLS, on demand, no transcoding — opt-in via `MEDIAMTX_ENABLED` |
-| Help assistant | Chat against an OpenAI-compatible LLM gateway with a curated product context — opt-in via `ASSISTANT_ENABLED` |
+| Help assistant | Chat against an OpenAI-compatible LLM gateway with a curated product context — opt-in via `ASSISTANT_ENABLED`. Speech in and out behind a second switch, `ASSISTANT_VOICE_ENABLED` |
 | Resilience | `opossum` circuit breaker around face-auth upstream (in-memory, no infra) |
 | API contract | committed `openapi.json`, exported by `scripts/export-openapi.ts`, diff-checked in CI |
 | Supply chain | `npm audit` gate (prod deps, critical) + Dependabot (weekly, targets `develop`) |
@@ -130,6 +130,8 @@ The `03` plan replaced these shapes destructively rather than shipping a `/v2` b
 | `POST /api/v1/events/acknowledgements` | Public. Body carries exactly one credential, and which one says who is calling: `{ correlationId }` from a notification provider, or `{ token }` from the acknowledge link of an alert email. Answers `202 { accepted: true }` for a match, a repeat, an unknown id and a token that fails its signature alike, so it reveals no event. Both credentials at once, or neither, is `400`. Idempotent: the first call acknowledges the event, later ones change nothing. |
 | `POST /api/v1/streaming/authorize` | Public media-server hook, called for the HLS playlist and **every** segment. The reader bearer token arrives in the body, validated by the same verifier the bearer guard uses. Only `read` over `hls`, only a camera inside the space the token names — a granted `publish` would let someone feed fake video to the dashboard. |
 | `POST /api/v1/assistant/chat` | Bearer, any member. Answers a question about using the product. The client sends the whole conversation as `messages` — nothing is stored — and may only use the `user` and `assistant` roles: the product context is the one `system` message and this side writes it. Answers in the language it was asked in. `CONFLICT` when `ASSISTANT_ENABLED` is off. See [Help assistant](#help-assistant). |
+| `POST /api/v1/assistant/transcribe` | Bearer, any member. Multipart `file` — one recorded clip, forwarded to a Whisper gateway as-is — answering `{ text }`. Feed that straight to `/assistant/chat`. Language is deployment config, not a body field. Nothing is stored. `CONFLICT` when `ASSISTANT_ENABLED` or `ASSISTANT_VOICE_ENABLED` is off. See [Help assistant](#help-assistant). |
+| `POST /api/v1/assistant/speak` | Bearer, any member. Takes `{ text }` and answers `audio/mpeg` bytes, so a client can play a reply instead of reading it. Voice and model are deployment config. Nothing is stored and nothing is cached — the same text asked twice is synthesized twice. `CONFLICT` when `ASSISTANT_ENABLED` or `ASSISTANT_VOICE_ENABLED` is off. See [Help assistant](#help-assistant). |
 | `GET /health/live`, `GET /health/ready` | Public. `ready` pings DB via Terminus. |
 | `GET /health/dependencies` | Public. Separate from `ready`: short-timeout reachability check against face-auth upstream. Degraded upstream reports here **without** marking whole app not-ready (camera/zone CRUD still works). |
 | `GET /metrics` | Prometheus exposition. No JWT; gated by the `X-Metrics-Token` header, which is required in production and unset in dev. Leaves no `hits` row — a scraper on a fixed interval is not an operator. |
@@ -274,6 +276,35 @@ recorder at this", which until now existed only in these engineering docs.
 Keeping `assistant-context.ts` current is manual work. A feature that ships without a line there is a
 feature the assistant will confidently tell an operator does not exist.
 
+### Voice
+
+`POST /assistant/transcribe` and `POST /assistant/speak` are the same assistant with an ear and a
+mouth: an operator holds a mic, the clip becomes a transcript, the transcript goes to
+`/assistant/chat` unchanged, and the reply comes back as mp3 bytes to play. Both are proxies — one
+multipart call out to a Whisper gateway, one JSON call out to a Kokoro one — and neither adds a
+concept the chat route did not already have.
+
+- **Off by default, behind its own switch.** The gateway that serves `/v1/chat/completions` today
+  serves no audio routes, so `ASSISTANT_VOICE_ENABLED` is separate from `ASSISTANT_ENABLED`: chat
+  stays on while voice stays off, and each answers `CONFLICT` on its own. There is no capability
+  route to ask which — the first call *is* the probe, and `409` is the answer.
+- **Provider-agnostic by construction.** `ASSISTANT_STT_API_URL` and `ASSISTANT_TTS_API_URL` default
+  to the chat gateway's URL, so pointing them at a local Speaches / kokoro-fastapi container is what
+  makes the feature buildable while that gateway is incomplete. When it grows the routes, both
+  overrides come out and the flag goes on — no code change either way. Swapping Kokoro for Piper (the
+  escape hatch if the neutral Latin American accent is rejected, or if Kokoro's known Spanish
+  silence bug hits this deployment) is the same three variables.
+- **Nothing is transcoded and nothing is stored.** The clip is forwarded byte-for-byte, whatever the
+  browser recorder produced, because a Whisper backend reads either container. Both directions are
+  pass-through: no rows, no files, no retention sweep, and no id ties a transcript to the reply that
+  gets read back — the client threads them.
+- **The domain hint is not configurable.** One fixed prompt (`cámara, zona, intruso, sospechoso,
+  DVR, canal`) rides every transcription. It is what stops Whisper writing "de vr" for "DVR", and it
+  is one string colocated with the method that sends it rather than a knob to get wrong.
+- **`speak` writes its own response**, like `GET /snapshots/:id`, because the body is bytes rather
+  than an `Either` for the interceptor to unwrap. Unlike that route it sets no `ETag`: a stored frame
+  has an identity worth revalidating, a synthesized reply does not.
+
 ## Snapshot storage
 
 Frame bytes live in MySQL, in a `snapshots` `MEDIUMBLOB` alongside their camera, MIME type, byte size, SHA-256 and capture time. Why MySQL and not object storage, and what that costs: [`docs/decisions/001-mysql-snapshot-storage.md`](docs/decisions/001-mysql-snapshot-storage.md).
@@ -381,6 +412,7 @@ Infra concerns handled by frameworks below. **Every external integration is opt-
 | Metrics | `@willsoto/nestjs-prometheus` + `prom-client` | `src/cross/metrics/` | `GET /metrics` (`VERSION_NEUTRAL`, `@Public()`, behind `MetricsTokenGuard`), Node default metrics plus four of this app's own: HTTP request duration by method/route/status (`HitInterceptor`), throttler 429s (`MetricsThrottlerGuard`, which is the global `APP_GUARD`), active authenticated WebSocket clients (`EventsGateway`, counted only past every handshake rejection), camera poll count + duration labelled by `cameraId`, and what the detector answered per camera (`pipeline_persons_detected_total{cameraId,outcome}`, `outcome` one of `persons`, `empty` — the upstream found nobody — and `filtered` — it found somebody this camera's threshold dropped). The gap between `persons` and the alerts actually raised is the unconfirmed-sighting rate the entry window exists to close. Always on; the token guard is what gates it, so an unset `METRICS_TOKEN` in dev leaves the route open. The route is excluded from the `api` global prefix and from `HitInterceptor`, so a scrape leaves no `hits` row. |
 | Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
 | Live video | MediaMTX (external) | `src/modules/streaming/` | Opt-in via `MEDIAMTX_ENABLED`. Off = one `CONFLICT`, nothing contacted. On = the path is registered through the Control API with `sourceOnDemand`, so the recorder RTSP is pulled only while somebody watches and dropped when the last reader leaves. This process never touches a media packet. See [`docs/decisions/002-hls-live-streaming.md`](docs/decisions/002-hls-live-streaming.md). |
+| Assistant voice | OpenAI-compatible speech gateways (Whisper in, Kokoro out) | `src/modules/assistant/` | Opt-in via `ASSISTANT_VOICE_ENABLED` on top of `ASSISTANT_ENABLED`. Off = one `CONFLICT`, no gateway contacted. URLs default to the chat gateway's, so a local container is an override rather than a code change. Pass-through both ways: nothing stored, nothing cached. See [Help assistant](#help-assistant). |
 | Help assistant | An OpenAI-compatible LLM gateway | `src/modules/assistant/` | Opt-in via `ASSISTANT_ENABLED`. Off = one `CONFLICT`, no gateway contacted. On = one request per question, carrying `assistant-context.ts` as the system message. Stateless, so nothing is persisted and nothing is swept. See [Help assistant](#help-assistant). |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
@@ -480,6 +512,14 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | `ASSISTANT_API_TOKEN` | `change-me` | Bearer token for that gateway. Defaulted rather than required in production, for the same reason `APP_BASE_URL` is: a production boot with the assistant off must not be blocked by a variable that deployment does not use. The cost is that turning the switch on and forgetting the token boots fine and answers `UPSTREAM_ERROR` on the first question. |
 | `ASSISTANT_MODEL` | `DisierTECH/DeepSeek-V4-Flash-0731` | Model the gateway is asked for, and the value echoed back in the response. A variable because swapping models is a deployment decision. |
 | `ASSISTANT_TIMEOUT_MS` | `30000` | Gateway request timeout. Longer than every other timeout here — a model writing a paragraph is slow in a way a recorder capture is not. |
+| `ASSISTANT_VOICE_ENABLED` | `false` | Second switch, over `ASSISTANT_ENABLED`, for `POST /assistant/transcribe` and `POST /assistant/speak`. Off = both answer `CONFLICT` and no gateway is contacted; `/assistant/chat` is unaffected. Ships off because the chat gateway serves no audio routes yet. |
+| `ASSISTANT_STT_API_URL` | `ASSISTANT_API_URL` | Base URL of the OpenAI-compatible speech-to-text gateway. `/v1/audio/transcriptions` is appended. Defaults to the chat gateway, so a local Speaches container is one override rather than a code change. |
+| `ASSISTANT_TTS_API_URL` | `ASSISTANT_API_URL` | Same, for text-to-speech. `/v1/audio/speech` is appended. A kokoro-fastapi or Piper container swaps in here with no contract change. |
+| `ASSISTANT_STT_MODEL` | `large-v3-turbo` | Whisper build the speech gateway is asked for. Turbo gives up ~0.8 WER points on Spanish against `large-v3` and runs several times faster — a trade nobody notices on a short clip and everybody notices in the wait. |
+| `ASSISTANT_STT_LANGUAGE` | `es` | Language forced on every transcription. Not detected: a clip this short is too little audio to identify one reliably, and every caller of this app speaks Spanish. |
+| `ASSISTANT_TTS_MODEL` | `kokoro` | Speech model the voice gateway is asked for. |
+| `ASSISTANT_TTS_VOICE` | `ef_dora` | Voice id. A variable, not a constant, because Kokoro's Spanish tier is three voices wide, phonemized through `espeak-ng` rather than its own G2P, and neutral Latin American rather than rioplatense — the value most likely to move after operators hear it. |
+| `ASSISTANT_AUDIO_MAX_BYTES` | `2097152` | Cap on an uploaded voice clip, enforced by multer before any handler runs. Roughly two minutes of browser-recorder opus, far more than the few seconds the route exists for. Its own variable rather than `SNAPSHOT_MAX_BYTES`: a frame and a spoken question have no reason to move together. |
 
 ## Docs map
 

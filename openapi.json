@@ -5195,6 +5195,367 @@
           "assistant"
         ]
       }
+    },
+    "/api/v1/assistant/transcribe": {
+      "post": {
+        "description": "Transcribes one uploaded audio clip and answers the text, so a caller can feed it straight to `POST /assistant/chat`. Whatever the browser recorder produced is accepted as-is — no transcoding, no container conversion. The language is fixed by deployment config, not detected and not a body field: a short clip is too little audio to identify one reliably. Nothing is stored. `CONFLICT` when the assistant or its voice half is not enabled on the deployment.",
+        "operationId": "AssistantController_transcribe_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantTranscribeResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — No `file` field, a file that is not audio, or one over the size limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The assistant, or its voice half, is not enabled on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The speech gateway refused the call or answered a body that carries no transcript.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The speech gateway did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Turn a spoken clip into text",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/speak": {
+      "post": {
+        "description": "Answers mp3 bytes for the text it was given, so a client can play an assistant reply instead of reading it. The voice and the model are deployment config, never body fields — swapping either is a redeploy decision, not a per-request one. Nothing is stored and nothing is cached: the same text asked twice is synthesized twice. `CONFLICT` when the assistant or its voice half is not enabled on the deployment.",
+        "operationId": "AssistantController_speak_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantSpeakDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MP3 bytes.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Empty `text`, or one over 4096 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The assistant, or its voice half, is not enabled on this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The speech gateway refused the call or answered no audio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The speech gateway did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read a text aloud",
+        "tags": [
+          "assistant"
+        ]
+      }
     }
   },
   "info": {
@@ -6437,6 +6798,31 @@
         "required": [
           "reply",
           "model"
+        ]
+      },
+      "AssistantTranscribeResponseDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The transcript, as plain text. No model field beside it, unlike the chat answer: the speech model is not echoed back because nothing on the client varies with it."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "AssistantSpeakDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "The text to read aloud, usually an assistant reply."
+          }
+        },
+        "required": [
+          "text"
         ]
       }
     }
