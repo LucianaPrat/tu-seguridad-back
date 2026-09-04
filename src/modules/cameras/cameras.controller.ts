@@ -30,13 +30,13 @@ import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { UploadTooLargeFilter } from '../../cross/errors/upload-too-large.filter';
 import { AnalysisResult } from '../pipeline/analysis-result';
 import { SnapshotDto } from '../snapshots/dto/snapshot.dto';
 import { LiveStreamDto } from '../streaming/dto/live-stream.dto';
 import { LiveStreamService } from '../streaming/live-stream.service';
 import { CameraPipelineStatus } from './camera-status.registry';
 import { CamerasService } from './cameras.service';
-import { UploadTooLargeFilter } from './upload-too-large.filter';
 import { CameraDto } from './dto/camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 

@@ -1,5 +1,5 @@
 import { ArgumentsHost, PayloadTooLargeException } from '@nestjs/common';
-import { ErrorCode } from '../../cross/common/constants';
+import { ErrorCode } from '../common/constants';
 import { UploadTooLargeFilter } from './upload-too-large.filter';
 
 describe('UploadTooLargeFilter', () => {
