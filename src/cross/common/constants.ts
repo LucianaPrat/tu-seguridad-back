@@ -83,6 +83,14 @@ export const EnvNames = {
   ASSISTANT_API_TOKEN: 'ASSISTANT_API_TOKEN',
   ASSISTANT_MODEL: 'ASSISTANT_MODEL',
   ASSISTANT_TIMEOUT_MS: 'ASSISTANT_TIMEOUT_MS',
+  ASSISTANT_VOICE_ENABLED: 'ASSISTANT_VOICE_ENABLED',
+  ASSISTANT_STT_API_URL: 'ASSISTANT_STT_API_URL',
+  ASSISTANT_TTS_API_URL: 'ASSISTANT_TTS_API_URL',
+  ASSISTANT_STT_MODEL: 'ASSISTANT_STT_MODEL',
+  ASSISTANT_STT_LANGUAGE: 'ASSISTANT_STT_LANGUAGE',
+  ASSISTANT_TTS_MODEL: 'ASSISTANT_TTS_MODEL',
+  ASSISTANT_TTS_VOICE: 'ASSISTANT_TTS_VOICE',
+  ASSISTANT_AUDIO_MAX_BYTES: 'ASSISTANT_AUDIO_MAX_BYTES',
 } as const;
 
 export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
@@ -106,7 +114,8 @@ export type EnvName = (typeof EnvNames)[keyof typeof EnvNames];
  * and whose caller is a notification provider or a person clicking a link in a
  * mail: neither of them needs more than a handful of calls a minute.
  *
- * `ASSISTANT` covers `POST /assistant/chat`, and it is the one limit here that
+ * `ASSISTANT` covers `POST /assistant/chat` and the two voice routes beside it
+ * (`transcribe`, `speak`), and it is the one limit here that
  * is about money rather than about an attacker: every call is a paid request to
  * an LLM gateway, and the global allowance of ten a second would let one bored
  * member run up a bill on a route that a person types into by hand.

@@ -342,4 +342,35 @@ export const envValidationSchema = Joi.object({
   // Longer than every other timeout here: a language model answering a
   // paragraph is slow in a way a recorder capture and a detection call are not.
   [EnvNames.ASSISTANT_TIMEOUT_MS]: Joi.number().default(30000),
+
+  // The voice half of the assistant: `POST /assistant/transcribe` and
+  // `POST /assistant/speak`. A second switch rather than a reuse of
+  // ASSISTANT_ENABLED because the chat gateway works today and the audio routes
+  // it is supposed to serve do not — chat stays on while voice stays off.
+  // ASSISTANT_ENABLED=false still kills both; this one only kills voice.
+  [EnvNames.ASSISTANT_VOICE_ENABLED]: Joi.boolean().default(false),
+  // Each defaults to the chat gateway's own URL — the escape hatch that makes
+  // this buildable while that gateway serves no audio routes: point these two at
+  // a local Speaches / kokoro-fastapi container and the routes work end to end
+  // without touching ASSISTANT_API_URL. Nothing else about the call changes, so
+  // the day the gateway grows the routes both overrides just come back out.
+  [EnvNames.ASSISTANT_STT_API_URL]: Joi.string()
+    .uri()
+    .default(Joi.ref(EnvNames.ASSISTANT_API_URL)),
+  [EnvNames.ASSISTANT_TTS_API_URL]: Joi.string()
+    .uri()
+    .default(Joi.ref(EnvNames.ASSISTANT_API_URL)),
+  [EnvNames.ASSISTANT_STT_MODEL]: Joi.string().default('large-v3-turbo'),
+  // Forced, not detected: a five-second clip is too short for reliable language
+  // identification and every caller of this app speaks Spanish.
+  [EnvNames.ASSISTANT_STT_LANGUAGE]: Joi.string().default('es'),
+  // Kokoro's Spanish tier is three voices wide and phonemized through espeak-ng
+  // rather than Kokoro's own G2P, so the voice is the value most likely to move.
+  // Both are placeholders until smoke-tested against the container actually
+  // deployed — a Piper voice swaps in here with no code change.
+  [EnvNames.ASSISTANT_TTS_MODEL]: Joi.string().default('kokoro'),
+  [EnvNames.ASSISTANT_TTS_VOICE]: Joi.string().default('ef_dora'),
+  // Roughly two minutes of opus at the bitrate a browser recorder produces, and
+  // far more than the five-to-thirty-second clip this route exists for.
+  [EnvNames.ASSISTANT_AUDIO_MAX_BYTES]: Joi.number().default(2 * 1024 * 1024),
 });
