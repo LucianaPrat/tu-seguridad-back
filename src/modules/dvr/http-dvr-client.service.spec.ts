@@ -58,6 +58,52 @@ const CHANNELS_XML = `<?xml version="1.0" encoding="UTF-8" ?>
 </VideoInputChannel>
 </VideoInputChannelList>`;
 
+const NOTIFICATIONS_URL =
+  'http://192.168.1.250/ISAPI/Event/triggers/VMD-4/notifications';
+
+/** Verbatim shape of a VMD trigger's notification list on V4.71.410. */
+const NOTIFICATIONS_XML = `<?xml version="1.0" encoding="UTF-8" ?>
+<EventTriggerNotificationList version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<EventTriggerNotification>
+<id>whiteLightOut-1</id>
+<notificationMethod>whiteLightOut</notificationMethod>
+<lightAudioOutID>1</lightAudioOutID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>record-1</id>
+<notificationMethod>record</notificationMethod>
+<videoInputID>1</videoInputID>
+</EventTriggerNotification>
+</EventTriggerNotificationList>`;
+
+/** The same list after a `center` linkage already took. */
+const NOTIFICATIONS_XML_WITH_CENTER = `<?xml version="1.0" encoding="UTF-8" ?>
+<EventTriggerNotificationList version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<EventTriggerNotification>
+<id>whiteLightOut-1</id>
+<notificationMethod>whiteLightOut</notificationMethod>
+<lightAudioOutID>1</lightAudioOutID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>record-1</id>
+<notificationMethod>record</notificationMethod>
+<videoInputID>1</videoInputID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>center</id>
+<notificationMethod>center</notificationMethod>
+</EventTriggerNotification>
+</EventTriggerNotificationList>`;
+
+/** What ISAPI answers a PUT with — accepted here, even where it silently drops an element. */
+const RESPONSE_STATUS_OK = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<requestURL>/ISAPI/Event/triggers/VMD-4/notifications</requestURL>
+<statusCode>1</statusCode>
+<statusString>OK</statusString>
+<subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+
 function axiosResponse<T>(
   data: T,
   headers: Record<string, string> = {},
@@ -489,6 +535,104 @@ describe('HttpDvrClientService', () => {
     it('refuses a stored base url that cannot be parsed', () => {
       const result = client.streamUrl({ ...connection, url: 'not a url' }, '3');
 
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+    });
+  });
+
+  describe('linkMotionEvents', () => {
+    /** Regression test: HA2 must sign the verb actually sent, not a hardcoded GET. */
+    it('signs PUT: in HA2, not GET:', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML_WITH_CENTER));
+
+      await client.linkMotionEvents(connection, '4');
+
+      const putCall = 2;
+      expect(calls()[putCall].method).toBe('put');
+      const ha1 = md5('admin:dvr-realm:dvr-password');
+      const ha2 = md5('PUT:/ISAPI/Event/triggers/VMD-4/notifications');
+      const cnonce = authField(putCall, 'cnonce');
+      expect(authField(putCall, 'nc')).toBe('00000002');
+      expect(authField(putCall, 'response')).toBe(
+        md5(`${ha1}:abc123:00000002:${cnonce}:auth:${ha2}`),
+      );
+    });
+
+    it('keeps the notifications the operator already had', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML_WITH_CENTER));
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(calls()[1].url).toBe(NOTIFICATIONS_URL);
+      const putCall = calls()[2];
+      expect(putCall.url).toBe(NOTIFICATIONS_URL);
+      expect(putCall.headers?.['Content-Type']).toBe('application/xml');
+      const body = putCall.data as string;
+      expect(body).toContain('whiteLightOut-1');
+      expect(body).toContain('record-1');
+      expect(body).toContain('<id>center</id>');
+      expect(result).toEqual({ ok: true, data: 'linked' });
+    });
+
+    it('writes nothing when the trigger already publishes', async () => {
+      respondAfterChallenge(NOTIFICATIONS_XML_WITH_CENTER);
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      // Just the listing GET (challenge + signed retry) — no PUT, no re-GET.
+      expect(httpService.request).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({ ok: true, data: 'alreadyLinked' });
+    });
+
+    it('refuses a body that is not a notification list', async () => {
+      respondAfterChallenge(
+        '<ResponseStatus><statusCode>1</statusCode></ResponseStatus>',
+      );
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(httpService.request).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+    });
+
+    it('reports a write the recorder accepted and silently dropped', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML));
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+      if (!result.ok) {
+        expect(result.message).toContain('OK');
+      }
+    });
+
+    it('refuses an externalId that is not a video input number', async () => {
+      const result = await client.linkMotionEvents(
+        connection,
+        '4/../../System/deviceInfo',
+      );
+
+      expect(httpService.request).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.VALIDATION_ERROR,

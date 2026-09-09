@@ -2451,6 +2451,149 @@
         ]
       }
     },
+    "/api/v1/dvr/event-linkage": {
+      "post": {
+        "description": "Admin only. Writes configuration into the recorder itself, which is why this is not a side effect of `PUT /dvr`: it changes what the appliance does on its own, not what this product stores. Existing notifications are preserved — the document written back to each channel motion trigger is the listing already returned by the recorder, plus one `center` entry, never a document composed from scratch, so entries such as `record-N` (record on motion) and `whiteLightOut-N` (light on motion) survive. Idempotent: a channel already publishing `center` is reported `alreadyLinked` and left untouched. Best effort, with one row per channel in the report rather than a single verdict, since these are independent writes with no transaction between them. Most important: this does not enable motion detection — a channel whose VMD grid is off is reported `linked` and stays silent, because this route only wires the notification the recorder fires once its own motion detector decides to trigger.",
+        "operationId": "DvrController_linkEvents_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Per-channel event linkage report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrEventLinkageResultDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The space has no recorder configured yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`UPSTREAM_ERROR` — The recorder refused the stored credentials, answered an error, or accepted no event linkage on any channel.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UPSTREAM_TIMEOUT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Wire recorder motion triggers to publish an event",
+        "tags": [
+          "dvr"
+        ]
+      }
+    },
     "/api/v1/snapshots/{id}": {
       "get": {
         "description": "Answers the raw image bytes of one stored frame. This is the only route that serves them: snapshots live in the database and are resolved inside the caller space, so another space's id answers 404 rather than the image. Cached `private, no-cache` with the frame sha256 as `ETag`: the live row is rewritten in place, so the same id answers different bytes and the browser has to revalidate. An unchanged frame answers 304.",
@@ -6098,6 +6241,44 @@
         },
         "required": [
           "channelCount"
+        ]
+      },
+      "DvrEventLinkageChannelDto": {
+        "type": "object",
+        "properties": {
+          "externalId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "linked",
+              "alreadyLinked",
+              "failed"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "Why the channel failed, or why it was never attempted. Absent on linked and alreadyLinked."
+          }
+        },
+        "required": [
+          "externalId",
+          "outcome"
+        ]
+      },
+      "DvrEventLinkageResultDto": {
+        "type": "object",
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DvrEventLinkageChannelDto"
+            }
+          }
+        },
+        "required": [
+          "channels"
         ]
       },
       "CameraDto": {

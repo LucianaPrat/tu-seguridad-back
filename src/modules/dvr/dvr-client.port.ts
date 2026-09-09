@@ -24,6 +24,14 @@ export interface CapturedImage {
 }
 
 /**
+ * `linked`: this call is the one that wrote the `center` trigger. `alreadyLinked`:
+ * the recorder already published it, nothing was written. Never a bare boolean —
+ * the caller reports both outcomes as success, but only one of them changed the
+ * appliance's configuration.
+ */
+export type MotionLinkage = 'linked' | 'alreadyLinked';
+
+/**
  * The seam between the product and whatever recorder a space actually owns.
  *
  * Only two operations exist because only two are needed: listing the channels
@@ -59,4 +67,43 @@ export abstract class DvrClientPort {
     connection: DvrConnection,
     externalId: string,
   ): Either<string>;
+
+  /**
+   * Wires one channel's motion detector to actually publish something this
+   * product can see: a `center` entry in that trigger's own notification list.
+   * ISAPI's VMD trigger fires internally the moment the grid decides motion
+   * happened, but nothing leaves the box unless a notification method is
+   * registered for it — `center` is the one this recorder answers a poll
+   * against, the same way `record` tells it to write to its own disk and
+   * `whiteLightOut` tells it to flash a light. Without this write the polling
+   * loop has nothing to observe, no matter how well the grid is tuned.
+   *
+   * The first method on this port that writes to the appliance rather than
+   * reading it, and it belongs behind the port for the same reason `streamUrl`
+   * does: the trigger id (`VMD-<port>`), the notification vocabulary (`center`,
+   * `record`, `whiteLightOut`, ...) and — the dangerous part — that a write here
+   * REPLACES the recorder's whole notification list for that trigger rather than
+   * patching it, are this vendor's dialect. A caller above this port has no
+   * business knowing any of that, the same way it has no business knowing the
+   * two-part channel id `captureSnapshot` builds.
+   *
+   * Returns which of two things happened rather than a bare success because the
+   * two are not the same event: `alreadyLinked` means the recorder was already
+   * publishing `center` and nothing was written, `linked` means this call is the
+   * one that changed the recorder's stored configuration. A caller auditing
+   * "did we just modify hardware state" cannot get that answer from a boolean.
+   *
+   * Per channel, not per recorder, because eight channels are eight independent
+   * writes to eight independent trigger resources with no transaction spanning
+   * them. A recorder can accept six of eight and refuse the other two — refuse
+   * silently, even, since this hardware can answer `statusCode 1 / OK` and still
+   * drop the element it does not implement — and the caller has to be able to
+   * say which channel is which. A per-recorder signature could only report the
+   * whole space as one verdict, and would have hidden exactly the failure mode
+   * this hardware produces.
+   */
+  abstract linkMotionEvents(
+    connection: DvrConnection,
+    externalId: string,
+  ): Promise<Either<MotionLinkage>>;
 }

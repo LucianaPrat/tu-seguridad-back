@@ -18,6 +18,7 @@ import {
   DiscoveredChannel,
   DvrClientPort,
   DvrConnection,
+  MotionLinkage,
 } from './dvr-client.port';
 
 /**
@@ -47,6 +48,30 @@ const rtspPath = (port: string, stream: string) =>
 
 /** A BNC port number, and the only shape allowed to reach a request path. */
 const CHANNEL_PORT = /^\d{1,2}$/;
+
+/**
+ * One motion-detection trigger per BNC port, and a PUT here REPLACES its whole
+ * notification list. Composing a document from scratch would silently destroy
+ * whatever the operator already wired — `record-N` (record on motion),
+ * `whiteLightOut-N` (light on motion) — so `linkMotionEvents` always amends the
+ * list this same GET returns rather than building one. `GET .../capabilities`
+ * on this trigger answers `notSupport` on V4.71.410, so there is no capability
+ * discovery to build, and a device that cannot honour an element still answers
+ * `statusCode 1 / OK`, so a re-GET is the only proof a write took.
+ */
+const notificationsPath = (port: string) =>
+  `/ISAPI/Event/triggers/VMD-${port}/notifications`;
+
+const CENTER_NOTIFICATION_METHOD = 'center';
+const NOTIFICATION_LIST_CLOSE = '</EventTriggerNotificationList>';
+
+/** The exact block a DVR-208G-M1 accepted and persisted on V4.71.410. */
+const CENTER_TRIGGER_BLOCK = [
+  '<EventTriggerNotification>',
+  '<id>center</id>',
+  '<notificationMethod>center</notificationMethod>',
+  '</EventTriggerNotification>',
+].join('\n');
 
 /**
  * `videoInputEnabled` reads `true` on all eight ports whether a camera is
@@ -304,6 +329,82 @@ export class HttpDvrClientService extends DvrClientPort {
     );
   }
 
+  async linkMotionEvents(
+    connection: DvrConnection,
+    externalId: string,
+  ): Promise<Either<MotionLinkage>> {
+    if (!CHANNEL_PORT.test(externalId)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR channel is not a video input number',
+      );
+    }
+
+    const path = notificationsPath(externalId);
+    const operation = `DVR event linkage for VMD-${externalId}`;
+    const requestConfig: AxiosRequestConfig = {
+      responseType: 'text',
+      timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
+      maxContentLength: MAX_LISTING_BYTES,
+    };
+
+    try {
+      const listing = await this.request<string>(
+        connection,
+        'get',
+        path,
+        requestConfig,
+      );
+      if (hasCenterNotification(listing.data)) {
+        return buildData('alreadyLinked');
+      }
+
+      // ponytail: a self-closed empty list is refused rather than
+      // reconstructed — never seen on V4.71.410; splice the closing tag in if
+      // a recorder ever produces one.
+      const closingTag = listing.data.lastIndexOf(NOTIFICATION_LIST_CLOSE);
+      if (closingTag === -1) {
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: response was not a notification list`,
+        );
+      }
+
+      const merged =
+        listing.data.slice(0, closingTag) +
+        CENTER_TRIGGER_BLOCK +
+        '\n' +
+        listing.data.slice(closingTag);
+
+      const written = await this.request<string>(connection, 'put', path, {
+        ...requestConfig,
+        data: merged,
+        headers: { 'Content-Type': 'application/xml' },
+      });
+
+      const verify = await this.request<string>(
+        connection,
+        'get',
+        path,
+        requestConfig,
+      );
+      if (!hasCenterNotification(verify.data)) {
+        const statusString = tagText(written.data, 'statusString') ?? 'unknown';
+        const subStatusCode =
+          tagText(written.data, 'subStatusCode') ?? 'unknown';
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: DVR reported ${statusString}/${subStatusCode} ` +
+            'but did not persist the linkage',
+        );
+      }
+
+      return buildData('linked');
+    } catch (error) {
+      return this.mapError(error, operation);
+    }
+  }
+
   /**
    * ISAPI answers only to HTTP digest. The challenge is cached per recorder, so
    * the usual call is one signed request rather than the 401 handshake plus the
@@ -485,6 +586,23 @@ function tagText(block: string, tag: string): string | undefined {
     .exec(block)?.[1]
     .replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => ENTITIES[entity])
     .trim();
+}
+
+/**
+ * `tagText` returns the first match only. A notification list carries one
+ * `<notificationMethod>` per trigger entry, and asking "is `center` anywhere
+ * in this document" means reading every one of them, not just the first.
+ */
+function matchAll(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g'))].map(
+    (match) => match[1].trim(),
+  );
+}
+
+function hasCenterNotification(xml: string): boolean {
+  return matchAll(xml, 'notificationMethod').includes(
+    CENTER_NOTIFICATION_METHOD,
+  );
 }
 
 /**

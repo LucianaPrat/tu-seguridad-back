@@ -26,6 +26,7 @@ import {
   DiscoveredChannel,
   DvrClientPort,
   DvrConnection,
+  MotionLinkage,
 } from '../../src/modules/dvr/dvr-client.port';
 import { DetectPersonsResponse } from '../../src/modules/face-auth-client/detect-persons-response';
 import { FaceAuthClientService } from '../../src/modules/face-auth-client/face-auth-client.service';
@@ -99,6 +100,15 @@ export class FakeDvrClientService extends DvrClientPort {
     return buildData(
       `rtsp://fake/${encodeURIComponent(connection.username)}/${externalId}`,
     );
+  }
+
+  linkMotionEvents(): Promise<Either<MotionLinkage>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'DVR event linkage failed'),
+      );
+    }
+    return Promise.resolve(buildData('linked'));
   }
 }
 
