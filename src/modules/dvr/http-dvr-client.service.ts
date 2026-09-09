@@ -6,6 +6,7 @@ import { Counter } from 'prom-client';
 import { CameraStatus } from '@prisma/client';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { createHash, randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
@@ -106,6 +107,21 @@ const isTransient = (error: unknown): boolean =>
   error.response === undefined &&
   TRANSIENT_CODES.has(error.code ?? '');
 
+/**
+ * Releases a response nobody is going to read.
+ *
+ * A `401` that only tells us the challenge is stale is abandoned twice below,
+ * and with a buffered body that costs nothing. A streamed body is a socket:
+ * unread, it is never returned to the agent and never freed, so a recorder
+ * answering `401` leaks one connection per attempt. Handled here rather than in
+ * the streaming caller because the leak belongs to whoever drops the response.
+ */
+const discard = (response: AxiosResponse<unknown>): void => {
+  if (response.data instanceof Readable) {
+    response.data.destroy();
+  }
+};
+
 @Injectable()
 export class HttpDvrClientService extends DvrClientPort {
   /**
@@ -130,11 +146,16 @@ export class HttpDvrClientService extends DvrClientPort {
     connection: DvrConnection,
   ): Promise<Either<DiscoveredChannel[]>> {
     try {
-      const response = await this.get<string>(connection, CHANNELS_PATH, {
-        responseType: 'text',
-        timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
-        maxContentLength: MAX_LISTING_BYTES,
-      });
+      const response = await this.request<string>(
+        connection,
+        'get',
+        CHANNELS_PATH,
+        {
+          responseType: 'text',
+          timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
+          maxContentLength: MAX_LISTING_BYTES,
+        },
+      );
 
       const channels = parseChannels(response.data);
       // A recorder with zero video inputs does not exist, so an empty roster
@@ -224,8 +245,9 @@ export class HttpDvrClientService extends DvrClientPort {
     );
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await this.get<ArrayBuffer>(
+        return await this.request<ArrayBuffer>(
           connection,
+          'get',
           snapshotPath(externalId),
           {
             responseType: 'arraybuffer',
@@ -293,9 +315,16 @@ export class HttpDvrClientService extends DvrClientPort {
    * recorder has expired, or a recorder that restarted, answers `401` to the
    * signed request; that drops the entry and falls through to a fresh
    * challenge, so the stale case costs what every case used to.
+   *
+   * The verb is a parameter because the digest signature covers it: HA2 is
+   * `METHOD:uri`, so a write signed as a read is refused, and refused as a
+   * `401` — which this method reads as a stale nonce and `mapError` reports as
+   * a rejected password. A caller re-typing a working credential is the symptom
+   * that hardcoding `GET` produces, so it is not hardcoded.
    */
-  private async get<T>(
+  private async request<T>(
     connection: DvrConnection,
+    method: 'get' | 'put',
     path: string,
     overrides: AxiosRequestConfig,
   ): Promise<AxiosResponse<T>> {
@@ -309,13 +338,16 @@ export class HttpDvrClientService extends DvrClientPort {
       const authorization = buildAuthorization(
         cached.header,
         connection,
+        method,
         target,
         cached.count,
       );
       if (authorization) {
         const signed = await firstValueFrom(
-          this.httpService.get<T>(url, {
+          this.httpService.request<T>({
             ...overrides,
+            method,
+            url,
             headers: { ...overrides.headers, Authorization: authorization },
             validateStatus: (status) =>
               status === 401 || (status >= 200 && status < 300),
@@ -324,6 +356,7 @@ export class HttpDvrClientService extends DvrClientPort {
         if (signed.status !== 401) {
           return signed;
         }
+        discard(signed);
       }
       // Expired nonce, restarted recorder, or a challenge this build cannot
       // sign any more. Either way the cached one is worthless.
@@ -331,8 +364,10 @@ export class HttpDvrClientService extends DvrClientPort {
     }
 
     const challenge = await firstValueFrom(
-      this.httpService.get<T>(url, {
+      this.httpService.request<T>({
         ...overrides,
+        method,
+        url,
         validateStatus: (status) =>
           status === 401 || (status >= 200 && status < 300),
       }),
@@ -340,9 +375,16 @@ export class HttpDvrClientService extends DvrClientPort {
     if (challenge.status !== 401) {
       return challenge;
     }
+    discard(challenge);
 
     const header = challenge.headers['www-authenticate'] as string | undefined;
-    const authorization = buildAuthorization(header, connection, target, 1);
+    const authorization = buildAuthorization(
+      header,
+      connection,
+      method,
+      target,
+      1,
+    );
     // Nothing to sign means the password can never be presented at all, which
     // is a different problem from a password the recorder looked at and
     // refused. Saying so beats reporting a credential rejection that did not
@@ -355,8 +397,10 @@ export class HttpDvrClientService extends DvrClientPort {
     }
 
     return firstValueFrom(
-      this.httpService.get<T>(url, {
+      this.httpService.request<T>({
         ...overrides,
+        method,
+        url,
         headers: { ...overrides.headers, Authorization: authorization },
       }),
     );
@@ -452,6 +496,7 @@ function tagText(block: string, tag: string): string | undefined {
 function buildAuthorization(
   header: string | undefined,
   connection: DvrConnection,
+  method: string,
   uri: string,
   count: number,
 ): string | undefined {
@@ -470,7 +515,7 @@ function buildAuthorization(
   const hash = (value: string) =>
     createHash(algorithm).update(value).digest('hex');
   const ha1 = hash(`${connection.username}:${realm}:${connection.password}`);
-  const ha2 = hash(`GET:${uri}`);
+  const ha2 = hash(`${method.toUpperCase()}:${uri}`);
   const cnonce = randomBytes(8).toString('hex');
   const qop = params.qop
     ?.split(',')

@@ -83,7 +83,7 @@ const md5 = (value: string) => createHash('md5').update(value).digest('hex');
 describe('HttpDvrClientService', () => {
   const maxBytes = 1000;
 
-  let httpService: { get: jest.Mock };
+  let httpService: { request: jest.Mock };
   let configService: { get: jest.Mock; getOrThrow: jest.Mock };
   let envValues: Record<string, number | string>;
   let client: HttpDvrClientService;
@@ -93,19 +93,21 @@ describe('HttpDvrClientService', () => {
     data: T,
     headers: Record<string, string> = {},
   ) {
-    httpService.get
+    httpService.request
       .mockReturnValueOnce(digestChallenge())
       .mockReturnValueOnce(axiosResponse(data, headers));
   }
 
   /** `mock.calls` is untyped; every read of a recorded request goes through here. */
-  function calls(): [string, AxiosRequestConfig][] {
-    return httpService.get.mock.calls as [string, AxiosRequestConfig][];
+  function calls(): AxiosRequestConfig[] {
+    return (httpService.request.mock.calls as [AxiosRequestConfig][]).map(
+      ([config]) => config,
+    );
   }
 
   /** Pulls one field out of the Authorization header this client just built. */
   function authField(call: number, name: string): string | undefined {
-    const header = calls()[call][1].headers?.Authorization as string;
+    const header = calls()[call].headers?.Authorization as string;
     return new RegExp(`[ ,]${name}="?([^",]+)"?`).exec(header)?.[1];
   }
 
@@ -113,7 +115,7 @@ describe('HttpDvrClientService', () => {
   let captureRetries: { inc: jest.Mock };
 
   beforeEach(() => {
-    httpService = { get: jest.fn() };
+    httpService = { request: jest.fn() };
     envValues = {
       [EnvNames.DVR_TIMEOUT_MS]: 5000,
       [EnvNames.SNAPSHOT_TIMEOUT_MS]: 5000,
@@ -142,9 +144,9 @@ describe('HttpDvrClientService', () => {
 
       await client.discoverChannels(connection);
 
-      expect(httpService.get).toHaveBeenCalledTimes(2);
+      expect(httpService.request).toHaveBeenCalledTimes(2);
       // The first request has to survive its own 401 to read the challenge.
-      const validateStatus = calls()[0][1].validateStatus as (
+      const validateStatus = calls()[0].validateStatus as (
         status: number,
       ) => boolean;
       expect(validateStatus(401)).toBe(true);
@@ -190,7 +192,7 @@ describe('HttpDvrClientService', () => {
 
     /** A second scheme reuses parameter names; the Digest ones have to survive. */
     it('keeps the digest parameters when another scheme follows them', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge(
             'Digest realm="dvr-realm", qop="auth", nonce="abc123", ' +
@@ -206,7 +208,7 @@ describe('HttpDvrClientService', () => {
 
     /** RFC 2069: no qop means no nonce count and no client nonce in the hash. */
     it('falls back to the unqualified response when the challenge omits qop', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge('Digest realm="dvr-realm", nonce="abc123"'),
         )
@@ -222,7 +224,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('hashes with SHA-256 when the recorder asks for it', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge(
             'Digest realm="dvr-realm", qop="auth", nonce="abc123", ' +
@@ -244,13 +246,13 @@ describe('HttpDvrClientService', () => {
     });
 
     it('skips the retry when the recorder offers no digest challenge', async () => {
-      httpService.get.mockReturnValueOnce(
+      httpService.request.mockReturnValueOnce(
         digestChallenge('Basic realm="dvr-realm"'),
       );
 
       const result = await client.discoverChannels(connection);
 
-      expect(httpService.get).toHaveBeenCalledTimes(1);
+      expect(httpService.request).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.UPSTREAM_ERROR,
@@ -259,7 +261,7 @@ describe('HttpDvrClientService', () => {
 
     /** Only the signed attempt getting refused says the password is wrong. */
     it('maps a credential rejection on the signed retry to VALIDATION_ERROR', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(401));
 
@@ -278,8 +280,8 @@ describe('HttpDvrClientService', () => {
 
       await client.discoverChannels(connection);
 
-      expect(calls()[0][0]).toBe(CHANNELS_URL);
-      expect(calls()[1][0]).toBe(CHANNELS_URL);
+      expect(calls()[0].url).toBe(CHANNELS_URL);
+      expect(calls()[1].url).toBe(CHANNELS_URL);
     });
 
     /**
@@ -335,7 +337,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('maps a timeout to UPSTREAM_TIMEOUT', async () => {
-      httpService.get.mockReturnValueOnce(
+      httpService.request.mockReturnValueOnce(
         axiosFailure(undefined, 'ECONNABORTED'),
       );
 
@@ -354,10 +356,10 @@ describe('HttpDvrClientService', () => {
 
       await client.captureSnapshot(connection, '4');
 
-      expect(calls()[1][0]).toBe(
+      expect(calls()[1].url).toBe(
         'http://192.168.1.250/ISAPI/Streaming/channels/401/picture?snapShotImageType=JPEG',
       );
-      expect(calls()[1][1]).toMatchObject({
+      expect(calls()[1]).toMatchObject({
         maxContentLength: maxBytes,
       });
     });
@@ -411,7 +413,7 @@ describe('HttpDvrClientService', () => {
         '4/../../System/deviceInfo',
       );
 
-      expect(httpService.get).not.toHaveBeenCalled();
+      expect(httpService.request).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.VALIDATION_ERROR,
@@ -499,24 +501,24 @@ describe('HttpDvrClientService', () => {
       axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
 
     it('signs the second capture straight away, with no second challenge', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         .mockReturnValueOnce(jpeg());
 
       await client.captureSnapshot(connection, '3');
-      const afterFirst = httpService.get.mock.calls.length;
+      const afterFirst = httpService.request.mock.calls.length;
       const second = await client.captureSnapshot(connection, '3');
 
       expect(second.ok).toBe(true);
       // First capture: challenge plus signed retry. Second: signed only.
       expect(afterFirst).toBe(2);
-      expect(httpService.get).toHaveBeenCalledTimes(3);
+      expect(httpService.request).toHaveBeenCalledTimes(3);
     });
 
     /** `nc` must move for as long as one nonce is reused, or the server refuses. */
     it('increments the nonce count on the reused challenge', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         .mockReturnValueOnce(jpeg());
@@ -529,7 +531,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('re-challenges when the recorder refuses the cached nonce', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         // Second capture: the cached nonce is stale.
@@ -541,7 +543,7 @@ describe('HttpDvrClientService', () => {
       const second = await client.captureSnapshot(connection, '3');
 
       expect(second.ok).toBe(true);
-      expect(httpService.get).toHaveBeenCalledTimes(5);
+      expect(httpService.request).toHaveBeenCalledTimes(5);
       expect(authField(4, 'nc')).toBe('00000001');
     });
   });
@@ -551,7 +553,7 @@ describe('HttpDvrClientService', () => {
       axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
 
     it('retries a dropped connection and returns the second frame', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(undefined, 'ECONNRESET'))
         .mockReturnValueOnce(digestChallenge())
@@ -565,7 +567,7 @@ describe('HttpDvrClientService', () => {
 
     /** An answer is an answer. Asking again gets the same one. */
     it('does not retry a credential rejection', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(401));
 
@@ -576,7 +578,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('does not retry an error the recorder answered with', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(500));
 
@@ -587,7 +589,7 @@ describe('HttpDvrClientService', () => {
 
     it('gives up at the configured cap and reports the last failure', async () => {
       envValues[EnvNames.DVR_CAPTURE_RETRIES] = 2;
-      httpService.get.mockReturnValue(axiosFailure(undefined, 'ETIMEDOUT'));
+      httpService.request.mockReturnValue(axiosFailure(undefined, 'ETIMEDOUT'));
 
       const result = await client.captureSnapshot(connection, '3');
 
