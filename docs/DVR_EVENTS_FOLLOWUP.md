@@ -93,7 +93,20 @@ This class of box caps concurrent authenticated sessions in the single digits. A
 switch being off, and has no cadence escalation because no tick consumes the re-arm. It is not
 blocked, and it is not described anywhere but here.
 
-### 6. Two pre-existing issues were found and not fixed
+### 6. Two review findings were declined
+
+Both from the review on PR #97, both real, both judged not worth their fix today.
+
+- **`findPollableBySpace` runs before the debounce check**, so a burst costs five queries where it
+  costs one capture. Short-circuiting earlier needs a second map keyed by channel, because the
+  debounce is keyed by `cameraId` and the channel is all the notification carries — a second piece of
+  per-camera state to save one indexed query against eight rows per space. The `ponytail:` note above
+  the lookup already records the ceiling and the upgrade path.
+- **A 1.3-second real sleep in `dvr-event.listener.spec.ts`.** `node:timers/promises` is captured at
+  import and Jest's fake timers do not intercept it, so the reconnect backoff can only be driven with
+  a real wait. Documented at the test itself.
+
+### 7. Two pre-existing issues were found and not fixed
 
 - `.env.example` shipped `ENTER_CONSECUTIVE_POLLS=2`, removed from the schema by `plans/05` T03, and
   omitted its replacements. **Fixed in this branch** since it sat in the block being edited.
