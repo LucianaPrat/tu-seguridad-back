@@ -18,13 +18,18 @@ import { FaceAuthClientService } from '../src/modules/face-auth-client/face-auth
  */
 
 /**
- * Floor between detect calls. The upstream is IP-throttled and undocumented:
- * measured on 2026-09-02, 250 ms spacing drew a `429` after ~17 requests and
- * then a penalty window of 15–45 s, while 12 s ran clean. Five is the floor
- * this script will not go under whatever the caller asks for.
+ * Floor between detect calls. The upstream limit is a stated **1 request per
+ * second per IP**, and the shape measured on 2026-09-02 agrees with it: 250 ms
+ * spacing drew a `429` after ~17 requests and then a penalty window of
+ * 15–45 s, while 12 s ran clean — a ~17-token bucket refilling at 1/s. The
+ * floor is 1.5 s, half again the stated rate, and this script will not go
+ * under it whatever the caller asks for. It was 5 s while the limit was
+ * unknown, which turned a 40-frame event into eight minutes; at 2 s the same
+ * event takes about eighty seconds, which is what makes a ten-event sample
+ * affordable.
  */
-const MIN_GAP_MS = 5000;
-const DEFAULT_GAP_MS = 12000;
+const MIN_GAP_MS = 1500;
+const DEFAULT_GAP_MS = 2000;
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
 
