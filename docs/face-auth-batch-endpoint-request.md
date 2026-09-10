@@ -84,10 +84,10 @@ files: frame_040.jpg
 
 Opcionales, como campos del form:
 
-| Campo | Tipo | Para qué |
-| --- | --- | --- |
+| Campo                  | Tipo                     | Para qué                                                                                                                                                          |
+| ---------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stopOnFirstDetection` | boolean, default `false` | Procesar en orden y cortar en la primera imagen con detecciones. Las restantes vuelven con `skipped: true`. **Es la que más nos sirve y más cómputo les ahorra.** |
-| `minDetScore` | number | Filtrar del lado de ustedes. Hoy filtramos nosotros; si cortan antes, viaja menos payload. |
+| `minDetScore`          | number                   | Filtrar del lado de ustedes. Hoy filtramos nosotros; si cortan antes, viaja menos payload.                                                                        |
 
 **Response** — un resultado por imagen, en el mismo orden en que se enviaron:
 
@@ -99,7 +99,8 @@ Opcionales, como campos del form:
       "filename": "frame_001.jpg",
       "status": "ok",
       "personsDetected": false,
-      "imageWidth": 960, "imageHeight": 1088,
+      "imageWidth": 960,
+      "imageHeight": 1088,
       "persons": []
     },
     {
@@ -107,13 +108,22 @@ Opcionales, como campos del form:
       "filename": "frame_002.jpg",
       "status": "ok",
       "personsDetected": true,
-      "imageWidth": 960, "imageHeight": 1088,
-      "persons": [{
-        "detScore": 0.91,
-        "bbox": { "topLeft": {"x":417,"y":163}, "bottomRight": {"x":596,"y":682} },
-        "bboxNorm": { "topLeft": {"x":0.32,"y":0.22}, "bottomRight": {"x":0.46,"y":0.94} },
-        "anchor": { "x": 0.396, "y": 0.947 }
-      }]
+      "imageWidth": 960,
+      "imageHeight": 1088,
+      "persons": [
+        {
+          "detScore": 0.91,
+          "bbox": {
+            "topLeft": { "x": 417, "y": 163 },
+            "bottomRight": { "x": 596, "y": 682 }
+          },
+          "bboxNorm": {
+            "topLeft": { "x": 0.32, "y": 0.22 },
+            "bottomRight": { "x": 0.46, "y": 0.94 }
+          },
+          "anchor": { "x": 0.396, "y": 0.947 }
+        }
+      ]
     },
     {
       "index": 2,
@@ -144,6 +154,29 @@ validación de borde que ya tenemos.
    como N, también sirve, pero necesitamos saberlo para pacear bien.
 6. **`429` con `Retry-After`.** Hoy no lo mandan y asumimos 5 segundos a ciegas. Con batch el costo
    de equivocarse es mayor.
+
+---
+
+## 4bis. Detalles del contrato ya confirmados por ustedes
+
+Anotados el 2026-09-10, mientras construyen el endpoint. Los dejamos escritos acá para que nuestra
+implementación los respete y para que quede registro de qué asumimos.
+
+1. **Éxito devuelve `201`, no `200`.** Nuestro cliente valida el rango 2xx y no una igualdad, así que
+   ya funciona — pero queda dicho para que nadie escriba `=== 200` al agregar el método batch.
+2. **`stopOnFirstDetection` corta al final de una tanda de 8**, no en la imagen exacta. Consecuencias
+   que asumimos: con 8 imágenes o menos nunca hay `skipped` ni ahorro; pasado el primer hit se
+   procesan hasta 7 imágenes más; y los tamaños útiles de request son múltiplos de 8. Nos sirve igual
+   — nuestra ventana recomendada es de 24 frames, o sea tres tandas, y por lo que medimos el hit suele
+   caer en la primera.
+
+## 4ter. Un dato nuevo que refuerza el punto 4.2
+
+Midiendo 40 frames de un evento real el 2026-09-10, **uno volvió con HTTP 500** — 2,5% de falla, y
+justo en el medio del grupo de frames con mejor detección (entre un 0,634 y un 0,809). Si ese request
+hubiera sido un batch que falla entero en vez de por imagen, habríamos perdido las otras 39.
+
+Es exactamente el caso del punto 4.2, ahora con evidencia.
 
 ---
 
