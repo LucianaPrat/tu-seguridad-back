@@ -35,6 +35,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   that account to whoever holds it. It belongs in the gitignored `.env` and nowhere else — not in
   `.env.example`, not in a commit, not in a PR description. Gmail also caps sends at roughly 500/day,
   which is a testing tool, not a delivery channel.
+
 - `MAIL_ENABLED=true` in a developer `.env` used to be enough to make `npm run test:e2e` send real
   mail: `test/setup-e2e-env.ts` loads `dotenv/config`, and the e2e harness overrides
   `FaceAuthClientService` and `DvrClientPort` but not `CredentialDeliveryPort`. That setup file now
@@ -44,7 +45,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 
 - **The confidence tag needs a font on the host.** `sharp` composites the detection boxes from an
   SVG, and the `%` label inside it is rendered by librsvg through fontconfig — which uses the
-  *host's* fonts, not something the package ships. A deploy target with no font packages installed
+  _host's_ fonts, not something the package ships. A deploy target with no font packages installed
   draws the green box and the filled tag and leaves the tag empty. `fc-list | head` on the host says
   whether there is anything to render with; `fonts-dejavu-core` is enough. The failure is silent and
   only visible in the delivered mail, which is why the label sits on a filled rectangle: an empty
@@ -82,7 +83,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   [`ops/otel-collector/`](../ops/otel-collector/README.md). `scripts/install.sh` once, then a `.env`
   with `OTELCOL_MODE=debug`, then `scripts/start.sh`. Debug mode prints every span with
   `verbosity: detailed` **and** ships it to Grafana Cloud, so `pm2 logs
-  tu-seguridad-otel-collector` is the whole tool for reading one trace. `OTELCOL_MODE=test` needs no
+tu-seguridad-otel-collector` is the whole tool for reading one trace. `OTELCOL_MODE=test` needs no
   Grafana credentials at all.
 - **`OTEL_ENABLED=true` in the app's `.env` is the other half.** With the collector up and the switch
   off, or the switch on and no collector, nothing arrives — and the second case looks worse than it
@@ -127,9 +128,19 @@ running it, not by reading a datasheet.
   send back the recorder's own document with the one block added. The endpoint does exactly that.
 - **`<statusCode>1</statusCode>` is not proof.** This firmware answers `OK` to a write whose elements
   it silently dropped. Only a re-`GET` shows whether the change stuck.
-- **There is no capability discovery.** `GET /ISAPI/Event/triggers/VMD-1/capabilities` answers
-  `statusCode 4` / `Invalid Operation` / `notSupport`. Do not build anything that asks the recorder
-  what it supports; it will not answer.
+- **Capability discovery exists, but not on the trigger endpoint.**
+  `GET /ISAPI/Event/triggers/VMD-1/capabilities` answers `statusCode 4` / `Invalid Operation` /
+  `notSupport`, so nothing can ask which notification methods a trigger accepts. Other endpoints do
+  answer — `GET /ISAPI/System/Video/inputs/channels/<N>/motionDetection/capabilities` returns the
+  allowed values inline, e.g. `<targetType opt="human,vehicle">`. Check per endpoint rather than
+  assuming either way.
+- **Motion detection classifies targets, and the only two values are `human` and `vehicle`.**
+  `<targetType>human</targetType>` is accepted and persists. An empty `targetType` is answered `OK`
+  and then vanishes from the document — the silent-drop behaviour again — so there is no verified way
+  to ask for unclassified pixel motion. Narrowing to `human` is not obviously a win: the recorder's
+  classifier is the first of two filters in front of the detector, and a person it fails to classify
+  produces no event at all, so the frame is never looked at. Measure the event mix per channel over a
+  night before dropping `vehicle`.
 - **The digest signature covers the HTTP verb.** HA2 is `METHOD:uri`, so a write signed as a read is
   refused — and refused as a `401`, which reads like a rejected password rather than a malformed
   signature. If a new ISAPI write ever fails with a credential error against credentials that work,
