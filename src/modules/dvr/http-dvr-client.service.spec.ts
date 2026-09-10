@@ -1,7 +1,9 @@
 import { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { of, throwError } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { DvrEvent } from './dvr-client.port';
 import { HttpDvrClientService } from './http-dvr-client.service';
 
 const connection = {
@@ -103,6 +105,41 @@ const RESPONSE_STATUS_OK = `<?xml version="1.0" encoding="UTF-8"?>
 <statusString>OK</statusString>
 <subStatusCode>ok</subStatusCode>
 </ResponseStatus>`;
+
+const EVENT_STREAM_HEADERS = {
+  'content-type': 'multipart/mixed; boundary=--boundary',
+};
+
+/** Verbatim idle heartbeat: a DVR-208G-M1 repeats this every ~9.5s. */
+const HEARTBEAT_ALERT = `<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<ipAddress>192.168.1.250</ipAddress><portNo>80</portNo><protocol>HTTP</protocol>
+<macAddress>3c:1b:f8:38:ba:23</macAddress><channelID>0</channelID>
+<dateTime>2026-09-09T17:02:40</dateTime><activePostCount>0</activePostCount>
+<eventType>videoloss</eventType><eventState>inactive</eventState>
+<eventDescription>videoloss alarm</eventDescription>
+</EventNotificationAlert>`;
+
+/** Same envelope, a motion pulse on channel 4. */
+const MOTION_ALERT = `<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<ipAddress>192.168.1.250</ipAddress><portNo>80</portNo><protocol>HTTP</protocol>
+<macAddress>3c:1b:f8:38:ba:23</macAddress><channelID>4</channelID>
+<dateTime>2026-09-09T17:02:45</dateTime><activePostCount>1</activePostCount>
+<eventType>VMD</eventType><eventState>active</eventState>
+<eventDescription>Motion Alarm</eventDescription>
+</EventNotificationAlert>`;
+
+/** `Readable.from` defaults to object mode; `objectMode: false` is what makes `setEncoding` behave. */
+function textStream(chunks: string[]): Readable {
+  return Readable.from(chunks, { objectMode: false });
+}
+
+async function collect(events: AsyncIterable<DvrEvent>): Promise<DvrEvent[]> {
+  const collected: DvrEvent[] = [];
+  for await (const event of events) {
+    collected.push(event);
+  }
+  return collected;
+}
 
 function axiosResponse<T>(
   data: T,
@@ -756,6 +793,200 @@ describe('HttpDvrClientService', () => {
         channel: '3',
         outcome: 'success',
       });
+    });
+  });
+
+  describe('openEventStream', () => {
+    it('yields one event for a document split across three chunks, including a split inside the closing tag', async () => {
+      const closeTag = '</EventNotificationAlert>';
+      // Both cuts land inside the last 25 characters of the document, i.e.
+      // inside `closeTag` itself.
+      const splitA = MOTION_ALERT.length - closeTag.length + 5;
+      const splitB = MOTION_ALERT.length - 3;
+      respondAfterChallenge(
+        textStream([
+          MOTION_ALERT.slice(0, splitA),
+          MOTION_ALERT.slice(splitA, splitB),
+          MOTION_ALERT.slice(splitB),
+        ]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('yields two events in order for two documents arriving in one chunk', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT + MOTION_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('classifies the verbatim idle heartbeat as keepalive', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+        ]);
+      }
+    });
+
+    it('classifies VMD + active + channelID 4 as motion on channel 4', async () => {
+      respondAfterChallenge(textStream([MOTION_ALERT]), EVENT_STREAM_HEADERS);
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('discards boundary lines and junk between parts and still parses the following document', async () => {
+      const junk =
+        '\r\n--boundary\r\nContent-Type: application/xml\r\n' +
+        'Content-Length: 512\r\n\r\n';
+      respondAfterChallenge(
+        textStream([
+          HEARTBEAT_ALERT + junk + MOTION_ALERT + '\r\n--boundary--\r\n',
+        ]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('throws when a document never closes past the cap', async () => {
+      respondAfterChallenge(
+        textStream(['<EventNotificationAlert' + 'x'.repeat(1_000_001)]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).rejects.toThrow(
+          'DVR event stream sent no complete notification',
+        );
+      }
+    });
+
+    it('destroys the stream when the consumer breaks out of the loop early', async () => {
+      const body = textStream([HEARTBEAT_ALERT, MOTION_ALERT]);
+      respondAfterChallenge(body, EVENT_STREAM_HEADERS);
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        for await (const event of result.data) {
+          expect(event).toEqual({ kind: 'keepalive' });
+          break;
+        }
+        expect(body.destroyed).toBe(true);
+      }
+    });
+
+    it('returns UPSTREAM_ERROR and destroys the body for a non-multipart response', async () => {
+      const body = textStream(['ignored']);
+      respondAfterChallenge(body, { 'content-type': 'text/html' });
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+      expect(body.destroyed).toBe(true);
+    });
+
+    it('requests the stream with no maxContentLength cap', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      await client.openEventStream(connection, new AbortController().signal);
+
+      const signedCall = calls()[1];
+      expect(signedCall.responseType).toBe('stream');
+      expect(signedCall.timeout).toBe(0);
+      expect(signedCall).not.toHaveProperty('maxContentLength');
+    });
+
+    /** The leak guard from d451562, exercised here for the first time on a stream body. */
+    it('destroys a 401 challenge body that arrives as a stream before the signed retry', async () => {
+      const challengeBody = textStream(['nope']);
+      httpService.request
+        .mockReturnValueOnce(
+          axiosResponse(challengeBody, { 'www-authenticate': CHALLENGE }, 401),
+        )
+        .mockReturnValueOnce(
+          axiosResponse(textStream([HEARTBEAT_ALERT]), EVENT_STREAM_HEADERS),
+        );
+
+      await client.openEventStream(connection, new AbortController().signal);
+
+      expect(challengeBody.destroyed).toBe(true);
     });
   });
 });

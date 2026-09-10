@@ -197,4 +197,26 @@ describe('envValidationSchema', () => {
       expect(value[EnvNames.FACE_AUTH_CLIENT_TOKEN]).toBe('change-me');
     });
   });
+
+  // Deliberate exception to "this file covers only production-gated secrets":
+  // schema logic with a branch no consumer can observe from outside Joi.
+  describe('POLLING_PASSIVE_SECONDS', () => {
+    it('defaults to 15 with DVR_EVENTS_ENABLED off', () => {
+      const { error, value } = validate({
+        [EnvNames.DVR_EVENTS_ENABLED]: 'false',
+      });
+
+      expect(error).toBeUndefined();
+      expect(value[EnvNames.POLLING_PASSIVE_SECONDS]).toBe(15);
+    });
+
+    it('defaults to 300 with DVR_EVENTS_ENABLED on', () => {
+      const { error, value } = validate({
+        [EnvNames.DVR_EVENTS_ENABLED]: 'true',
+      });
+
+      expect(error).toBeUndefined();
+      expect(value[EnvNames.POLLING_PASSIVE_SECONDS]).toBe(300);
+    });
+  });
 });

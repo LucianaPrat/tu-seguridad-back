@@ -133,12 +133,54 @@ export const envValidationSchema = Joi.object({
   // a full-frame view needs the native resolution.
   [EnvNames.DVR_RTSP_STREAM]: Joi.string().valid('main', 'sub').default('sub'),
 
+  // Event-driven capture is opt-in like POLLING_ENABLED and MEDIAMTX_ENABLED —
+  // it opens a socket to the recorder and holds it open, and a developer who
+  // pulls this branch must not start talking to an appliance because the
+  // process booted. Off, the poll alone drives captures exactly as before.
+  [EnvNames.DVR_EVENTS_ENABLED]: Joi.boolean().default(false),
+  // Floor between two event-driven captures of the same camera. The recorder
+  // repeats `VMD active` for as long as motion lasts and never sends an
+  // "inactive" — one person walking past produced 5 pulses in under 10 seconds
+  // — and the scheduler's in-flight guard refuses only *overlap*, not
+  // *repetition*, so without this floor one person is five captures and five
+  // detection POSTs. Default 5 matches the detection rung: the event path never
+  // polls a camera faster than the ladder already would once somebody is
+  // confirmed in frame. A plain default, deliberately not a `Joi.ref` to
+  // POLLING_DETECTION_SECONDS, so lowering the poll cannot silently loosen this
+  // too. The floor is 1, not 0, because 0 against an IP-throttled detector is
+  // the `429` storm this repo has already had (`plans/05` §2.5).
+  [EnvNames.DVR_EVENTS_DEBOUNCE_SECONDS]: pollCadenceSeconds(5),
+  // Silence that means the connection is dead. The recorder's idle heartbeat
+  // lands roughly every 9.5 seconds, so this is three missed beats; the floor
+  // sits above one beat so a value cannot be set that reconnects between two
+  // heartbeats that were never actually missed. This is the only liveness
+  // signal a half-open socket gives.
+  [EnvNames.DVR_EVENTS_IDLE_SECONDS]: Joi.number()
+    .integer()
+    .min(5)
+    .max(3600)
+    .default(30),
+
   [EnvNames.POLLING_ENABLED]: Joi.boolean().default(false),
   // The poll cadence ladder. A camera moves between the three depending on what
   // its last frame showed, and the scheduler's single interval runs at the
   // shortest of them — there is deliberately no separate base-tick knob to get
-  // out of step with these.
-  [EnvNames.POLLING_PASSIVE_SECONDS]: pollCadenceSeconds(15),
+  // out of step with these. With DVR_EVENTS_ENABLED on, the event listener
+  // drives captures and this passive rung becomes a watchdog rather than the
+  // primary path, so its own default moves to 300 — a flat change to 300 would
+  // regress any deployment that upgrades without turning events on, 20× less
+  // responsive with nothing replacing the poll. POLLING_ACTIVE_SECONDS and
+  // POLLING_DETECTION_SECONDS are unchanged, and the tick still runs at
+  // min(...) of the three — 5 seconds, so the base tick does not move.
+  [EnvNames.POLLING_PASSIVE_SECONDS]: Joi.number()
+    .integer()
+    .min(1)
+    .max(3600)
+    .when(EnvNames.DVR_EVENTS_ENABLED, {
+      is: true,
+      then: Joi.number().default(300),
+      otherwise: Joi.number().default(15),
+    }),
   [EnvNames.POLLING_ACTIVE_SECONDS]: pollCadenceSeconds(10),
   [EnvNames.POLLING_DETECTION_SECONDS]: pollCadenceSeconds(5),
   // How many cameras one tick polls at a time. The tick used to await each

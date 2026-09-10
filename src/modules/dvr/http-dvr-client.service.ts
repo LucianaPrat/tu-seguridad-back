@@ -18,6 +18,7 @@ import {
   DiscoveredChannel,
   DvrClientPort,
   DvrConnection,
+  DvrEvent,
   MotionLinkage,
 } from './dvr-client.port';
 
@@ -48,6 +49,8 @@ const rtspPath = (port: string, stream: string) =>
 
 /** A BNC port number, and the only shape allowed to reach a request path. */
 const CHANNEL_PORT = /^\d{1,2}$/;
+
+const EVENT_STREAM_PATH = '/ISAPI/Event/notification/alertStream';
 
 /**
  * One motion-detection trigger per BNC port, and a PUT here REPLACES its whole
@@ -405,6 +408,57 @@ export class HttpDvrClientService extends DvrClientPort {
     }
   }
 
+  async openEventStream(
+    connection: DvrConnection,
+    signal: AbortSignal,
+  ): Promise<Either<AsyncIterable<DvrEvent>>> {
+    try {
+      const response = await this.request<Readable>(
+        connection,
+        'get',
+        EVENT_STREAM_PATH,
+        {
+          responseType: 'stream',
+          signal,
+          // Zero, not omitted: a non-zero axios timeout only appears to
+          // guard this call, because axios disarms it once the response
+          // headers land, and this response's headers land almost
+          // immediately while the body keeps talking for as long as the
+          // recorder is plugged in. The caller arms its own watchdog,
+          // covering connect, headers and idle, from one timer instead.
+          timeout: 0,
+          // maxContentLength deliberately absent — not Infinity, absent.
+          // Verified against axios 1.18.1 with a fake infinite multipart
+          // server: omitted and Infinity both stream indefinitely, but a
+          // numeric cap does not, because axios wraps a stream response in
+          // a generator that throws once the running total passes it —
+          // `maxContentLength: 1000` killed a real stream at 894 bytes with
+          // "maxContentLength size of 1000 exceeded". Reusing
+          // MAX_LISTING_BYTES here, the obvious way to "harden" this later,
+          // would drop the socket after roughly five hours at this
+          // recorder's ~525-byte, 9.5s heartbeat — overnight, looking
+          // exactly like a network fault.
+        },
+      );
+
+      const contentType =
+        (response.headers['content-type'] as string | undefined) ?? '';
+      // Prefix match, not equality: this firmware answers `multipart/mixed`,
+      // other ISAPI firmware answers `multipart/x-mixed-replace`.
+      if (!contentType.startsWith('multipart/')) {
+        response.data.destroy();
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          'DVR event stream response was not multipart',
+        );
+      }
+
+      return buildData(readAlerts(response.data));
+    } catch (error) {
+      return this.mapError(error, 'DVR event stream');
+    }
+  }
+
   /**
    * ISAPI answers only to HTTP digest. The challenge is cached per recorder, so
    * the usual call is one signed request rather than the 401 handshake plus the
@@ -570,6 +624,83 @@ function parseChannels(xml: string): DiscoveredChannel[] {
       },
     ];
   });
+}
+
+const ALERT_OPEN = '<EventNotificationAlert';
+const ALERT_CLOSE = '</EventNotificationAlert>';
+
+/**
+ * Sanity check, not a size policy: the scan in `readAlerts` drops everything
+ * between documents, so the buffer only ever holds one partial notification.
+ * This cap exists for the one recorder that opens a document and never
+ * closes it.
+ *
+ * ponytail: same regex-over-XML ceiling as parseChannels, same upgrade path.
+ */
+const MAX_ALERT_BYTES = 1_000_000;
+
+/**
+ * Reads the multipart alert stream by finding `<EventNotificationAlert>`
+ * documents by their own open and close tags rather than parsing MIME. The
+ * boundary line, the per-part headers and `Content-Length` are three ways to
+ * be wrong about a body that is findable by its own tags, and skipping all
+ * three turns a chunk split mid-tag into nothing worse than a buffer that
+ * has not closed yet.
+ */
+async function* readAlerts(stream: Readable): AsyncGenerator<DvrEvent> {
+  stream.setEncoding('utf8'); // StringDecoder semantics: a multi-byte char split across two TCP segments stays one char
+  let buffer = '';
+  try {
+    for await (const chunk of stream as AsyncIterable<string>) {
+      buffer += chunk;
+      for (;;) {
+        const start = buffer.indexOf(ALERT_OPEN);
+        if (start === -1) {
+          // Between documents. Keep only what could be a half-received opening
+          // tag, so a binary part cannot accumulate.
+          buffer = buffer.slice(1 - ALERT_OPEN.length);
+          break;
+        }
+        const end = buffer.indexOf(ALERT_CLOSE, start);
+        if (end === -1) {
+          buffer = buffer.slice(start);
+          break;
+        }
+        yield classifyAlert(buffer.slice(start, end + ALERT_CLOSE.length));
+        buffer = buffer.slice(end + ALERT_CLOSE.length);
+      }
+      if (buffer.length > MAX_ALERT_BYTES) {
+        throw new Error('DVR event stream sent no complete notification');
+      }
+    }
+  } finally {
+    stream.destroy(); // covers the consumer breaking out of its loop as well as an abort
+  }
+}
+
+/**
+ * Reads exactly three fields off one alert document. Deliberately not read:
+ * `dateTime` (a recorder clock this product does not trust and does not need
+ * — the capture stamps itself), `activePostCount` (debouncing on it would
+ * trust the recorder to reset it), `targetType` (the recorder's own
+ * human/vehicle classification is the *reason* this trigger is worth having,
+ * not a field to branch on).
+ *
+ * `channelID` is `0` on the heartbeat, and `CHANNEL_PORT` matches `0` — it is
+ * the `eventType`/`eventState` conditions that reject the heartbeat, not the
+ * channel, and that is intended: zero gets no special case.
+ */
+function classifyAlert(document: string): DvrEvent {
+  const channelId = tagText(document, 'channelID');
+  if (
+    channelId !== undefined &&
+    CHANNEL_PORT.test(channelId) &&
+    tagText(document, 'eventType')?.toLowerCase() === 'vmd' &&
+    tagText(document, 'eventState')?.toLowerCase() === 'active'
+  ) {
+    return { kind: 'motion', externalId: channelId };
+  }
+  return { kind: 'keepalive' };
 }
 
 const ENTITIES: Record<string, string> = {

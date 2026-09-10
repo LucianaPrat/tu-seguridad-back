@@ -8,5 +8,8 @@ export const MetricNames = {
   PIPELINE_PERSONS_DETECTED_TOTAL: 'pipeline_persons_detected_total',
   DVR_CAPTURE_TOTAL: 'dvr_capture_total',
   DVR_CAPTURE_RETRY_TOTAL: 'dvr_capture_retry_total',
+  DVR_EVENT_MOTION_TOTAL: 'dvr_event_motion_total',
+  DVR_EVENT_STREAMS_ACTIVE: 'dvr_event_streams_active',
+  DVR_EVENT_STREAM_DROPS_TOTAL: 'dvr_event_stream_drops_total',
   RETENTION_ROWS_DELETED_TOTAL: 'retention_rows_deleted_total',
 } as const;

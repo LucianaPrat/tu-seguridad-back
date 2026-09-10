@@ -32,6 +32,18 @@ export interface CapturedImage {
 export type MotionLinkage = 'linked' | 'alreadyLinked';
 
 /**
+ * One notification off the recorder's event stream, reduced to the one
+ * distinction a caller can act on. `keepalive` covers every notification
+ * that is not an active motion trigger — the idle heartbeat this recorder
+ * repeats every few seconds included — because it exists to answer one
+ * question: is the connection still there. This recorder never announces
+ * that motion ended, so nothing else here is an edge case, and silence on
+ * the iterable is the only failure signal a caller gets.
+ */
+export type DvrEvent =
+  { kind: 'motion'; externalId: string } | { kind: 'keepalive' };
+
+/**
  * The seam between the product and whatever recorder a space actually owns.
  *
  * Only two operations exist because only two are needed: listing the channels
@@ -106,4 +118,35 @@ export abstract class DvrClientPort {
     connection: DvrConnection,
     externalId: string,
   ): Promise<Either<MotionLinkage>>;
+
+  /**
+   * Opens the recorder's event push channel and hands back one `DvrEvent`
+   * per notification for as long as the connection lives. `keepalive` is
+   * every notification that is not an active motion trigger, the idle
+   * heartbeat included, and it exists because the caller has no other way
+   * to tell "connected and quiet" from "socket dead" — this recorder never
+   * signals the end of motion, so nothing on the wire marks that moment,
+   * and going quiet is the only thing that ever will.
+   *
+   * The iterable ends when the recorder closes the connection and throws
+   * when the transport breaks; wrapping every notification in its own
+   * `Either` would invent a failure mode per notification when there is
+   * only one thing that can actually fail here: the connection itself.
+   * `Either` covers that one failure, at the point where opening the stream
+   * either succeeds or does not.
+   *
+   * `signal` is the only way to stop it. A consumer parked awaiting the
+   * next notification is inside its own loop and cannot break out on its
+   * own; cancellation has to reach in from outside.
+   *
+   * Returns `AsyncIterable<DvrEvent>` rather than a `Readable` so that VMD,
+   * multipart and `node:stream` all stay inside the adapter that already
+   * owns this vendor's dialect, the same reason `linkMotionEvents` keeps
+   * the trigger vocabulary out of this file. A transport type has no
+   * business in the port.
+   */
+  abstract openEventStream(
+    connection: DvrConnection,
+    signal: AbortSignal,
+  ): Promise<Either<AsyncIterable<DvrEvent>>>;
 }

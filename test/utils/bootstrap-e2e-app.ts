@@ -26,6 +26,7 @@ import {
   DiscoveredChannel,
   DvrClientPort,
   DvrConnection,
+  DvrEvent,
   MotionLinkage,
 } from '../../src/modules/dvr/dvr-client.port';
 import { DetectPersonsResponse } from '../../src/modules/face-auth-client/detect-persons-response';
@@ -109,6 +110,15 @@ export class FakeDvrClientService extends DvrClientPort {
       );
     }
     return Promise.resolve(buildData('linked'));
+  }
+
+  openEventStream(): Promise<Either<AsyncIterable<DvrEvent>>> {
+    if (!this.reachable) {
+      return Promise.resolve(
+        buildError(ErrorCode.UPSTREAM_ERROR, 'DVR event stream failed'),
+      );
+    }
+    return Promise.resolve(buildData((async function* () {})()));
   }
 }
 

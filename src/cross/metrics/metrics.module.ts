@@ -74,6 +74,36 @@ const metricProviders = [
     help: 'Detection outcomes by camera: persons, empty (upstream found none), filtered (all below threshold)',
     labelNames: ['cameraId', 'outcome'],
   }),
+  // What the recorder pushed and what was done with it. The gap between
+  // `triggered` and the rest is the whole point of the debounce: one person
+  // walking past produced five `active` pulses on one channel with no
+  // `inactive` between them, so without this a debounce set too wide and a
+  // recorder that stopped publishing look identical.
+  //
+  // Channel and not cameraId, because `unmatched` has no camera to name. Eight
+  // BNC ports at three outcomes is the same ceiling as `dvr_capture_total`.
+  makeCounterProvider({
+    name: MetricNames.DVR_EVENT_MOTION_TOTAL,
+    help: 'Recorder motion notifications by channel and what the listener did with them',
+    labelNames: ['channel', 'outcome'],
+  }),
+  // Unlabelled, like `websocket_connections_active`: the useful reading is
+  // against the number of recorders configured, and a spaceId label is tenant
+  // cardinality on a gauge for an estate of one box. The space is on the log
+  // line either side of every change.
+  makeGaugeProvider({
+    name: MetricNames.DVR_EVENT_STREAMS_ACTIVE,
+    help: 'Recorder event streams currently connected',
+  }),
+  // A gauge scraped every fifteen seconds cannot see a connection that flaps
+  // every three, and flapping is how a long-lived socket fails. The reason
+  // separates the idle watchdog firing — the recorder went quiet with the
+  // socket still open — from a socket that broke on its own.
+  makeCounterProvider({
+    name: MetricNames.DVR_EVENT_STREAM_DROPS_TOTAL,
+    help: 'Recorder event stream disconnections, by reason',
+    labelNames: ['reason'],
+  }),
   // Labelled by sweep, three series. A sweep that silently stops deleting is
   // indistinguishable from one with nothing left to delete unless the counter
   // is there to flatten.

@@ -148,8 +148,15 @@ export class PollingScheduler
    * it expects onto the camera's status, so anything reaching here is
    * unexpected — and letting it propagate would abandon the rest of this
    * worker's share of the batch and reject the whole tick.
+   *
+   * Public because it is also the entry point for an event-driven poll, which
+   * needs precisely what it already is: run `pollOnce` and absorb whatever it
+   * could not. A caller reaching for `pollOnce` directly would own a catch that
+   * either drops the unexpected failure or re-implements the status write and
+   * the cadence re-arm below, and would diverge from the tick the first time
+   * one of them changed.
    */
-  private async pollGuarded(spaceId: string, camera: Camera): Promise<void> {
+  async pollGuarded(spaceId: string, camera: Camera): Promise<void> {
     try {
       await this.pollOnce(spaceId, camera);
     } catch (error) {
