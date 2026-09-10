@@ -105,3 +105,47 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 - **Stacked-PR CI can show stale red.** Reopening a PR (or force-pushing while its base branch changed) can leave `gh pr checks` pointing at an old run computed on a **stale merge-ref** — e.g. a run that still executed a workflow step the current branch no longer has. Current merge-ref is what matters: `git fetch origin '+refs/pull/<n>/merge:refs/remotes/pr/<n>/merge'` and inspect it. To force a genuinely fresh run on the correct merge-ref, change the head sha (`git commit --amend --no-edit` + force-push), not just reopen.
 
 Agent duties are central ([`.standards/AGENTS.md`](../.standards/AGENTS.md)); this repo's session workflow and plan-tracker convention are in [`AGENTS.md`](../AGENTS.md) and [`CLAUDE.md`](../CLAUDE.md).
+
+## DVR motion events (recorder side)
+
+Verified against a Hikvision DVR-208G-M1 on firmware V4.71.410. Everything here was learned by
+running it, not by reading a datasheet.
+
+- **`POST /dvr/event-linkage` wires the notification. It does not enable motion detection.** These are
+  two independent settings, and this is the most confusing failure the feature can produce: a channel
+  whose detection grid is off is reported `linked` and stays silent forever, with nothing visible from
+  the API to say why. Check it per channel:
+  `curl --digest -u USER:PASS 'http://DVR/ISAPI/System/Video/inputs/channels/<N>/motionDetection'` —
+  you want `<enabled>true</enabled>` and a grid that actually covers the frame.
+- **Check which BNC ports carry video before concluding anything is broken.** The first walk test on
+  this recorder failed for the dullest possible reason: channel 1 is an empty socket. `resDesc` reads
+  `NO VIDEO` on an unwired port —
+  `curl --digest -u USER:PASS 'http://DVR/ISAPI/System/Video/inputs/channels' | grep -E '<id>|resDesc'`.
+- **A `PUT` to a trigger's `/notifications` replaces the whole list.** A document composed from scratch
+  silently deletes the operator's record-on-motion and light-on-motion linkages — the recorder answers
+  `OK` and quietly stops recording when somebody walks in. A hand-rolled `curl` must `GET` first and
+  send back the recorder's own document with the one block added. The endpoint does exactly that.
+- **`<statusCode>1</statusCode>` is not proof.** This firmware answers `OK` to a write whose elements
+  it silently dropped. Only a re-`GET` shows whether the change stuck.
+- **There is no capability discovery.** `GET /ISAPI/Event/triggers/VMD-1/capabilities` answers
+  `statusCode 4` / `Invalid Operation` / `notSupport`. Do not build anything that asks the recorder
+  what it supports; it will not answer.
+- **The digest signature covers the HTTP verb.** HA2 is `METHOD:uri`, so a write signed as a read is
+  refused — and refused as a `401`, which reads like a rejected password rather than a malformed
+  signature. If a new ISAPI write ever fails with a credential error against credentials that work,
+  this is the first thing to check.
+
+### Two axios findings, measured
+
+Both were reproduced against a fake infinite multipart server, not inferred.
+
+- **`maxContentLength` is fatal on a long-lived stream.** On axios 1.18.1, `maxContentLength: 1000`
+  killed the connection at 894 bytes with `maxContentLength size of 1000 exceeded`; omitted and
+  `Infinity` both streamed indefinitely. axios wraps a stream response in a generator that throws once
+  the running total passes the cap. Reusing `MAX_LISTING_BYTES` on `alertStream` — the obvious way to
+  "harden" it later — would drop the socket after roughly five hours at this recorder's ~525-byte,
+  9.5-second heartbeat: overnight, silently, looking exactly like a network fault. The byte cap belongs
+  in the parser instead, and it is there.
+- **An axios `timeout` is disarmed once the response headers land.** It therefore does not protect a
+  stream that later goes quiet. `DvrEventListener` arms its own watchdog before the connect, covering
+  the TCP connect, the headers and the idle period from one timer.

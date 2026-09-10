@@ -29,6 +29,7 @@ Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md),
 | Error tracking | `@sentry/node`, opt-in via `SENTRY_DSN`, unexpected 500s only, secrets scrubbed |
 | Metrics | `@willsoto/nestjs-prometheus` — `GET /metrics`, token-gated, HTTP/throttler/WebSocket/poll metrics |
 | Live video | MediaMTX sidecar restreams the recorder RTSP as HLS, on demand, no transcoding — opt-in via `MEDIAMTX_ENABLED` |
+| Recorder events | The DVR pushes motion over ISAPI `alertStream`; the poll drops to a watchdog — opt-in via `DVR_EVENTS_ENABLED` |
 | Help assistant | Chat against an OpenAI-compatible LLM gateway with a curated product context — opt-in via `ASSISTANT_ENABLED`. Speech in and out behind a second switch, `ASSISTANT_VOICE_ENABLED` |
 | Resilience | `opossum` circuit breaker around face-auth upstream (in-memory, no infra) |
 | API contract | committed `openapi.json`, exported by `scripts/export-openapi.ts`, diff-checked in CI |
@@ -195,7 +196,7 @@ Call wrapped in [`opossum`](https://github.com/nodeshift/opossum) **circuit brea
 5. Each entry becomes an alert candidate carrying the camera label as it read at detection time, the alert level of its area, how many anchors were inside (`personsDetected`) and the highest `detScore` among them (`confidence`) — `Camera.alertType` in full mode, the zone's own in partial. An alert stores the frame as a `snapshots` BLOB of its own, kept as evidence, with every detection above the threshold outlined in green and tagged with its `detScore` (`annotate-frame.ts`) — burnt into the pixels, so the alert email and the dashboard show the same annotated frame and no mail client can drop the overlay. A frame the encoder cannot read is stored unannotated, and a write the re-encoded bytes are refused for is retried with the frame as captured — an alert with no evidence at all is the worse outcome; the polling scheduler also refreshes the camera's single live row, at most once per `SNAPSHOT_LIVE_WRITE_SECONDS`, whether it alerted or not. Persistence, WebSocket broadcast and channel delivery arrive with the alert-event domain.
 6. `CameraStatusRegistry` records outcome (`lastPolledAt`, `lastSuccessAt`, `lastErrorCode`, `lastLatencyMs`, `lastPersonsDetected`, per-area occupancy) — surfaced at `GET /cameras/:id/status`.
 
-`PollingScheduler` drives steps 1–6 automatically when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable, then polling the due ones `POLLING_CONCURRENCY` at a time rather than one after another (see [Poll cadence](#poll-cadence)). A camera whose previous poll is still in flight is counted as skipped, not queued behind it, and one that throws unexpectedly is logged and recorded on its own status rather than ending the tick — otherwise a single bad camera would stop every remaining camera and space from being monitored. After detection has run, the tick refreshes that camera's live frame — at most once per `SNAPSHOT_LIVE_WRITE_SECONDS`, see [Snapshot storage](#snapshot-storage); the write is deliberately last and its failure only recorded on the camera's status — a thumbnail must never be able to suppress an alert. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable.
+`PollingScheduler` drives steps 1–6 automatically when `POLLING_ENABLED=true` (off by default in dev): one interval for the whole process, re-reading each tick which spaces own a recorder and which of their cameras are pollable, then polling the due ones `POLLING_CONCURRENCY` at a time rather than one after another (see [Poll cadence](#poll-cadence)). A camera whose previous poll is still in flight is counted as skipped, not queued behind it, and one that throws unexpectedly is logged and recorded on its own status rather than ending the tick — otherwise a single bad camera would stop every remaining camera and space from being monitored. After detection has run, the tick refreshes that camera's live frame — at most once per `SNAPSHOT_LIVE_WRITE_SECONDS`, see [Snapshot storage](#snapshot-storage); the write is deliberately last and its failure only recorded on the camera's status — a thumbnail must never be able to suppress an alert. `POST /cameras/:id/analyze` runs the same `processImage` synchronously against an uploaded image — the manual path when the DVR itself is unreachable. With `DVR_EVENTS_ENABLED` on, the recorder's own motion notifications drive step 1 as well, debounced per camera by `DVR_EVENTS_DEBOUNCE_SECONDS` — see [Recorder-pushed events](#recorder-pushed-events). They enter the same `pollGuarded` the tick uses, so there is one capture path and not two.
 
 The score a person must reach to count is `PipelineDefaults.CONFIDENCE_THRESHOLD` (`0.45`) unless the camera carries its own `confidenceThreshold`, set on `PUT /cameras/:id` and stored to three decimals. A camera pointed at a street and one pointed at a hallway need different numbers, and until the column existed tuning one detuned the other. `null` restores the deployment default.
 
@@ -205,7 +206,7 @@ How often a camera is polled follows what its last frame showed, so a quiet came
 
 | Level | Env var | Default | When |
 | --- | --- | --- | --- |
-| `passive` | `POLLING_PASSIVE_SECONDS` | `15` | no person in the frame |
+| `passive` | `POLLING_PASSIVE_SECONDS` | `15`, `300` with events on | no person in the frame |
 | `active` | `POLLING_ACTIVE_SECONDS` | `10` | person in the frame, no zone pending |
 | `detection` | `POLLING_DETECTION_SECONDS` | `5` | a monitored area is entered, or its exit is not confirmed yet |
 
@@ -220,6 +221,49 @@ A poll that fails — unreachable recorder, upstream detection error, or a skip 
 A `monitorMode = full` camera never sees `active`: its whole frame is the monitored area, so any person it detects is already a detection. The current level is on `GET /cameras/:id/status` as `pollLevel` / `pollIntervalSeconds`, and each real transition logs one line.
 
 A camera can also carry a **floor of its own**, `minPollSeconds` on `PUT /cameras/:id`. It raises that camera's interval and nothing else: the effective wait is the larger of the ladder's rung and the floor, so a floor can only ever slow one camera down. A value under the ladder's shortest rung is refused rather than clamped — accepted, it would do nothing, and an operator who set `2` where the ladder already polls at `5` deserves to be told. `null` puts the camera back on the ladder alone.
+
+### Recorder-pushed events
+
+The recorder can report motion itself instead of waiting to be asked. `DVR_EVENTS_ENABLED` turns it
+on; off, nothing connects to the recorder and the poll above is the only thing that captures, exactly
+as before this existed.
+
+`DvrEventListener` (`src/modules/pipeline/dvr-event.listener.ts`) holds one long-lived connection per
+recorder to ISAPI `alertStream` and calls the same `pollGuarded` the tick calls. Everything after the
+decision to fire — capture, detection, cadence, live frame, metrics — is unchanged.
+
+Three properties of the transport are worth knowing before reading the code:
+
+- **The recorder never says motion ended.** There is no "inactive" for a motion event, so nothing here
+  is an edge; every notification is a bare pulse.
+- **It repeats while motion lasts.** One person walking past a channel produced four to five
+  notifications in under ten seconds. `DVR_EVENTS_DEBOUNCE_SECONDS` is what collapses that into one
+  capture, and it is not optional — the scheduler's in-flight guard refuses *overlap*, not
+  *repetition*, so without it that walk is five captures and five detection calls upstream.
+- **The idle heartbeat pauses while the recorder is busy reporting.** So the watchdog behind
+  `DVR_EVENTS_IDLE_SECONDS` is fed by every notification, not only the quiet ones.
+
+**The recorder has to be publishing first, and that is two separate things.** `POST /dvr/event-linkage`
+writes the notification linkage onto every motion trigger — but motion detection itself must be
+enabled per channel on the recorder, and a channel whose detection grid is off is reported linked and
+stays silent forever. See [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).
+
+**The poll is retuned, not retired.** A push transport has no acknowledgement, no replay, and a socket
+that dies without saying so; a recorder rebooting at 03:00 stops publishing and reports nothing. The
+passive rung becomes a five-minute watchdog rather than being switched off, which bounds that failure
+at five minutes per camera. `POLLING_ACTIVE_SECONDS` and `POLLING_DETECTION_SECONDS` do not move, so a
+camera with somebody in frame still escalates exactly as it did.
+
+**The base tick does not move either.** It follows the *shortest* rung, which is still
+`POLLING_DETECTION_SECONDS` at five seconds. Raising the passive rung does not slow the scheduler down;
+it only means a quiet camera sits out fifty-nine ticks instead of two, and a sat-out tick costs one
+`Map.get` before any recorder request, detection call or live-frame write.
+
+Three metrics come with it: `dvr_event_motion_total{channel,outcome}` — `triggered`, `debounced` or
+`unmatched` — plus `dvr_event_streams_active` and `dvr_event_stream_drops_total{reason}`. The gap
+between `triggered` and `debounced` is the whole point of the window; a channel whose `motion_total`
+flatlines is a channel that stopped publishing, and that is the signal worth an alert rule, because
+with the watchdog at five minutes nothing else reports it.
 
 ## Alert emails
 
@@ -412,11 +456,12 @@ Infra concerns handled by frameworks below. **Every external integration is opt-
 | Metrics | `@willsoto/nestjs-prometheus` + `prom-client` | `src/cross/metrics/` | `GET /metrics` (`VERSION_NEUTRAL`, `@Public()`, behind `MetricsTokenGuard`), Node default metrics plus four of this app's own: HTTP request duration by method/route/status (`HitInterceptor`), throttler 429s (`MetricsThrottlerGuard`, which is the global `APP_GUARD`), active authenticated WebSocket clients (`EventsGateway`, counted only past every handshake rejection), camera poll count + duration labelled by `cameraId`, and what the detector answered per camera (`pipeline_persons_detected_total{cameraId,outcome}`, `outcome` one of `persons`, `empty` — the upstream found nobody — and `filtered` — it found somebody this camera's threshold dropped). The gap between `persons` and the alerts actually raised is the unconfirmed-sighting rate the entry window exists to close. Always on; the token guard is what gates it, so an unset `METRICS_TOKEN` in dev leaves the route open. The route is excluded from the `api` global prefix and from `HitInterceptor`, so a scrape leaves no `hits` row. |
 | Credential mail | `nodemailer` | `src/modules/auth/smtp-credential-delivery.service.ts`, `auth.module.ts` | Opt-in via `MAIL_ENABLED`. Off = `LoggedCredentialDeliveryService`, the pre-transport behaviour, no relay contacted. Sends invitation/magic-link/password-reset links built from `APP_BASE_URL`. A send failure is logged and absorbed — never a 500, and never a signal that distinguishes a registered from an unregistered address. Neither the token nor the link is ever logged. |
 | Live video | MediaMTX (external) | `src/modules/streaming/` | Opt-in via `MEDIAMTX_ENABLED`. Off = one `CONFLICT`, nothing contacted. On = the path is registered through the Control API with `sourceOnDemand`, so the recorder RTSP is pulled only while somebody watches and dropped when the last reader leaves. This process never touches a media packet. See [`docs/decisions/002-hls-live-streaming.md`](docs/decisions/002-hls-live-streaming.md). |
+| Recorder events | Hikvision ISAPI `alertStream` | `src/modules/pipeline/dvr-event.listener.ts`, `src/modules/dvr/` | Opt-in via `DVR_EVENTS_ENABLED`. Off = nothing connects to the recorder and the poll alone captures. On = one long-lived connection per recorder, motion debounced per camera by `DVR_EVENTS_DEBOUNCE_SECONDS`, and the passive poll rung drops to a five-minute watchdog. The recorder must be publishing first: `POST /dvr/event-linkage`, **plus** motion detection enabled per channel — see [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md). See [Recorder-pushed events](#recorder-pushed-events). |
 | Assistant voice | OpenAI-compatible speech gateways (Whisper in, Kokoro out) | `src/modules/assistant/` | Opt-in via `ASSISTANT_VOICE_ENABLED` on top of `ASSISTANT_ENABLED`. Off = one `CONFLICT`, no gateway contacted. URLs default to the chat gateway's, so a local container is an override rather than a code change. Pass-through both ways: nothing stored, nothing cached. See [Help assistant](#help-assistant). |
 | Help assistant | An OpenAI-compatible LLM gateway | `src/modules/assistant/` | Opt-in via `ASSISTANT_ENABLED`. Off = one `CONFLICT`, no gateway contacted. On = one request per question, carrying `assistant-context.ts` as the system message. Stateless, so nothing is persisted and nothing is swept. See [Help assistant](#help-assistant). |
 | Resilience | `opossum` circuit breaker | `src/modules/face-auth-client/face-auth-client.service.ts` | See [face-auth contract](#face-auth-upstream-contract). In-memory, no infra dependency. |
 | Health | `@nestjs/terminus` | `src/modules/health/` | `/health/live` (process), `/health/ready` (DB ping — LB readiness), `/health/dependencies` (face-auth reachability, **separate** so degraded upstream never marks app not-ready). All `@Public()`, version-neutral. |
-| Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
+| Graceful shutdown | Nest lifecycle hooks | `events.gateway.ts`, `polling.scheduler.ts`, `dvr-event.listener.ts`, `prisma.service.ts` | On `SIGINT`/`SIGTERM` (`enableShutdownHooks()`): scheduler stops issuing new poll ticks, the event listener aborts its open recorder connections, WS server disconnects clients cleanly **before** Prisma disconnects — Nest's reverse teardown order (feature modules before shared `DataModule`) guarantees it. In-flight polls left to finish, not killed. |
 | API contract | `@nestjs/swagger` + a committed artifact | `scripts/export-openapi.ts`, `openapi.json` | `openapi.json` — diffable, version-controlled artifact. CI regenerates it, fails on drift — run `npm run openapi:export` and commit after any DTO/route change. Live UI still at `/docs`, raw at `/docs-json`. Bearer is a document-level security requirement, and `@Public()` emits the per-operation opt-out alongside the guard metadata — so the contract cannot claim a public route needs a token, or the reverse. |
 | Supply chain | `npm audit` + Dependabot | `.github/workflows/pr-tests.yml`, `.github/dependabot.yml` | CI gate `npm audit --omit=dev --audit-level=critical` blocks only production-dependency **critical** vulnerabilities (dev tooling doesn't ship; high transitive advisories churn constantly). Dependabot opens weekly grouped update PRs against `develop` for the rest. |
 
@@ -556,6 +601,6 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
   - A per-event screen in the frontend. The alert mail's *View the alert* button carries the id, and `/events/:id` lands on the history list until one exists.
   - Snapshot retention and the move to object storage ([Snapshot storage](#snapshot-storage)), plus alert-event retention and partitioning.
   - Detection cooldown and deduplication — a camera that keeps seeing someone raises one alert per hysteresis cycle, and nothing suppresses a burst.
-  - Poll versus DVR push/WebSocket. Both must drive the same discovery, status and snapshot services; the schema does not pick a winner.
+  - Poll versus DVR push/WebSocket. **Decided: both.** The recorder pushes motion over ISAPI `alertStream` and the poll stays on as a watchdog at `POLLING_PASSIVE_SECONDS` — a push transport with no acknowledgement, no replay and a socket that dies silently is not something to bet a security product on alone. Both drive the same discovery, status and snapshot services, as this bullet always required. See [Recorder-pushed events](#recorder-pushed-events).
 - **04** — Per-track events (`track_id`) once face-auth exposes tracking; `PERSON_UPDATED_IN_ZONE`; movement-vs-presence rules; authorization of known persons; alert schedules.
 - DVR snapshot reliability (retries, backoff, reconnection metrics), per-camera FPS tuning, per-camera confidence threshold (today the pipeline uses one `PipelineDefaults.CONFIDENCE_THRESHOLD` for every camera).
