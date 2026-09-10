@@ -220,4 +220,23 @@ Hik-Connect app's per-event clip is a fixed 2 m 10 s pad from the event timestam
 boundary. `POST /ISAPI/ContentMgmt/logSearch` refused four different body shapes with
 `Invalid XML Content`; whether a device log is reachable is unverified. **The analysis window is ours
 to choose** — which is an advantage, since continuous recording is what allows sampling the seconds
-_before_ a notification, where the best frames turn out to be.
+around a notification rather than only after it.
+
+**And it will not give you a still image from the past, however much it looks like it does.**
+`GET /ISAPI/Streaming/channels/<track>/picture?playbackTime=<ISO>` answers **`200 image/jpeg`** with a
+perfectly valid photograph — of _now_. Asked for 2026-09-09T23:11:22Z in daylight hours the next day,
+it returned the live frame, burned-in clock reading the current time. The parameter is silently
+dropped, which is the same firmware behaviour documented above for writes, and here it is worse:
+there is no re-`GET` that reveals it, only the timestamp inside the image. Two other shapes were
+tried — `/ISAPI/Streaming/tracks/<track>/picture` and `/ISAPI/ContentMgmt/playback/picture` answer
+`404`, `/ISAPI/ContentMgmt/record/tracks/<track>/picture` answers `403`.
+
+**So decoding recorded video is the only way to get frames out of the past, and that means ffmpeg.**
+Worth knowing before reaching for alternatives: MediaMTX does not avoid it — the project's own
+documented recipe for extracting stills (`docs/2-features/13-extract-snapshots.md`) is to run ffmpeg
+inside a `runOnAvailable` hook. It is a media server; it has no still-image endpoint. What MediaMTX
+does offer is a deployment answer: `bluenviron/mediamtx` publishes a `<version>-ffmpeg` image tag, and
+that service is already in `docker-compose.yml`. Note also that
+[`docs/decisions/002-hls-live-streaming.md`](decisions/002-hls-live-streaming.md) rejected ffmpeg as a
+_live transcoder_, on cost-per-stream grounds — it says nothing about offline frame extraction, which
+is a different workload.
