@@ -1,3 +1,4 @@
+import { SnapshotReason } from '@prisma/client';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { truncateAll } from '../../../test/utils/truncate-all';
@@ -81,6 +82,7 @@ describe('retention sweeps (int)', () => {
     cameraId: string,
     capturedAt: Date,
     isLive = false,
+    reason: SnapshotReason | null = null,
   ) {
     return prisma.snapshot.create({
       data: {
@@ -88,9 +90,10 @@ describe('retention sweeps (int)', () => {
         data: Buffer.from('frame'),
         mimeType: 'image/jpeg',
         byteSize: 5,
-        sha256: `sha-${capturedAt.toISOString()}-${String(isLive)}`,
+        sha256: `sha-${capturedAt.toISOString()}-${String(isLive)}-${reason ?? 'evidence'}`,
         capturedAt,
         isLive,
+        reason,
       },
     });
   }
@@ -229,6 +232,73 @@ describe('retention sweeps (int)', () => {
       expect(after.snapshotId).toBeNull();
       expect(after.cameraLabelSnapshot).toBe('Front door');
       expect(after.personsDetected).toBe(1);
+    });
+
+    /**
+     * The whole reason `reason` is a column. Age alone cannot tell a labelled
+     * miss from the frame an operator was shown, so without this the ledger
+     * could be written but never read back.
+     */
+    it('lists the recall ledger for a date range and nothing else', async () => {
+      const user = await seedUser();
+      const space = await seedSpace(user.id);
+      const camera = await seedCamera(space.id);
+      const inRange = await seedSnapshot(
+        camera.id,
+        WELL_AFTER,
+        false,
+        SnapshotReason.ledger_miss,
+      );
+      await seedSnapshot(
+        camera.id,
+        WELL_BEFORE,
+        false,
+        SnapshotReason.ledger_miss,
+      );
+      await seedSnapshot(camera.id, WELL_AFTER, false, SnapshotReason.raw_copy);
+      await seedSnapshot(camera.id, WELL_AFTER);
+
+      const listed = await snapshotAccessor.listByReason(
+        SnapshotReason.ledger_miss,
+        CUTOFF,
+        NOW,
+        100,
+      );
+
+      expect(listed.map((row) => row.id)).toEqual([inRange.id]);
+      // The bytes come back with the row: the only caller writes them out as
+      // JPEGs for the detector to re-score, and a metadata-only list would
+      // mean a second query per frame.
+      expect(Buffer.from(listed[0].data).toString()).toBe('frame');
+    });
+
+    /**
+     * A ledger row is an ordinary evidence-class row for the sweep's purposes.
+     * It gets the snapshot window and no special lifetime, which is the
+     * decision `plans/07` recorded — not an oversight.
+     */
+    it('still prunes ledger rows past the cutoff', async () => {
+      const user = await seedUser();
+      const space = await seedSpace(user.id);
+      const camera = await seedCamera(space.id);
+      await seedSnapshot(
+        camera.id,
+        WELL_BEFORE,
+        false,
+        SnapshotReason.ledger_miss,
+      );
+      const recent = await seedSnapshot(
+        camera.id,
+        WELL_AFTER,
+        false,
+        SnapshotReason.ledger_miss,
+      );
+
+      const removed = await snapshotAccessor.deleteEvidenceBefore(CUTOFF, 100);
+
+      expect(removed).toBe(1);
+      const left = await prisma.snapshot.findMany({ select: { id: true } });
+      expect(left.map((row) => row.id)).toEqual([recent.id]);
     });
   });
 });

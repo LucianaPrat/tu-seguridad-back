@@ -18,7 +18,7 @@ import { withSpan } from '../../observability/tracing.helpers';
 import { SnapshotService } from '../snapshots/snapshot.service';
 import { AnalysisResult } from './analysis-result';
 import { CadenceEngine } from './cadence.engine';
-import { PipelineService } from './pipeline.service';
+import { PipelineService, PollTrigger } from './pipeline.service';
 
 const INTERVAL_NAME = 'camera-poll';
 
@@ -156,9 +156,13 @@ export class PollingScheduler
    * the cadence re-arm below, and would diverge from the tick the first time
    * one of them changed.
    */
-  async pollGuarded(spaceId: string, camera: Camera): Promise<void> {
+  async pollGuarded(
+    spaceId: string,
+    camera: Camera,
+    trigger: PollTrigger = 'schedule',
+  ): Promise<void> {
     try {
-      await this.pollOnce(spaceId, camera);
+      await this.pollOnce(spaceId, camera, trigger);
     } catch (error) {
       this.logger.error(
         `poll failed for camera ${camera.id}`,
@@ -184,7 +188,11 @@ export class PollingScheduler
    * a camera whose recorder is unreachable back onto the base tick would
    * hammer exactly the thing that is already struggling.
    */
-  async pollOnce(spaceId: string, camera: Camera): Promise<void> {
+  async pollOnce(
+    spaceId: string,
+    camera: Camera,
+    trigger: PollTrigger = 'schedule',
+  ): Promise<void> {
     if (this.inFlight.has(camera.id)) {
       this.statusRegistry.incrementSkipped(camera.id);
       this.cadenceEngine.rearm(camera.id, Date.now(), pollFloor(camera));
@@ -221,6 +229,7 @@ export class PollingScheduler
             spaceId,
             camera,
             captured.data,
+            trigger,
           );
           if (analysis.ok) {
             this.applyCadence(camera, analysis.data);

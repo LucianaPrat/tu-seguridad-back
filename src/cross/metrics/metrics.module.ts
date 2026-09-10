@@ -71,8 +71,13 @@ const metricProviders = [
   // window exists to close.
   makeCounterProvider({
     name: MetricNames.PIPELINE_PERSONS_DETECTED_TOTAL,
-    help: 'Detection outcomes by camera: persons, empty (upstream found none), filtered (all below threshold)',
-    labelNames: ['cameraId', 'outcome'],
+    help: 'Detection outcomes by camera and what triggered the poll: persons, empty (upstream found none), filtered (all below threshold)',
+    // `trigger` is what makes an `empty` readable. A scheduled poll finding
+    // nobody is the normal case; the recorder saying something moved and the
+    // detector answering nobody is a labelled miss, and the two were one
+    // series until this label existed. Doubles the series count for this
+    // metric — 6 per camera, 48 across the estate.
+    labelNames: ['cameraId', 'outcome', 'trigger'],
   }),
   // What the recorder pushed and what was done with it. The gap between
   // `triggered` and the rest is the whole point of the debounce: one person

@@ -17,6 +17,7 @@ const person: PersonDetection = {
 function buildResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
   return {
     persons: [],
+    personsReported: 0,
     zoneResults: [],
     alerts: [],
     occupancyPending: false,
@@ -163,12 +164,7 @@ describe('CadenceEngine', () => {
   });
 
   describe('per-camera poll floor', () => {
-    const empty = {
-      persons: [],
-      zoneResults: [],
-      alerts: [],
-      occupancyPending: false,
-    };
+    const empty = buildResult();
 
     it('raises a camera above the rung the ladder chose', () => {
       const engine = new CadenceEngine(15, 10, 5);

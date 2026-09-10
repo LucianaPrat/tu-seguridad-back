@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Camera, CameraStatus, Snapshot } from '@prisma/client';
+import { Camera, CameraStatus, Snapshot, SnapshotReason } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import { buildData, buildError, Either } from '../../cross/errors/either';
@@ -82,12 +82,17 @@ export class SnapshotService {
    *
    * `isLive` picks which row is written: the camera's single live frame,
    * overwritten every poll, or a new immutable row an alert can point at.
+   *
+   * `reason` is null for both of those. It is set only on rows kept for audit
+   * — the recall ledger and the raw evidence copy — which the retention sweep
+   * cannot otherwise tell apart from the frame an operator was shown.
    */
   async store(
     spaceId: string,
     cameraId: string,
     image: CapturedImage,
     isLive = false,
+    reason: SnapshotReason | null = null,
   ): Promise<Either<Snapshot>> {
     const maxBytes = this.configService.getOrThrow<number>(
       EnvNames.SNAPSHOT_MAX_BYTES,
@@ -114,6 +119,7 @@ export class SnapshotService {
       byteSize: image.byteSize,
       sha256: image.sha256,
       capturedAt: image.capturedAt,
+      reason,
     };
     const snapshot = isLive
       ? await this.snapshotAccessor.upsertLive(spaceId, row)

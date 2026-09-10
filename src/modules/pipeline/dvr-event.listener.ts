@@ -402,7 +402,7 @@ export class DvrEventListener
     // Stamped before anything can yield, for the reason in the doc comment.
     this.motionDueAt.set(camera.id, now + seconds * 1000);
     this.motionTotal.inc({ channel: externalId, outcome: 'triggered' });
-    void this.pollingScheduler.pollGuarded(spaceId, camera);
+    void this.pollingScheduler.pollGuarded(spaceId, camera, 'event');
   }
 
   /**

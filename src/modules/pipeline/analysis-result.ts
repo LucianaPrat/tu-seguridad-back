@@ -11,6 +11,14 @@ export interface ZoneResult {
 
 export interface AnalysisResult {
   persons: PersonDetection[];
+  /**
+   * How many detections the upstream reported, before this camera's confidence
+   * threshold dropped any. `persons` is what survived, so on its own it cannot
+   * tell "the detector found nobody" from "it found somebody we refused" — and
+   * those are different problems with different owners. The recall ledger keys
+   * on the first of them.
+   */
+  personsReported: number;
   zoneResults: ZoneResult[];
   alerts: AlertCandidate[];
   /**

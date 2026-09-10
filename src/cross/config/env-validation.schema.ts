@@ -238,6 +238,7 @@ export const envValidationSchema = Joi.object({
   // the detector's own recall is under audit — re-running history against the
   // upstream is only exact on the untouched pixels.
   [EnvNames.SNAPSHOT_KEEP_RAW]: Joi.boolean().default(false),
+  [EnvNames.SNAPSHOT_KEEP_MISSES]: Joi.boolean().default(false),
   // Entry confirmation: `ENTER_HITS_REQUIRED` of the last `ENTER_WINDOW_POLLS`
   // frames must have put an anchor inside the area. A window rather than a run
   // of consecutive hits because the upstream detector drops single frames of a
