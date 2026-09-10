@@ -202,3 +202,69 @@ En orden de preferencia:
   de este pedido y se las pasamos aunque salga en contra.
 - Volumen estimado, en cuanto contemos eventos de movimiento por cámara por noche. Todavía no lo
   medimos y no queremos inventarlo.
+
+---
+
+## 7. El endpoint ya está publicado — contrato observado el 2026-09-10
+
+Está en `POST /api/v1/persons/batch` y funciona. Como el spec de `/docs-json` documenta el `201` sin
+cuerpo — igual que el endpoint de una imagen —, lo observamos llamándolo. Esto es lo que medimos, no
+lo que suponemos.
+
+**Petición.** `multipart/form-data`, campo `files` repetido, más `stopOnFirstDetection` (booleano) y
+`minDetScore` (número). Cabeceras `Fa-Domain` y `Fa-Token`, con el mismo token de sesión de
+`/auth/authorize` que usa el endpoint de una imagen. Éxito `201`.
+
+**Respuesta.** `{ "results": [ ... ] }`, un elemento por imagen, en orden:
+
+```json
+{
+  "index": 0,
+  "filename": "f_001.jpg",
+  "status": "ok",
+  "personsDetected": true,
+  "imageWidth": 960,
+  "imageHeight": 1088,
+  "persons": [{ "detScore": 0.335, "bbox": {...}, "bboxNorm": {...}, "anchor": {...} }]
+}
+```
+
+El cuerpo por imagen es idéntico al del endpoint de una imagen, envuelto en `index`, `filename` y
+`status`. Un elemento con `status: "skipped"` trae **sólo** `index`, `filename` y `status` — sin
+`personsDetected` ni `persons`, así que un cliente no puede leerlos sin comprobar antes el `status`.
+
+**Rendimiento.** 10 imágenes en 3.2 s en una sola petición. Contra un presupuesto de 1 req/s, esas 10
+imágenes por separado cuestan 10 segundos de la capacidad de todo el sistema. Es exactamente la
+ganancia que pedía el punto 2.
+
+### Dos cosas que querríamos revisar con ustedes
+
+**7.1 — Una imagen inválida tumba el lote entero.** Mandamos tres archivos, uno de ellos no era una
+imagen, y la respuesta fue `HTTP 500` con `{"code":"UNHANDLED_ERROR","msg":"Unhandled exception"}` y
+**ningún resultado parcial**: se perdieron también las dos imágenes válidas.
+
+Es justo el caso que pedía el punto 4.2, y para nosotros no es teórico: los frames los extraemos de
+video grabado con `ffmpeg`, y un frame truncado al final de un segmento es una posibilidad real. Con
+lotes de veinte, un archivo malo cuesta las diecinueve buenas. Lo ideal sería un `status: "error"`
+por imagen dentro del `200`/`201`, dejando pasar el resto.
+
+**7.2 — `stopOnFirstDetection` cortó antes de lo que nos habían anticipado.** Nos pasaron que corta
+en un bloque de 8. Con diez imágenes y detección en la primera, observamos `status: "ok"` en los
+índices 0 y 1 y `"skipped"` de 2 a 9 — es decir, un bloque de **2**, no de 8.
+
+No sacamos una regla de una sola muestra; puede ser dinámico, o puede haber cambiado. Sólo queremos
+confirmar cuál es el comportamiento esperado, porque de eso depende cuántos frames pedimos por lote.
+
+### Lo que prometimos entregar, y ya está medido
+
+La curva de detección por cantidad de frames del punto 6 ya existe: once eventos, tres cámaras, de
+día y de noche, en [`T00-frame-window-measurement.md`](T00-frame-window-measurement.md). El resumen,
+y sale a favor del batch:
+
+- El frame único que toma hoy nuestro camino en vivo detecta a alguien en **2 de 10 eventos**.
+- Veinte frames alrededor del aviso detectan en **7 de 10**.
+- Cuarenta frames detectan en los **mismos siete** — la curva se aplana, no hace falta pedir más.
+
+Por eso pediríamos lotes de veinte, no de cuarenta. Y un dato que les sirve a ustedes: de las 73
+detecciones que devolvieron en 400 frames, sólo 25 superan el umbral de confianza de 0.45 que
+aplicamos de nuestro lado. Dos tercios de lo que encuentran, los descartamos nosotros.
