@@ -49,6 +49,7 @@ describe('CamerasService', () => {
   };
   let configService: { getOrThrow: jest.Mock };
   let pollingScheduler: { forget: jest.Mock };
+  let dvrEventListener: { forget: jest.Mock };
   let liveStreamService: { forget: jest.Mock };
   let service: CamerasService;
 
@@ -74,6 +75,7 @@ describe('CamerasService', () => {
       getOrThrow: jest.fn().mockReturnValue(MAX_SNAPSHOT_BYTES),
     };
     pollingScheduler = { forget: jest.fn() };
+    dvrEventListener = { forget: jest.fn() };
     liveStreamService = { forget: jest.fn().mockResolvedValue(undefined) };
     service = new CamerasService(
       cameraAccessor as never,
@@ -83,6 +85,7 @@ describe('CamerasService', () => {
       configService as never,
       pollingScheduler as never,
       liveStreamService as never,
+      dvrEventListener as never,
     );
   });
 
@@ -314,6 +317,7 @@ describe('CamerasService', () => {
       );
       expect(statusRegistry.forget).toHaveBeenCalledWith('camera-uuid');
       expect(pollingScheduler.forget).toHaveBeenCalledWith('camera-uuid');
+      expect(dvrEventListener.forget).toHaveBeenCalledWith('camera-uuid');
       expect(liveStreamService.forget).toHaveBeenCalledWith(
         spaceId,
         'camera-uuid',

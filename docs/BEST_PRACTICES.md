@@ -35,6 +35,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   that account to whoever holds it. It belongs in the gitignored `.env` and nowhere else — not in
   `.env.example`, not in a commit, not in a PR description. Gmail also caps sends at roughly 500/day,
   which is a testing tool, not a delivery channel.
+
 - `MAIL_ENABLED=true` in a developer `.env` used to be enough to make `npm run test:e2e` send real
   mail: `test/setup-e2e-env.ts` loads `dotenv/config`, and the e2e harness overrides
   `FaceAuthClientService` and `DvrClientPort` but not `CredentialDeliveryPort`. That setup file now
@@ -44,7 +45,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 
 - **The confidence tag needs a font on the host.** `sharp` composites the detection boxes from an
   SVG, and the `%` label inside it is rendered by librsvg through fontconfig — which uses the
-  *host's* fonts, not something the package ships. A deploy target with no font packages installed
+  _host's_ fonts, not something the package ships. A deploy target with no font packages installed
   draws the green box and the filled tag and leaves the tag empty. `fc-list | head` on the host says
   whether there is anything to render with; `fonts-dejavu-core` is enough. The failure is silent and
   only visible in the delivered mail, which is why the label sits on a filled rectangle: an empty
@@ -82,7 +83,7 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
   [`ops/otel-collector/`](../ops/otel-collector/README.md). `scripts/install.sh` once, then a `.env`
   with `OTELCOL_MODE=debug`, then `scripts/start.sh`. Debug mode prints every span with
   `verbosity: detailed` **and** ships it to Grafana Cloud, so `pm2 logs
-  tu-seguridad-otel-collector` is the whole tool for reading one trace. `OTELCOL_MODE=test` needs no
+tu-seguridad-otel-collector` is the whole tool for reading one trace. `OTELCOL_MODE=test` needs no
   Grafana credentials at all.
 - **`OTEL_ENABLED=true` in the app's `.env` is the other half.** With the collector up and the switch
   off, or the switch on and no collector, nothing arrives — and the second case looks worse than it
@@ -105,3 +106,57 @@ Ops + tooling lessons from building this repo. Not architecture (see [`ARCHITECT
 - **Stacked-PR CI can show stale red.** Reopening a PR (or force-pushing while its base branch changed) can leave `gh pr checks` pointing at an old run computed on a **stale merge-ref** — e.g. a run that still executed a workflow step the current branch no longer has. Current merge-ref is what matters: `git fetch origin '+refs/pull/<n>/merge:refs/remotes/pr/<n>/merge'` and inspect it. To force a genuinely fresh run on the correct merge-ref, change the head sha (`git commit --amend --no-edit` + force-push), not just reopen.
 
 Agent duties are central ([`.standards/AGENTS.md`](../.standards/AGENTS.md)); this repo's session workflow and plan-tracker convention are in [`AGENTS.md`](../AGENTS.md) and [`CLAUDE.md`](../CLAUDE.md).
+
+## DVR motion events (recorder side)
+
+Verified against a Hikvision DVR-208G-M1 on firmware V4.71.410. Everything here was learned by
+running it, not by reading a datasheet.
+
+- **`POST /dvr/event-linkage` wires the notification. It does not enable motion detection.** These are
+  two independent settings, and this is the most confusing failure the feature can produce: a channel
+  whose detection grid is off is reported `linked` and stays silent forever, with nothing visible from
+  the API to say why. Check it per channel:
+  `curl --digest -u USER:PASS 'http://DVR/ISAPI/System/Video/inputs/channels/<N>/motionDetection'` —
+  you want `<enabled>true</enabled>` and a grid that actually covers the frame.
+- **Check which BNC ports carry video before concluding anything is broken.** The first walk test on
+  this recorder failed for the dullest possible reason: channel 1 is an empty socket. `resDesc` reads
+  `NO VIDEO` on an unwired port —
+  `curl --digest -u USER:PASS 'http://DVR/ISAPI/System/Video/inputs/channels' | grep -E '<id>|resDesc'`.
+- **A `PUT` to a trigger's `/notifications` replaces the whole list.** A document composed from scratch
+  silently deletes the operator's record-on-motion and light-on-motion linkages — the recorder answers
+  `OK` and quietly stops recording when somebody walks in. A hand-rolled `curl` must `GET` first and
+  send back the recorder's own document with the one block added. The endpoint does exactly that.
+- **`<statusCode>1</statusCode>` is not proof.** This firmware answers `OK` to a write whose elements
+  it silently dropped. Only a re-`GET` shows whether the change stuck.
+- **Capability discovery exists, but not on the trigger endpoint.**
+  `GET /ISAPI/Event/triggers/VMD-1/capabilities` answers `statusCode 4` / `Invalid Operation` /
+  `notSupport`, so nothing can ask which notification methods a trigger accepts. Other endpoints do
+  answer — `GET /ISAPI/System/Video/inputs/channels/<N>/motionDetection/capabilities` returns the
+  allowed values inline, e.g. `<targetType opt="human,vehicle">`. Check per endpoint rather than
+  assuming either way.
+- **Motion detection classifies targets, and the only two values are `human` and `vehicle`.**
+  `<targetType>human</targetType>` is accepted and persists. An empty `targetType` is answered `OK`
+  and then vanishes from the document — the silent-drop behaviour again — so there is no verified way
+  to ask for unclassified pixel motion. Narrowing to `human` is not obviously a win: the recorder's
+  classifier is the first of two filters in front of the detector, and a person it fails to classify
+  produces no event at all, so the frame is never looked at. Measure the event mix per channel over a
+  night before dropping `vehicle`.
+- **The digest signature covers the HTTP verb.** HA2 is `METHOD:uri`, so a write signed as a read is
+  refused — and refused as a `401`, which reads like a rejected password rather than a malformed
+  signature. If a new ISAPI write ever fails with a credential error against credentials that work,
+  this is the first thing to check.
+
+### Two axios findings, measured
+
+Both were reproduced against a fake infinite multipart server, not inferred.
+
+- **`maxContentLength` is fatal on a long-lived stream.** On axios 1.18.1, `maxContentLength: 1000`
+  killed the connection at 894 bytes with `maxContentLength size of 1000 exceeded`; omitted and
+  `Infinity` both streamed indefinitely. axios wraps a stream response in a generator that throws once
+  the running total passes the cap. Reusing `MAX_LISTING_BYTES` on `alertStream` — the obvious way to
+  "harden" it later — would drop the socket after roughly five hours at this recorder's ~525-byte,
+  9.5-second heartbeat: overnight, silently, looking exactly like a network fault. The byte cap belongs
+  in the parser instead, and it is there.
+- **An axios `timeout` is disarmed once the response headers land.** It therefore does not protect a
+  stream that later goes quiet. `DvrEventListener` arms its own watchdog before the connect, covering
+  the TCP connect, the headers and the idle period from one timer.

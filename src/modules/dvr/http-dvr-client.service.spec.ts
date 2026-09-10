@@ -1,7 +1,9 @@
 import { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { of, throwError } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import { DvrEvent } from './dvr-client.port';
 import { HttpDvrClientService } from './http-dvr-client.service';
 
 const connection = {
@@ -58,6 +60,87 @@ const CHANNELS_XML = `<?xml version="1.0" encoding="UTF-8" ?>
 </VideoInputChannel>
 </VideoInputChannelList>`;
 
+const NOTIFICATIONS_URL =
+  'http://192.168.1.250/ISAPI/Event/triggers/VMD-4/notifications';
+
+/** Verbatim shape of a VMD trigger's notification list on V4.71.410. */
+const NOTIFICATIONS_XML = `<?xml version="1.0" encoding="UTF-8" ?>
+<EventTriggerNotificationList version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<EventTriggerNotification>
+<id>whiteLightOut-1</id>
+<notificationMethod>whiteLightOut</notificationMethod>
+<lightAudioOutID>1</lightAudioOutID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>record-1</id>
+<notificationMethod>record</notificationMethod>
+<videoInputID>1</videoInputID>
+</EventTriggerNotification>
+</EventTriggerNotificationList>`;
+
+/** The same list after a `center` linkage already took. */
+const NOTIFICATIONS_XML_WITH_CENTER = `<?xml version="1.0" encoding="UTF-8" ?>
+<EventTriggerNotificationList version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<EventTriggerNotification>
+<id>whiteLightOut-1</id>
+<notificationMethod>whiteLightOut</notificationMethod>
+<lightAudioOutID>1</lightAudioOutID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>record-1</id>
+<notificationMethod>record</notificationMethod>
+<videoInputID>1</videoInputID>
+</EventTriggerNotification>
+<EventTriggerNotification>
+<id>center</id>
+<notificationMethod>center</notificationMethod>
+</EventTriggerNotification>
+</EventTriggerNotificationList>`;
+
+/** What ISAPI answers a PUT with — accepted here, even where it silently drops an element. */
+const RESPONSE_STATUS_OK = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<requestURL>/ISAPI/Event/triggers/VMD-4/notifications</requestURL>
+<statusCode>1</statusCode>
+<statusString>OK</statusString>
+<subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+
+const EVENT_STREAM_HEADERS = {
+  'content-type': 'multipart/mixed; boundary=--boundary',
+};
+
+/** Verbatim idle heartbeat: a DVR-208G-M1 repeats this every ~9.5s. */
+const HEARTBEAT_ALERT = `<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<ipAddress>192.168.1.250</ipAddress><portNo>80</portNo><protocol>HTTP</protocol>
+<macAddress>3c:1b:f8:38:ba:23</macAddress><channelID>0</channelID>
+<dateTime>2026-09-09T17:02:40</dateTime><activePostCount>0</activePostCount>
+<eventType>videoloss</eventType><eventState>inactive</eventState>
+<eventDescription>videoloss alarm</eventDescription>
+</EventNotificationAlert>`;
+
+/** Same envelope, a motion pulse on channel 4. */
+const MOTION_ALERT = `<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<ipAddress>192.168.1.250</ipAddress><portNo>80</portNo><protocol>HTTP</protocol>
+<macAddress>3c:1b:f8:38:ba:23</macAddress><channelID>4</channelID>
+<dateTime>2026-09-09T17:02:45</dateTime><activePostCount>1</activePostCount>
+<eventType>VMD</eventType><eventState>active</eventState>
+<eventDescription>Motion Alarm</eventDescription>
+</EventNotificationAlert>`;
+
+/** `Readable.from` defaults to object mode; `objectMode: false` is what makes `setEncoding` behave. */
+function textStream(chunks: string[]): Readable {
+  return Readable.from(chunks, { objectMode: false });
+}
+
+async function collect(events: AsyncIterable<DvrEvent>): Promise<DvrEvent[]> {
+  const collected: DvrEvent[] = [];
+  for await (const event of events) {
+    collected.push(event);
+  }
+  return collected;
+}
+
 function axiosResponse<T>(
   data: T,
   headers: Record<string, string> = {},
@@ -83,7 +166,7 @@ const md5 = (value: string) => createHash('md5').update(value).digest('hex');
 describe('HttpDvrClientService', () => {
   const maxBytes = 1000;
 
-  let httpService: { get: jest.Mock };
+  let httpService: { request: jest.Mock };
   let configService: { get: jest.Mock; getOrThrow: jest.Mock };
   let envValues: Record<string, number | string>;
   let client: HttpDvrClientService;
@@ -93,19 +176,21 @@ describe('HttpDvrClientService', () => {
     data: T,
     headers: Record<string, string> = {},
   ) {
-    httpService.get
+    httpService.request
       .mockReturnValueOnce(digestChallenge())
       .mockReturnValueOnce(axiosResponse(data, headers));
   }
 
   /** `mock.calls` is untyped; every read of a recorded request goes through here. */
-  function calls(): [string, AxiosRequestConfig][] {
-    return httpService.get.mock.calls as [string, AxiosRequestConfig][];
+  function calls(): AxiosRequestConfig[] {
+    return (httpService.request.mock.calls as [AxiosRequestConfig][]).map(
+      ([config]) => config,
+    );
   }
 
   /** Pulls one field out of the Authorization header this client just built. */
   function authField(call: number, name: string): string | undefined {
-    const header = calls()[call][1].headers?.Authorization as string;
+    const header = calls()[call].headers?.Authorization as string;
     return new RegExp(`[ ,]${name}="?([^",]+)"?`).exec(header)?.[1];
   }
 
@@ -113,7 +198,7 @@ describe('HttpDvrClientService', () => {
   let captureRetries: { inc: jest.Mock };
 
   beforeEach(() => {
-    httpService = { get: jest.fn() };
+    httpService = { request: jest.fn() };
     envValues = {
       [EnvNames.DVR_TIMEOUT_MS]: 5000,
       [EnvNames.SNAPSHOT_TIMEOUT_MS]: 5000,
@@ -142,9 +227,9 @@ describe('HttpDvrClientService', () => {
 
       await client.discoverChannels(connection);
 
-      expect(httpService.get).toHaveBeenCalledTimes(2);
+      expect(httpService.request).toHaveBeenCalledTimes(2);
       // The first request has to survive its own 401 to read the challenge.
-      const validateStatus = calls()[0][1].validateStatus as (
+      const validateStatus = calls()[0].validateStatus as (
         status: number,
       ) => boolean;
       expect(validateStatus(401)).toBe(true);
@@ -190,7 +275,7 @@ describe('HttpDvrClientService', () => {
 
     /** A second scheme reuses parameter names; the Digest ones have to survive. */
     it('keeps the digest parameters when another scheme follows them', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge(
             'Digest realm="dvr-realm", qop="auth", nonce="abc123", ' +
@@ -206,7 +291,7 @@ describe('HttpDvrClientService', () => {
 
     /** RFC 2069: no qop means no nonce count and no client nonce in the hash. */
     it('falls back to the unqualified response when the challenge omits qop', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge('Digest realm="dvr-realm", nonce="abc123"'),
         )
@@ -222,7 +307,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('hashes with SHA-256 when the recorder asks for it', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(
           digestChallenge(
             'Digest realm="dvr-realm", qop="auth", nonce="abc123", ' +
@@ -244,13 +329,13 @@ describe('HttpDvrClientService', () => {
     });
 
     it('skips the retry when the recorder offers no digest challenge', async () => {
-      httpService.get.mockReturnValueOnce(
+      httpService.request.mockReturnValueOnce(
         digestChallenge('Basic realm="dvr-realm"'),
       );
 
       const result = await client.discoverChannels(connection);
 
-      expect(httpService.get).toHaveBeenCalledTimes(1);
+      expect(httpService.request).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.UPSTREAM_ERROR,
@@ -259,7 +344,7 @@ describe('HttpDvrClientService', () => {
 
     /** Only the signed attempt getting refused says the password is wrong. */
     it('maps a credential rejection on the signed retry to VALIDATION_ERROR', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(401));
 
@@ -278,8 +363,8 @@ describe('HttpDvrClientService', () => {
 
       await client.discoverChannels(connection);
 
-      expect(calls()[0][0]).toBe(CHANNELS_URL);
-      expect(calls()[1][0]).toBe(CHANNELS_URL);
+      expect(calls()[0].url).toBe(CHANNELS_URL);
+      expect(calls()[1].url).toBe(CHANNELS_URL);
     });
 
     /**
@@ -335,7 +420,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('maps a timeout to UPSTREAM_TIMEOUT', async () => {
-      httpService.get.mockReturnValueOnce(
+      httpService.request.mockReturnValueOnce(
         axiosFailure(undefined, 'ECONNABORTED'),
       );
 
@@ -354,10 +439,10 @@ describe('HttpDvrClientService', () => {
 
       await client.captureSnapshot(connection, '4');
 
-      expect(calls()[1][0]).toBe(
+      expect(calls()[1].url).toBe(
         'http://192.168.1.250/ISAPI/Streaming/channels/401/picture?snapShotImageType=JPEG',
       );
-      expect(calls()[1][1]).toMatchObject({
+      expect(calls()[1]).toMatchObject({
         maxContentLength: maxBytes,
       });
     });
@@ -411,7 +496,7 @@ describe('HttpDvrClientService', () => {
         '4/../../System/deviceInfo',
       );
 
-      expect(httpService.get).not.toHaveBeenCalled();
+      expect(httpService.request).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         ok: false,
         code: ErrorCode.VALIDATION_ERROR,
@@ -494,29 +579,127 @@ describe('HttpDvrClientService', () => {
     });
   });
 
+  describe('linkMotionEvents', () => {
+    /** Regression test: HA2 must sign the verb actually sent, not a hardcoded GET. */
+    it('signs PUT: in HA2, not GET:', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML_WITH_CENTER));
+
+      await client.linkMotionEvents(connection, '4');
+
+      const putCall = 2;
+      expect(calls()[putCall].method).toBe('put');
+      const ha1 = md5('admin:dvr-realm:dvr-password');
+      const ha2 = md5('PUT:/ISAPI/Event/triggers/VMD-4/notifications');
+      const cnonce = authField(putCall, 'cnonce');
+      expect(authField(putCall, 'nc')).toBe('00000002');
+      expect(authField(putCall, 'response')).toBe(
+        md5(`${ha1}:abc123:00000002:${cnonce}:auth:${ha2}`),
+      );
+    });
+
+    it('keeps the notifications the operator already had', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML_WITH_CENTER));
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(calls()[1].url).toBe(NOTIFICATIONS_URL);
+      const putCall = calls()[2];
+      expect(putCall.url).toBe(NOTIFICATIONS_URL);
+      expect(putCall.headers?.['Content-Type']).toBe('application/xml');
+      const body = putCall.data as string;
+      expect(body).toContain('whiteLightOut-1');
+      expect(body).toContain('record-1');
+      expect(body).toContain('<id>center</id>');
+      expect(result).toEqual({ ok: true, data: 'linked' });
+    });
+
+    it('writes nothing when the trigger already publishes', async () => {
+      respondAfterChallenge(NOTIFICATIONS_XML_WITH_CENTER);
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      // Just the listing GET (challenge + signed retry) — no PUT, no re-GET.
+      expect(httpService.request).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({ ok: true, data: 'alreadyLinked' });
+    });
+
+    it('refuses a body that is not a notification list', async () => {
+      respondAfterChallenge(
+        '<ResponseStatus><statusCode>1</statusCode></ResponseStatus>',
+      );
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(httpService.request).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+    });
+
+    it('reports a write the recorder accepted and silently dropped', async () => {
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML))
+        .mockReturnValueOnce(axiosResponse(RESPONSE_STATUS_OK))
+        .mockReturnValueOnce(axiosResponse(NOTIFICATIONS_XML));
+
+      const result = await client.linkMotionEvents(connection, '4');
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+      if (!result.ok) {
+        expect(result.message).toContain('OK');
+      }
+    });
+
+    it('refuses an externalId that is not a video input number', async () => {
+      const result = await client.linkMotionEvents(
+        connection,
+        '4/../../System/deviceInfo',
+      );
+
+      expect(httpService.request).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+    });
+  });
+
   describe('challenge reuse', () => {
     const jpeg = () =>
       axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
 
     it('signs the second capture straight away, with no second challenge', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         .mockReturnValueOnce(jpeg());
 
       await client.captureSnapshot(connection, '3');
-      const afterFirst = httpService.get.mock.calls.length;
+      const afterFirst = httpService.request.mock.calls.length;
       const second = await client.captureSnapshot(connection, '3');
 
       expect(second.ok).toBe(true);
       // First capture: challenge plus signed retry. Second: signed only.
       expect(afterFirst).toBe(2);
-      expect(httpService.get).toHaveBeenCalledTimes(3);
+      expect(httpService.request).toHaveBeenCalledTimes(3);
     });
 
     /** `nc` must move for as long as one nonce is reused, or the server refuses. */
     it('increments the nonce count on the reused challenge', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         .mockReturnValueOnce(jpeg());
@@ -529,7 +712,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('re-challenges when the recorder refuses the cached nonce', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(jpeg())
         // Second capture: the cached nonce is stale.
@@ -541,7 +724,7 @@ describe('HttpDvrClientService', () => {
       const second = await client.captureSnapshot(connection, '3');
 
       expect(second.ok).toBe(true);
-      expect(httpService.get).toHaveBeenCalledTimes(5);
+      expect(httpService.request).toHaveBeenCalledTimes(5);
       expect(authField(4, 'nc')).toBe('00000001');
     });
   });
@@ -551,7 +734,7 @@ describe('HttpDvrClientService', () => {
       axiosResponse(new ArrayBuffer(4), { 'content-type': 'image/jpeg' });
 
     it('retries a dropped connection and returns the second frame', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(undefined, 'ECONNRESET'))
         .mockReturnValueOnce(digestChallenge())
@@ -565,7 +748,7 @@ describe('HttpDvrClientService', () => {
 
     /** An answer is an answer. Asking again gets the same one. */
     it('does not retry a credential rejection', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(401));
 
@@ -576,7 +759,7 @@ describe('HttpDvrClientService', () => {
     });
 
     it('does not retry an error the recorder answered with', async () => {
-      httpService.get
+      httpService.request
         .mockReturnValueOnce(digestChallenge())
         .mockReturnValueOnce(axiosFailure(500));
 
@@ -587,7 +770,7 @@ describe('HttpDvrClientService', () => {
 
     it('gives up at the configured cap and reports the last failure', async () => {
       envValues[EnvNames.DVR_CAPTURE_RETRIES] = 2;
-      httpService.get.mockReturnValue(axiosFailure(undefined, 'ETIMEDOUT'));
+      httpService.request.mockReturnValue(axiosFailure(undefined, 'ETIMEDOUT'));
 
       const result = await client.captureSnapshot(connection, '3');
 
@@ -610,6 +793,224 @@ describe('HttpDvrClientService', () => {
         channel: '3',
         outcome: 'success',
       });
+    });
+  });
+
+  describe('openEventStream', () => {
+    it('releases the socket when the recorder answers an error', async () => {
+      // A non-2xx answer still carries a body, and on this request the body is
+      // an unread socket: without the discard a recorder answering 500 leaks
+      // one connection per reconnect attempt.
+      const body = Readable.from(['boom'], { objectMode: false });
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(
+          throwError(() =>
+            Object.assign(new AxiosError('failed'), {
+              response: { status: 500, headers: {}, data: body },
+            }),
+          ),
+        );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(false);
+      expect(body.destroyed).toBe(true);
+    });
+
+    it('yields one event for a document split across three chunks, including a split inside the closing tag', async () => {
+      const closeTag = '</EventNotificationAlert>';
+      // Both cuts land inside the last 25 characters of the document, i.e.
+      // inside `closeTag` itself.
+      const splitA = MOTION_ALERT.length - closeTag.length + 5;
+      const splitB = MOTION_ALERT.length - 3;
+      respondAfterChallenge(
+        textStream([
+          MOTION_ALERT.slice(0, splitA),
+          MOTION_ALERT.slice(splitA, splitB),
+          MOTION_ALERT.slice(splitB),
+        ]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('yields two events in order for two documents arriving in one chunk', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT + MOTION_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('classifies the verbatim idle heartbeat as keepalive', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+        ]);
+      }
+    });
+
+    it('classifies VMD + active + channelID 4 as motion on channel 4', async () => {
+      respondAfterChallenge(textStream([MOTION_ALERT]), EVENT_STREAM_HEADERS);
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('discards boundary lines and junk between parts and still parses the following document', async () => {
+      const junk =
+        '\r\n--boundary\r\nContent-Type: application/xml\r\n' +
+        'Content-Length: 512\r\n\r\n';
+      respondAfterChallenge(
+        textStream([
+          HEARTBEAT_ALERT + junk + MOTION_ALERT + '\r\n--boundary--\r\n',
+        ]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).resolves.toEqual([
+          { kind: 'keepalive' },
+          { kind: 'motion', externalId: '4' },
+        ]);
+      }
+    });
+
+    it('throws when a document never closes past the cap', async () => {
+      respondAfterChallenge(
+        textStream(['<EventNotificationAlert' + 'x'.repeat(1_000_001)]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        await expect(collect(result.data)).rejects.toThrow(
+          'DVR event stream sent no complete notification',
+        );
+      }
+    });
+
+    it('destroys the stream when the consumer breaks out of the loop early', async () => {
+      const body = textStream([HEARTBEAT_ALERT, MOTION_ALERT]);
+      respondAfterChallenge(body, EVENT_STREAM_HEADERS);
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        for await (const event of result.data) {
+          expect(event).toEqual({ kind: 'keepalive' });
+          break;
+        }
+        expect(body.destroyed).toBe(true);
+      }
+    });
+
+    it('returns UPSTREAM_ERROR and destroys the body for a non-multipart response', async () => {
+      const body = textStream(['ignored']);
+      respondAfterChallenge(body, { 'content-type': 'text/html' });
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_ERROR,
+      });
+      expect(body.destroyed).toBe(true);
+    });
+
+    it('requests the stream with no maxContentLength cap', async () => {
+      respondAfterChallenge(
+        textStream([HEARTBEAT_ALERT]),
+        EVENT_STREAM_HEADERS,
+      );
+
+      await client.openEventStream(connection, new AbortController().signal);
+
+      const signedCall = calls()[1];
+      expect(signedCall.responseType).toBe('stream');
+      expect(signedCall.timeout).toBe(0);
+      expect(signedCall).not.toHaveProperty('maxContentLength');
+    });
+
+    /** The leak guard from d451562, exercised here for the first time on a stream body. */
+    it('destroys a 401 challenge body that arrives as a stream before the signed retry', async () => {
+      const challengeBody = textStream(['nope']);
+      httpService.request
+        .mockReturnValueOnce(
+          axiosResponse(challengeBody, { 'www-authenticate': CHALLENGE }, 401),
+        )
+        .mockReturnValueOnce(
+          axiosResponse(textStream([HEARTBEAT_ALERT]), EVENT_STREAM_HEADERS),
+        );
+
+      await client.openEventStream(connection, new AbortController().signal);
+
+      expect(challengeBody.destroyed).toBe(true);
     });
   });
 });

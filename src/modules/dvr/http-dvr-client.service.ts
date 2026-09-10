@@ -6,6 +6,7 @@ import { Counter } from 'prom-client';
 import { CameraStatus } from '@prisma/client';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { createHash, randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { firstValueFrom } from 'rxjs';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
@@ -17,6 +18,8 @@ import {
   DiscoveredChannel,
   DvrClientPort,
   DvrConnection,
+  DvrEvent,
+  MotionLinkage,
 } from './dvr-client.port';
 
 /**
@@ -46,6 +49,32 @@ const rtspPath = (port: string, stream: string) =>
 
 /** A BNC port number, and the only shape allowed to reach a request path. */
 const CHANNEL_PORT = /^\d{1,2}$/;
+
+const EVENT_STREAM_PATH = '/ISAPI/Event/notification/alertStream';
+
+/**
+ * One motion-detection trigger per BNC port, and a PUT here REPLACES its whole
+ * notification list. Composing a document from scratch would silently destroy
+ * whatever the operator already wired — `record-N` (record on motion),
+ * `whiteLightOut-N` (light on motion) — so `linkMotionEvents` always amends the
+ * list this same GET returns rather than building one. `GET .../capabilities`
+ * on this trigger answers `notSupport` on V4.71.410, so there is no capability
+ * discovery to build, and a device that cannot honour an element still answers
+ * `statusCode 1 / OK`, so a re-GET is the only proof a write took.
+ */
+const notificationsPath = (port: string) =>
+  `/ISAPI/Event/triggers/VMD-${port}/notifications`;
+
+const CENTER_NOTIFICATION_METHOD = 'center';
+const NOTIFICATION_LIST_CLOSE = '</EventTriggerNotificationList>';
+
+/** The exact block a DVR-208G-M1 accepted and persisted on V4.71.410. */
+const CENTER_TRIGGER_BLOCK = [
+  '<EventTriggerNotification>',
+  '<id>center</id>',
+  '<notificationMethod>center</notificationMethod>',
+  '</EventTriggerNotification>',
+].join('\n');
 
 /**
  * `videoInputEnabled` reads `true` on all eight ports whether a camera is
@@ -106,6 +135,21 @@ const isTransient = (error: unknown): boolean =>
   error.response === undefined &&
   TRANSIENT_CODES.has(error.code ?? '');
 
+/**
+ * Releases a response nobody is going to read.
+ *
+ * A `401` that only tells us the challenge is stale is abandoned twice below,
+ * and with a buffered body that costs nothing. A streamed body is a socket:
+ * unread, it is never returned to the agent and never freed, so a recorder
+ * answering `401` leaks one connection per attempt. Handled here rather than in
+ * the streaming caller because the leak belongs to whoever drops the response.
+ */
+const discard = (response: AxiosResponse<unknown>): void => {
+  if (response.data instanceof Readable) {
+    response.data.destroy();
+  }
+};
+
 @Injectable()
 export class HttpDvrClientService extends DvrClientPort {
   /**
@@ -130,11 +174,16 @@ export class HttpDvrClientService extends DvrClientPort {
     connection: DvrConnection,
   ): Promise<Either<DiscoveredChannel[]>> {
     try {
-      const response = await this.get<string>(connection, CHANNELS_PATH, {
-        responseType: 'text',
-        timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
-        maxContentLength: MAX_LISTING_BYTES,
-      });
+      const response = await this.request<string>(
+        connection,
+        'get',
+        CHANNELS_PATH,
+        {
+          responseType: 'text',
+          timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
+          maxContentLength: MAX_LISTING_BYTES,
+        },
+      );
 
       const channels = parseChannels(response.data);
       // A recorder with zero video inputs does not exist, so an empty roster
@@ -224,8 +273,9 @@ export class HttpDvrClientService extends DvrClientPort {
     );
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await this.get<ArrayBuffer>(
+        return await this.request<ArrayBuffer>(
           connection,
+          'get',
           snapshotPath(externalId),
           {
             responseType: 'arraybuffer',
@@ -282,6 +332,140 @@ export class HttpDvrClientService extends DvrClientPort {
     );
   }
 
+  async linkMotionEvents(
+    connection: DvrConnection,
+    externalId: string,
+  ): Promise<Either<MotionLinkage>> {
+    if (!CHANNEL_PORT.test(externalId)) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'DVR channel is not a video input number',
+      );
+    }
+
+    const path = notificationsPath(externalId);
+    const operation = `DVR event linkage for VMD-${externalId}`;
+    const requestConfig: AxiosRequestConfig = {
+      responseType: 'text',
+      timeout: this.configService.get<number>(EnvNames.DVR_TIMEOUT_MS),
+      maxContentLength: MAX_LISTING_BYTES,
+    };
+
+    try {
+      const listing = await this.request<string>(
+        connection,
+        'get',
+        path,
+        requestConfig,
+      );
+      if (hasCenterNotification(listing.data)) {
+        return buildData('alreadyLinked');
+      }
+
+      // ponytail: a self-closed empty list is refused rather than
+      // reconstructed — never seen on V4.71.410; splice the closing tag in if
+      // a recorder ever produces one.
+      const closingTag = listing.data.lastIndexOf(NOTIFICATION_LIST_CLOSE);
+      if (closingTag === -1) {
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: response was not a notification list`,
+        );
+      }
+
+      const merged =
+        listing.data.slice(0, closingTag) +
+        CENTER_TRIGGER_BLOCK +
+        '\n' +
+        listing.data.slice(closingTag);
+
+      const written = await this.request<string>(connection, 'put', path, {
+        ...requestConfig,
+        data: merged,
+        headers: { 'Content-Type': 'application/xml' },
+      });
+
+      const verify = await this.request<string>(
+        connection,
+        'get',
+        path,
+        requestConfig,
+      );
+      if (!hasCenterNotification(verify.data)) {
+        const statusString = tagText(written.data, 'statusString') ?? 'unknown';
+        const subStatusCode =
+          tagText(written.data, 'subStatusCode') ?? 'unknown';
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          `${operation} failed: DVR reported ${statusString}/${subStatusCode} ` +
+            'but did not persist the linkage',
+        );
+      }
+
+      return buildData('linked');
+    } catch (error) {
+      return this.mapError(error, operation);
+    }
+  }
+
+  async openEventStream(
+    connection: DvrConnection,
+    signal: AbortSignal,
+  ): Promise<Either<AsyncIterable<DvrEvent>>> {
+    try {
+      const response = await this.request<Readable>(
+        connection,
+        'get',
+        EVENT_STREAM_PATH,
+        {
+          responseType: 'stream',
+          signal,
+          // Zero, not omitted: a non-zero axios timeout only appears to
+          // guard this call, because axios disarms it once the response
+          // headers land, and this response's headers land almost
+          // immediately while the body keeps talking for as long as the
+          // recorder is plugged in. The caller arms its own watchdog,
+          // covering connect, headers and idle, from one timer instead.
+          timeout: 0,
+          // maxContentLength deliberately absent — not Infinity, absent.
+          // Verified against axios 1.18.1 with a fake infinite multipart
+          // server: omitted and Infinity both stream indefinitely, but a
+          // numeric cap does not, because axios wraps a stream response in
+          // a generator that throws once the running total passes it —
+          // `maxContentLength: 1000` killed a real stream at 894 bytes with
+          // "maxContentLength size of 1000 exceeded". Reusing
+          // MAX_LISTING_BYTES here, the obvious way to "harden" this later,
+          // would drop the socket after roughly five hours at this
+          // recorder's ~525-byte, 9.5s heartbeat — overnight, looking
+          // exactly like a network fault.
+        },
+      );
+
+      const contentType =
+        (response.headers['content-type'] as string | undefined) ?? '';
+      // Prefix match, not equality: this firmware answers `multipart/mixed`,
+      // other ISAPI firmware answers `multipart/x-mixed-replace`.
+      if (!contentType.startsWith('multipart/')) {
+        response.data.destroy();
+        return buildError(
+          ErrorCode.UPSTREAM_ERROR,
+          'DVR event stream response was not multipart',
+        );
+      }
+
+      return buildData(readAlerts(response.data));
+    } catch (error) {
+      // A non-2xx answer here still carries a body, and on this request that
+      // body is an unread socket. Without this a recorder answering 403 or 500
+      // leaks one connection per reconnect attempt — the same failure `discard`
+      // exists for, on the one path that reaches it from outside `request`.
+      if (axios.isAxiosError(error) && error.response) {
+        discard(error.response);
+      }
+      return this.mapError(error, 'DVR event stream');
+    }
+  }
+
   /**
    * ISAPI answers only to HTTP digest. The challenge is cached per recorder, so
    * the usual call is one signed request rather than the 401 handshake plus the
@@ -293,9 +477,16 @@ export class HttpDvrClientService extends DvrClientPort {
    * recorder has expired, or a recorder that restarted, answers `401` to the
    * signed request; that drops the entry and falls through to a fresh
    * challenge, so the stale case costs what every case used to.
+   *
+   * The verb is a parameter because the digest signature covers it: HA2 is
+   * `METHOD:uri`, so a write signed as a read is refused, and refused as a
+   * `401` — which this method reads as a stale nonce and `mapError` reports as
+   * a rejected password. A caller re-typing a working credential is the symptom
+   * that hardcoding `GET` produces, so it is not hardcoded.
    */
-  private async get<T>(
+  private async request<T>(
     connection: DvrConnection,
+    method: 'get' | 'put',
     path: string,
     overrides: AxiosRequestConfig,
   ): Promise<AxiosResponse<T>> {
@@ -309,13 +500,16 @@ export class HttpDvrClientService extends DvrClientPort {
       const authorization = buildAuthorization(
         cached.header,
         connection,
+        method,
         target,
         cached.count,
       );
       if (authorization) {
         const signed = await firstValueFrom(
-          this.httpService.get<T>(url, {
+          this.httpService.request<T>({
             ...overrides,
+            method,
+            url,
             headers: { ...overrides.headers, Authorization: authorization },
             validateStatus: (status) =>
               status === 401 || (status >= 200 && status < 300),
@@ -324,6 +518,7 @@ export class HttpDvrClientService extends DvrClientPort {
         if (signed.status !== 401) {
           return signed;
         }
+        discard(signed);
       }
       // Expired nonce, restarted recorder, or a challenge this build cannot
       // sign any more. Either way the cached one is worthless.
@@ -331,8 +526,10 @@ export class HttpDvrClientService extends DvrClientPort {
     }
 
     const challenge = await firstValueFrom(
-      this.httpService.get<T>(url, {
+      this.httpService.request<T>({
         ...overrides,
+        method,
+        url,
         validateStatus: (status) =>
           status === 401 || (status >= 200 && status < 300),
       }),
@@ -340,9 +537,16 @@ export class HttpDvrClientService extends DvrClientPort {
     if (challenge.status !== 401) {
       return challenge;
     }
+    discard(challenge);
 
     const header = challenge.headers['www-authenticate'] as string | undefined;
-    const authorization = buildAuthorization(header, connection, target, 1);
+    const authorization = buildAuthorization(
+      header,
+      connection,
+      method,
+      target,
+      1,
+    );
     // Nothing to sign means the password can never be presented at all, which
     // is a different problem from a password the recorder looked at and
     // refused. Saying so beats reporting a credential rejection that did not
@@ -355,8 +559,10 @@ export class HttpDvrClientService extends DvrClientPort {
     }
 
     return firstValueFrom(
-      this.httpService.get<T>(url, {
+      this.httpService.request<T>({
         ...overrides,
+        method,
+        url,
         headers: { ...overrides.headers, Authorization: authorization },
       }),
     );
@@ -427,6 +633,83 @@ function parseChannels(xml: string): DiscoveredChannel[] {
   });
 }
 
+const ALERT_OPEN = '<EventNotificationAlert';
+const ALERT_CLOSE = '</EventNotificationAlert>';
+
+/**
+ * Sanity check, not a size policy: the scan in `readAlerts` drops everything
+ * between documents, so the buffer only ever holds one partial notification.
+ * This cap exists for the one recorder that opens a document and never
+ * closes it.
+ *
+ * ponytail: same regex-over-XML ceiling as parseChannels, same upgrade path.
+ */
+const MAX_ALERT_BYTES = 1_000_000;
+
+/**
+ * Reads the multipart alert stream by finding `<EventNotificationAlert>`
+ * documents by their own open and close tags rather than parsing MIME. The
+ * boundary line, the per-part headers and `Content-Length` are three ways to
+ * be wrong about a body that is findable by its own tags, and skipping all
+ * three turns a chunk split mid-tag into nothing worse than a buffer that
+ * has not closed yet.
+ */
+async function* readAlerts(stream: Readable): AsyncGenerator<DvrEvent> {
+  stream.setEncoding('utf8'); // StringDecoder semantics: a multi-byte char split across two TCP segments stays one char
+  let buffer = '';
+  try {
+    for await (const chunk of stream as AsyncIterable<string>) {
+      buffer += chunk;
+      for (;;) {
+        const start = buffer.indexOf(ALERT_OPEN);
+        if (start === -1) {
+          // Between documents. Keep only what could be a half-received opening
+          // tag, so a binary part cannot accumulate.
+          buffer = buffer.slice(1 - ALERT_OPEN.length);
+          break;
+        }
+        const end = buffer.indexOf(ALERT_CLOSE, start);
+        if (end === -1) {
+          buffer = buffer.slice(start);
+          break;
+        }
+        yield classifyAlert(buffer.slice(start, end + ALERT_CLOSE.length));
+        buffer = buffer.slice(end + ALERT_CLOSE.length);
+      }
+      if (buffer.length > MAX_ALERT_BYTES) {
+        throw new Error('DVR event stream sent no complete notification');
+      }
+    }
+  } finally {
+    stream.destroy(); // covers the consumer breaking out of its loop as well as an abort
+  }
+}
+
+/**
+ * Reads exactly three fields off one alert document. Deliberately not read:
+ * `dateTime` (a recorder clock this product does not trust and does not need
+ * — the capture stamps itself), `activePostCount` (debouncing on it would
+ * trust the recorder to reset it), `targetType` (the recorder's own
+ * human/vehicle classification is the *reason* this trigger is worth having,
+ * not a field to branch on).
+ *
+ * `channelID` is `0` on the heartbeat, and `CHANNEL_PORT` matches `0` — it is
+ * the `eventType`/`eventState` conditions that reject the heartbeat, not the
+ * channel, and that is intended: zero gets no special case.
+ */
+function classifyAlert(document: string): DvrEvent {
+  const channelId = tagText(document, 'channelID');
+  if (
+    channelId !== undefined &&
+    CHANNEL_PORT.test(channelId) &&
+    tagText(document, 'eventType')?.toLowerCase() === 'vmd' &&
+    tagText(document, 'eventState')?.toLowerCase() === 'active'
+  ) {
+    return { kind: 'motion', externalId: channelId };
+  }
+  return { kind: 'keepalive' };
+}
+
 const ENTITIES: Record<string, string> = {
   '&amp;': '&',
   '&lt;': '<',
@@ -444,6 +727,23 @@ function tagText(block: string, tag: string): string | undefined {
 }
 
 /**
+ * `tagText` returns the first match only. A notification list carries one
+ * `<notificationMethod>` per trigger entry, and asking "is `center` anywhere
+ * in this document" means reading every one of them, not just the first.
+ */
+function matchAll(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'g'))].map(
+    (match) => match[1].trim(),
+  );
+}
+
+function hasCenterNotification(xml: string): boolean {
+  return matchAll(xml, 'notificationMethod').includes(
+    CENTER_NOTIFICATION_METHOD,
+  );
+}
+
+/**
  * RFC 7616 digest, the only scheme ISAPI accepts. `-sess` algorithms and
  * `auth-int` are left out on purpose: no firmware in reach offers them, and
  * guessing at a variant nothing can verify turns a loud auth failure into a
@@ -452,6 +752,7 @@ function tagText(block: string, tag: string): string | undefined {
 function buildAuthorization(
   header: string | undefined,
   connection: DvrConnection,
+  method: string,
   uri: string,
   count: number,
 ): string | undefined {
@@ -470,7 +771,7 @@ function buildAuthorization(
   const hash = (value: string) =>
     createHash(algorithm).update(value).digest('hex');
   const ha1 = hash(`${connection.username}:${realm}:${connection.password}`);
-  const ha2 = hash(`GET:${uri}`);
+  const ha2 = hash(`${method.toUpperCase()}:${uri}`);
   const cnonce = randomBytes(8).toString('hex');
   const qop = params.qop
     ?.split(',')

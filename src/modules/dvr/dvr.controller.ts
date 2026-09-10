@@ -17,6 +17,7 @@ import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { ConfigureDvrDto } from './dto/configure-dvr.dto';
 import { DvrConnectionResultDto } from './dto/dvr-connection-result.dto';
+import { DvrEventLinkageResultDto } from './dto/dvr-event-linkage-result.dto';
 import { DvrDto } from './dto/dvr.dto';
 import { TestDvrConnectionDto } from './dto/test-dvr-connection.dto';
 import { DvrService } from './dvr.service';
@@ -141,5 +142,50 @@ export class DvrController {
   })
   rediscover(@CurrentUser() user: JwtPayload): Promise<Either<DvrDto>> {
     return this.dvrService.rediscover(user.spaceId);
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @HttpCode(HttpStatus.OK)
+  @Post('event-linkage')
+  @ApiOperation({
+    summary: 'Wire recorder motion triggers to publish an event',
+    description:
+      'Admin only. Writes configuration into the recorder itself, which is why this is ' +
+      'not a side effect of `PUT /dvr`: it changes what the appliance does on its own, ' +
+      'not what this product stores. Existing notifications are preserved — the document ' +
+      'written back to each channel motion trigger is the listing already returned by the ' +
+      'recorder, plus one `center` entry, never a document composed from scratch, so ' +
+      'entries such as `record-N` (record on motion) and `whiteLightOut-N` (light on ' +
+      'motion) survive. Idempotent: a channel already publishing `center` is reported ' +
+      '`alreadyLinked` and left untouched. Best effort, with one row per channel in the ' +
+      'report rather than a single verdict, since these are independent writes with no ' +
+      'transaction between them. Most important: this does not enable motion detection — ' +
+      'a channel whose VMD grid is off is reported `linked` and stays silent, because this ' +
+      'route only wires the notification the recorder fires once its own motion detector ' +
+      'decides to trigger.',
+  })
+  @ApiOkResponse({
+    type: DvrEventLinkageResultDto,
+    description: 'Per-channel event linkage report.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'The space has no recorder configured yet.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'The recorder rejected the stored credentials. They were accepted when ' +
+      'they were saved, so this means they changed on the appliance.',
+    [ErrorCode.UPSTREAM_ERROR]:
+      'The recorder answered an error, or accepted no event linkage on any ' +
+      'channel.',
+    [ErrorCode.UPSTREAM_TIMEOUT]:
+      'The recorder did not answer in time, on the first channel or partway ' +
+      'through the roster.',
+  })
+  linkEvents(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<Either<DvrEventLinkageResultDto>> {
+    return this.dvrService.linkEvents(user.spaceId);
   }
 }

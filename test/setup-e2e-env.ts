@@ -10,6 +10,11 @@ if (
 }
 process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 process.env.POLLING_ENABLED = 'false';
+// dotenv above has already loaded the developer's .env. The event listener
+// this switch turns on holds a permanent connection to the recorder, so
+// leaving it on would have the suite dial a real appliance the moment the
+// process boots.
+process.env.DVR_EVENTS_ENABLED = 'false';
 process.env.OTEL_ENABLED = 'false';
 // dotenv above has already loaded the developer's .env. AuthModule picks its
 // delivery adapter from this switch and the e2e harness does not override the

@@ -15,6 +15,7 @@ describe('DvrController', () => {
     configure: jest.Mock;
     rediscover: jest.Mock;
     testConnection: jest.Mock;
+    linkEvents: jest.Mock;
   };
   let controller: DvrController;
 
@@ -24,6 +25,7 @@ describe('DvrController', () => {
       configure: jest.fn(),
       rediscover: jest.fn(),
       testConnection: jest.fn(),
+      linkEvents: jest.fn(),
     };
     controller = new DvrController(dvrService as never);
   });
@@ -57,5 +59,10 @@ describe('DvrController', () => {
     };
     await controller.testConnection(dto);
     expect(dvrService.testConnection).toHaveBeenCalledWith(dto);
+  });
+
+  it('delegates linkEvents with the caller space', async () => {
+    await controller.linkEvents(user);
+    expect(dvrService.linkEvents).toHaveBeenCalledWith('space-uuid');
   });
 });

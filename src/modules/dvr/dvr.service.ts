@@ -9,6 +9,10 @@ import {
 import { DvrClientPort } from './dvr-client.port';
 import { ConfigureDvrDto } from './dto/configure-dvr.dto';
 import { DvrConnectionResultDto } from './dto/dvr-connection-result.dto';
+import {
+  DvrEventLinkageChannelDto,
+  DvrEventLinkageResultDto,
+} from './dto/dvr-event-linkage-result.dto';
 import { DvrDto } from './dto/dvr.dto';
 import { TestDvrConnectionDto } from './dto/test-dvr-connection.dto';
 import { toDvrDto } from './dvr.mapper';
@@ -140,6 +144,90 @@ export class DvrService {
     }
 
     return buildData({ channelCount: discovery.data.length });
+  }
+
+  /**
+   * Wires every channel the recorder currently lists to publish a `center`
+   * motion notification — provisioning, not a connectivity check, so it walks
+   * the recorder's own roster rather than the space's saved cameras: a channel
+   * with nothing plugged in yet gets linked too, and one plugged in later is
+   * already publishing.
+   *
+   * Strictly serial: these are writes to security hardware sharing one digest
+   * nonce counter per recorder, and concurrent requests would deliver that
+   * counter out of order and get refused. A channel timing out stops the loop
+   * rather than working through the rest — eight channels at `DVR_TIMEOUT_MS`
+   * each is minutes of hanging for a recorder that has already stopped
+   * answering, and the remaining channels are reported, not attempted.
+   */
+  async linkEvents(spaceId: string): Promise<Either<DvrEventLinkageResultDto>> {
+    const credentials =
+      await this.dvrAccessor.findCredentialsBySpaceId(spaceId);
+    if (!credentials) {
+      return buildError(ErrorCode.NOT_FOUND, NO_DVR_MESSAGE);
+    }
+
+    const connection = toConnection(credentials);
+    const discovery = await this.dvrClient.discoverChannels(connection);
+    if (!discovery.ok) {
+      return discovery;
+    }
+
+    const channels: DvrEventLinkageChannelDto[] = [];
+    let stoppedAt = -1;
+
+    for (let index = 0; index < discovery.data.length; index += 1) {
+      const channel = discovery.data[index];
+      const linkage = await this.dvrClient.linkMotionEvents(
+        connection,
+        channel.externalId,
+      );
+
+      if (linkage.ok) {
+        channels.push({
+          externalId: channel.externalId,
+          outcome: linkage.data,
+        });
+        continue;
+      }
+
+      channels.push({
+        externalId: channel.externalId,
+        outcome: 'failed',
+        detail: linkage.message,
+      });
+
+      if (linkage.code === ErrorCode.UPSTREAM_TIMEOUT) {
+        stoppedAt = index;
+        break;
+      }
+    }
+
+    if (stoppedAt >= 0) {
+      for (
+        let index = stoppedAt + 1;
+        index < discovery.data.length;
+        index += 1
+      ) {
+        channels.push({
+          externalId: discovery.data[index].externalId,
+          outcome: 'failed',
+          detail: 'not attempted — the recorder stopped answering',
+        });
+      }
+    }
+
+    if (channels.every((channel) => channel.outcome === 'failed')) {
+      // A recorder that stopped answering is a different answer from one that
+      // answered and refused, and the timeout is the one an operator can act
+      // on by looking at the network rather than at the credentials.
+      return buildError(
+        stoppedAt >= 0 ? ErrorCode.UPSTREAM_TIMEOUT : ErrorCode.UPSTREAM_ERROR,
+        'DVR accepted no event linkage on any channel',
+      );
+    }
+
+    return buildData({ channels });
   }
 }
 
