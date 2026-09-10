@@ -297,6 +297,41 @@ describe(DvrEventListener.name, () => {
       expect(pollingScheduler.pollGuarded).toHaveBeenCalledTimes(2);
     });
 
+    it('raises the window to the camera own floor', async () => {
+      // `minPollSeconds` is documented as only ever slowing a camera down, so
+      // an event path that ignored it would turn an operator's 120 into 5.
+      const camera = buildCamera('camera-4', '4');
+      camera.minPollSeconds = 120;
+      cameraAccessor.findPollableBySpace.mockResolvedValue([camera]);
+      const start = Date.now();
+      const now = jest.spyOn(Date, 'now').mockReturnValue(start);
+
+      await connect(
+        motion('4'),
+        () => now.mockReturnValue(start + 60_000),
+        motion('4'),
+      );
+
+      expect(pollingScheduler.pollGuarded).toHaveBeenCalledTimes(1);
+      expect(motionTotal.inc).toHaveBeenCalledWith({
+        channel: '4',
+        outcome: 'debounced',
+      });
+    });
+
+    it('keeps the stream alive when handling one notification throws', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      cameraAccessor.findPollableBySpace
+        .mockRejectedValueOnce(new Error('database blip'))
+        .mockResolvedValue([buildCamera('camera-7', '7')]);
+
+      await connect(motion('4'), motion('7'));
+
+      // The first notification is lost, the connection is not.
+      expect(pollingScheduler.pollGuarded).toHaveBeenCalledTimes(1);
+      expect(streamDrops.inc).not.toHaveBeenCalled();
+    });
+
     it('counts a channel that matches no pollable camera', async () => {
       await connect(motion('2'));
 
@@ -355,6 +390,22 @@ describe(DvrEventListener.name, () => {
         ...credentials,
         password: 'rotated',
       });
+
+      await listener.reconcile();
+
+      expect(signal.aborted).toBe(true);
+    });
+
+    it('disconnects a recorder whose credentials stopped decrypting', async () => {
+      // The open socket is still authenticated with the password that key could
+      // read, and nothing else would ever notice.
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await connect();
+      const signal = opened()[0][1];
+      dvrAccessor.findCredentialsBySpaceId.mockRejectedValue(
+        new Error('Invalid encrypted field format'),
+      );
 
       await listener.reconcile();
 

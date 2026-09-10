@@ -218,8 +218,11 @@ export class DvrService {
     }
 
     if (channels.every((channel) => channel.outcome === 'failed')) {
+      // A recorder that stopped answering is a different answer from one that
+      // answered and refused, and the timeout is the one an operator can act
+      // on by looking at the network rather than at the credentials.
       return buildError(
-        ErrorCode.UPSTREAM_ERROR,
+        stoppedAt >= 0 ? ErrorCode.UPSTREAM_TIMEOUT : ErrorCode.UPSTREAM_ERROR,
         'DVR accepted no event linkage on any channel',
       );
     }

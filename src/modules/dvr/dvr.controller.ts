@@ -173,10 +173,15 @@ export class DvrController {
     [ErrorCode.FORBIDDEN]:
       'Caller is not a space admin, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'The space has no recorder configured yet.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'The recorder rejected the stored credentials. They were accepted when ' +
+      'they were saved, so this means they changed on the appliance.',
     [ErrorCode.UPSTREAM_ERROR]:
-      'The recorder refused the stored credentials, answered an error, or ' +
-      'accepted no event linkage on any channel.',
-    [ErrorCode.UPSTREAM_TIMEOUT]: 'The recorder did not answer in time.',
+      'The recorder answered an error, or accepted no event linkage on any ' +
+      'channel.',
+    [ErrorCode.UPSTREAM_TIMEOUT]:
+      'The recorder did not answer in time, on the first channel or partway ' +
+      'through the roster.',
   })
   linkEvents(
     @CurrentUser() user: JwtPayload,

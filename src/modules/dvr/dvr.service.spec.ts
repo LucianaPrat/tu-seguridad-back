@@ -390,6 +390,28 @@ describe('DvrService', () => {
       });
     });
 
+    it('reports a timeout on the first channel as a timeout, not a generic error', async () => {
+      // A recorder that stopped answering sends the operator to the network;
+      // one that answered and refused sends them to the credentials.
+      withCredentials();
+      const channels: DiscoveredChannel[] = [
+        { externalId: '1', name: 'Cam 1', location: null, status: 'online' },
+        { externalId: '3', name: 'Cam 3', location: null, status: 'online' },
+      ];
+      dvrClient.discoverChannels.mockResolvedValue(buildData(channels));
+      dvrClient.linkMotionEvents.mockResolvedValue(
+        buildError(ErrorCode.UPSTREAM_TIMEOUT, 'DVR event linkage timed out'),
+      );
+
+      const result = await service.linkEvents(spaceId);
+
+      expect(dvrClient.linkMotionEvents).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UPSTREAM_TIMEOUT,
+      });
+    });
+
     it('stops the loop on the first timeout and reports the rest as not attempted', async () => {
       withCredentials();
       const channels: DiscoveredChannel[] = Array.from(

@@ -116,12 +116,25 @@ export class DvrEventListener
     }
 
     const handle = setInterval(() => {
-      void this.reconcile();
+      this.reconcile().catch((error: unknown) =>
+        this.logger.error('dvr event reconcile failed', error),
+      );
     }, RECONCILE_SECONDS * 1000);
     this.schedulerRegistry.addInterval(RECONCILE_NAME, handle);
     this.registered = true;
     this.logger.log('dvr event listener started');
-    void this.reconcile();
+    this.reconcile().catch((error: unknown) =>
+      this.logger.error('dvr event reconcile failed', error),
+    );
+
+    // The watchdog this design leans on is the poll, so a deployment that turns
+    // events on and polling off has removed it without being told.
+    if (!this.configService.get<boolean>(EnvNames.POLLING_ENABLED)) {
+      this.logger.warn(
+        'dvr events are on and polling is off: nothing covers a recorder that ' +
+          'stops publishing, because the poll is the watchdog',
+      );
+    }
   }
 
   onModuleDestroy(): void {
@@ -164,16 +177,38 @@ export class DvrEventListener
           controller: new AbortController(),
           fingerprint: '',
         });
-        void this.supervise(spaceId);
+        this.supervise(spaceId).catch((error: unknown) =>
+          this.logger.error(
+            `dvr event supervisor for space ${spaceId} failed`,
+            error,
+          ),
+        );
         continue;
       }
 
       const credentials = await this.credentialsFor(spaceId);
-      if (credentials && fingerprint(credentials) !== current.fingerprint) {
+      // Re-read across the await: the supervisor may have reconnected while
+      // the credentials were being fetched, and aborting the entry we captured
+      // before it would kill the connection that replaced it.
+      const live = this.streams.get(spaceId);
+      if (!live || live.controller.signal.aborted) {
+        continue;
+      }
+      // A row that stopped decrypting is a reason to disconnect, not a reason
+      // to do nothing: the open socket is still authenticated with the
+      // password that key could read, and nothing else will notice.
+      if (!credentials) {
+        this.logger.warn(
+          `dvr credentials for space ${spaceId} are unreadable, disconnecting`,
+        );
+        live.controller.abort();
+        continue;
+      }
+      if (fingerprint(credentials) !== live.fingerprint) {
         this.logger.log(
           `dvr for space ${spaceId} was reconfigured, reconnecting`,
         );
-        current.controller.abort();
+        live.controller.abort();
       }
     }
   }
@@ -270,7 +305,7 @@ export class DvrEventListener
         controller.signal,
       );
       if (!opened.ok) {
-        outcome = 'error';
+        outcome = idle ? 'idle' : 'error';
         this.logger.warn(
           `dvr event stream for space ${spaceId} did not open: ${opened.code}`,
         );
@@ -287,7 +322,17 @@ export class DvrEventListener
         watchdog.refresh();
         received = true;
         if (event.kind === 'motion') {
-          await this.onMotion(spaceId, event.externalId);
+          // Guarded: `onMotion` reads the database, and a blip there would
+          // otherwise break this loop, destroy the socket and back the whole
+          // recorder off — for one notification that could simply be dropped.
+          try {
+            await this.onMotion(spaceId, event.externalId);
+          } catch (error) {
+            this.logger.error(
+              `dvr motion handling failed for space ${spaceId}`,
+              error instanceof Error ? error.stack : String(error),
+            );
+          }
         }
       }
       return received;
@@ -345,15 +390,17 @@ export class DvrEventListener
       this.motionTotal.inc({ channel: externalId, outcome: 'debounced' });
       return;
     }
-    // Stamped before anything can yield, for the reason in the doc comment.
-    this.motionDueAt.set(
-      camera.id,
-      now +
-        this.configService.getOrThrow<number>(
-          EnvNames.DVR_EVENTS_DEBOUNCE_SECONDS,
-        ) *
-          1000,
+    // Raised to the camera's own floor when it has one. `minPollSeconds` is
+    // documented as only ever slowing a camera down, and an event path that
+    // ignored it would make an operator's 120 fire every 5 seconds instead.
+    const seconds = Math.max(
+      this.configService.getOrThrow<number>(
+        EnvNames.DVR_EVENTS_DEBOUNCE_SECONDS,
+      ),
+      camera.minPollSeconds ?? 0,
     );
+    // Stamped before anything can yield, for the reason in the doc comment.
+    this.motionDueAt.set(camera.id, now + seconds * 1000);
     this.motionTotal.inc({ channel: externalId, outcome: 'triggered' });
     void this.pollingScheduler.pollGuarded(spaceId, camera);
   }

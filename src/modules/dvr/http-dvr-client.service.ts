@@ -455,6 +455,13 @@ export class HttpDvrClientService extends DvrClientPort {
 
       return buildData(readAlerts(response.data));
     } catch (error) {
+      // A non-2xx answer here still carries a body, and on this request that
+      // body is an unread socket. Without this a recorder answering 403 or 500
+      // leaks one connection per reconnect attempt — the same failure `discard`
+      // exists for, on the one path that reaches it from outside `request`.
+      if (axios.isAxiosError(error) && error.response) {
+        discard(error.response);
+      }
       return this.mapError(error, 'DVR event stream');
     }
   }

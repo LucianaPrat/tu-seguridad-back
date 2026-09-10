@@ -74,8 +74,22 @@ const base64KeyRequiredInProduction = (devDefault: string) => {
 };
 
 /** One rung of the poll cadence ladder: whole seconds, at most an hour apart. */
+const POLL_CADENCE_MIN = 1;
+const POLL_CADENCE_MAX = 3600;
 const pollCadenceSeconds = (seconds: number) =>
-  Joi.number().integer().min(1).max(3600).default(seconds);
+  Joi.number()
+    .integer()
+    .min(POLL_CADENCE_MIN)
+    .max(POLL_CADENCE_MAX)
+    .default(seconds);
+
+/**
+ * The recorder's idle beat lands about every 9.5 seconds, so anything at or
+ * under that reconnects between two beats that were never missed — a permanent
+ * reconnect loop against a recorder that is perfectly healthy. Fifteen leaves
+ * room for one late beat and still catches a dead socket inside two.
+ */
+const POLL_CADENCE_MIN_IDLE_SECONDS = 15;
 
 export const envValidationSchema = Joi.object({
   [EnvNames.NODE_ENV]: Joi.string()
@@ -157,7 +171,7 @@ export const envValidationSchema = Joi.object({
   // signal a half-open socket gives.
   [EnvNames.DVR_EVENTS_IDLE_SECONDS]: Joi.number()
     .integer()
-    .min(5)
+    .min(POLL_CADENCE_MIN_IDLE_SECONDS)
     .max(3600)
     .default(30),
 
@@ -174,8 +188,8 @@ export const envValidationSchema = Joi.object({
   // min(...) of the three — 5 seconds, so the base tick does not move.
   [EnvNames.POLLING_PASSIVE_SECONDS]: Joi.number()
     .integer()
-    .min(1)
-    .max(3600)
+    .min(POLL_CADENCE_MIN)
+    .max(POLL_CADENCE_MAX)
     .when(EnvNames.DVR_EVENTS_ENABLED, {
       is: true,
       then: Joi.number().default(300),

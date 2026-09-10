@@ -797,6 +797,30 @@ describe('HttpDvrClientService', () => {
   });
 
   describe('openEventStream', () => {
+    it('releases the socket when the recorder answers an error', async () => {
+      // A non-2xx answer still carries a body, and on this request the body is
+      // an unread socket: without the discard a recorder answering 500 leaks
+      // one connection per reconnect attempt.
+      const body = Readable.from(['boom'], { objectMode: false });
+      httpService.request
+        .mockReturnValueOnce(digestChallenge())
+        .mockReturnValueOnce(
+          throwError(() =>
+            Object.assign(new AxiosError('failed'), {
+              response: { status: 500, headers: {}, data: body },
+            }),
+          ),
+        );
+
+      const result = await client.openEventStream(
+        connection,
+        new AbortController().signal,
+      );
+
+      expect(result.ok).toBe(false);
+      expect(body.destroyed).toBe(true);
+    });
+
     it('yields one event for a document split across three chunks, including a split inside the closing tag', async () => {
       const closeTag = '</EventNotificationAlert>';
       // Both cuts land inside the last 25 characters of the document, i.e.

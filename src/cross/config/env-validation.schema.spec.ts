@@ -219,4 +219,24 @@ describe('envValidationSchema', () => {
       expect(value[EnvNames.POLLING_PASSIVE_SECONDS]).toBe(300);
     });
   });
+
+  describe('DVR_EVENTS_IDLE_SECONDS', () => {
+    /**
+     * The floor has to sit above one heartbeat, or an accepted value reconnects
+     * between two beats that were never missed.
+     */
+    it('refuses a window shorter than the recorder heartbeat', () => {
+      const { error } = envValidationSchema.validate({
+        [EnvNames.DVR_EVENTS_IDLE_SECONDS]: '5',
+      });
+
+      expect(error).toBeDefined();
+    });
+
+    it('accepts a window of two beats', () => {
+      const { value } = validate({ [EnvNames.DVR_EVENTS_IDLE_SECONDS]: '20' });
+
+      expect(value[EnvNames.DVR_EVENTS_IDLE_SECONDS]).toBe(20);
+    });
+  });
 });

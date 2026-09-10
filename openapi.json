@@ -2467,6 +2467,30 @@
               }
             }
           },
+          "400": {
+            "description": "`VALIDATION_ERROR` — The recorder rejected the stored credentials. They were accepted when they were saved, so this means they changed on the appliance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "401": {
             "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
             "content": {
@@ -2540,7 +2564,7 @@
             }
           },
           "502": {
-            "description": "`UPSTREAM_ERROR` — The recorder refused the stored credentials, answered an error, or accepted no event linkage on any channel.",
+            "description": "`UPSTREAM_ERROR` — The recorder answered an error, or accepted no event linkage on any channel.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2564,7 +2588,7 @@
             }
           },
           "504": {
-            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time.",
+            "description": "`UPSTREAM_TIMEOUT` — The recorder did not answer in time, on the first channel or partway through the roster.",
             "content": {
               "application/json": {
                 "schema": {
