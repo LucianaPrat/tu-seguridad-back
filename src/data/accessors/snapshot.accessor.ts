@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, Snapshot } from '@prisma/client';
+import { Prisma, Snapshot, SnapshotReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -129,6 +129,28 @@ export class SnapshotAccessorService {
    * No "is it still referenced" clause: events and their frames age together, so
    * a frame past the window is only ever referenced by an event past it too.
    */
+  /**
+   * The audit rows of one kind inside a date range, oldest first, with their
+   * bytes — the only caller is `scripts/export-ledger.ts`, which writes them
+   * out as JPEGs for `scripts/try-detect.ts` to re-score, so a metadata-only
+   * variant would just mean a second query per row.
+   *
+   * `limit` is mandatory rather than defaulted: every row is a MEDIUMBLOB, and
+   * a forgotten bound here is an out-of-memory on the largest table.
+   */
+  async listByReason(
+    reason: SnapshotReason,
+    from: Date,
+    to: Date,
+    limit: number,
+  ): Promise<Snapshot[]> {
+    return this.prisma.snapshot.findMany({
+      where: { reason, capturedAt: { gte: from, lt: to } },
+      orderBy: { capturedAt: 'asc' },
+      take: limit,
+    });
+  }
+
   async deleteEvidenceBefore(before: Date, limit: number): Promise<number> {
     const doomed = await this.prisma.snapshot.findMany({
       where: { isLive: false, capturedAt: { lt: before } },

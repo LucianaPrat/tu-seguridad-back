@@ -1,6 +1,6 @@
 import { Camera, MonitorZone, Prisma } from '@prisma/client';
 import sharp from 'sharp';
-import { ErrorCode } from '../../cross/common/constants';
+import { ErrorCode, EnvNames } from '../../cross/common/constants';
 import { buildData, buildError } from '../../cross/errors/either';
 import { CapturedImage } from '../dvr/dvr-client.port';
 import { AlertCooldown } from './alert-cooldown';
@@ -545,6 +545,7 @@ describe('PipelineService', () => {
       expect(personsDetected.inc).toHaveBeenCalledWith({
         cameraId: 'camera-uuid',
         outcome: 'persons',
+        trigger: 'schedule',
       });
     });
 
@@ -556,6 +557,7 @@ describe('PipelineService', () => {
       expect(personsDetected.inc).toHaveBeenCalledWith({
         cameraId: 'camera-uuid',
         outcome: 'empty',
+        trigger: 'schedule',
       });
     });
 
@@ -569,7 +571,25 @@ describe('PipelineService', () => {
       expect(personsDetected.inc).toHaveBeenCalledWith({
         cameraId: 'camera-uuid',
         outcome: 'filtered',
+        trigger: 'schedule',
       });
+    });
+
+    /**
+     * `persons` is what survived the threshold, so on its own the result
+     * cannot say whether the detector found nobody or we refused what it
+     * found. The ledger keys on that difference, and so does anyone reading
+     * the manual analyze route.
+     */
+    it('reports what the upstream answered before the threshold', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(
+        detection({ x: 0.5, y: 0.5 }, 0.2),
+      );
+
+      const result = await service.processImage(spaceId, buildCamera(), image);
+
+      expect(result.ok && result.data.persons).toHaveLength(0);
+      expect(result.ok && result.data.personsReported).toBe(1);
     });
 
     it('does not count a poll the detector never answered', async () => {
@@ -645,6 +665,8 @@ describe('PipelineService', () => {
         spaceId,
         'camera-uuid',
         decodable,
+        false,
+        'raw_copy',
       );
     });
 
@@ -716,6 +738,122 @@ describe('PipelineService', () => {
       // threshold of its own still drops the person. Same score as the two
       // tests above: only the threshold changed between them.
       expect(result.ok && result.data.persons).toHaveLength(0);
+    });
+  });
+
+  /**
+   * An event poll is one the recorder already believes saw motion; when the
+   * detector answers nobody anyway, that empty frame is worth keeping so the
+   * upstream's recall can be re-measured later. A scheduled poll carries no
+   * such claim, so it is never worth a write.
+   */
+  describe('the recall ledger', () => {
+    const emptyFrame = () =>
+      buildData({
+        personsDetected: false,
+        imageWidth: 1920,
+        imageHeight: 1080,
+        persons: [],
+      });
+
+    it('stores the empty frame from an event poll when the switch is on', async () => {
+      configService.get.mockImplementation(
+        (name: string) => name === EnvNames.SNAPSHOT_KEEP_MISSES,
+      );
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      await service.processImage(spaceId, buildCamera(), image, 'event');
+
+      expect(snapshotService.store).toHaveBeenCalledTimes(1);
+      expect(snapshotService.store).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+        image,
+        false,
+        'ledger_miss',
+      );
+    });
+
+    it('does not store an empty scheduled poll', async () => {
+      configService.get.mockImplementation(
+        (name: string) => name === EnvNames.SNAPSHOT_KEEP_MISSES,
+      );
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      await service.processImage(spaceId, buildCamera(), image);
+
+      expect(snapshotService.store).not.toHaveBeenCalled();
+    });
+
+    it('does not store a sighting this camera filtered on confidence', async () => {
+      configService.get.mockImplementation(
+        (name: string) => name === EnvNames.SNAPSHOT_KEEP_MISSES,
+      );
+      faceAuthClient.detectPersons.mockResolvedValue(
+        detection({ x: 0.5, y: 0.5 }, 0.1),
+      );
+
+      await service.processImage(spaceId, buildCamera(), image, 'event');
+
+      // A threshold rejecting a sighting is our problem, not a detector miss,
+      // and the two must not land in the same ledger.
+      expect(snapshotService.store).not.toHaveBeenCalled();
+    });
+
+    it('does not store when the switch is off', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      await service.processImage(spaceId, buildCamera(), image, 'event');
+
+      expect(snapshotService.store).not.toHaveBeenCalled();
+    });
+
+    it('still resolves ok when the store rejects', async () => {
+      configService.get.mockImplementation(
+        (name: string) => name === EnvNames.SNAPSHOT_KEEP_MISSES,
+      );
+      snapshotService.store.mockRejectedValue(new Error('db is down'));
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera(),
+        image,
+        'event',
+      );
+
+      expect(result.ok).toBe(true);
+    });
+
+    it('still resolves ok when the store answers an Either error', async () => {
+      configService.get.mockImplementation(
+        (name: string) => name === EnvNames.SNAPSHOT_KEEP_MISSES,
+      );
+      snapshotService.store.mockResolvedValue(
+        buildError(ErrorCode.INTERNAL_ERROR, 'nope'),
+      );
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      const result = await service.processImage(
+        spaceId,
+        buildCamera(),
+        image,
+        'event',
+      );
+
+      expect(result.ok).toBe(true);
+    });
+
+    it('counts an event trigger apart from a scheduled one', async () => {
+      faceAuthClient.detectPersons.mockResolvedValue(emptyFrame());
+
+      await service.processImage(spaceId, buildCamera(), image, 'event');
+
+      expect(personsDetected.inc).toHaveBeenCalledWith({
+        cameraId: 'camera-uuid',
+        outcome: 'empty',
+        trigger: 'event',
+      });
     });
   });
 });

@@ -58,6 +58,7 @@ function buildSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     sha256: 'stored-hash',
     capturedAt: new Date('2026-01-01T00:00:00Z'),
     createdAt: new Date('2026-01-01T00:00:00Z'),
+    reason: null,
     isLive: false,
     ...overrides,
   };

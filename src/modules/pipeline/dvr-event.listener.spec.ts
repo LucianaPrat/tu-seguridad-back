@@ -246,9 +246,13 @@ describe(DvrEventListener.name, () => {
       await connect(motion('4'));
 
       expect(pollingScheduler.pollGuarded).toHaveBeenCalledTimes(1);
+      // The trigger is the point of the event path: the poll it starts is the
+      // only one the recorder already claimed saw motion, and the recall
+      // ledger keys on exactly that.
       expect(pollingScheduler.pollGuarded).toHaveBeenCalledWith(
         'space-a',
         expect.objectContaining({ id: 'camera-4' }),
+        'event',
       );
       expect(motionTotal.inc).toHaveBeenCalledWith({
         channel: '4',

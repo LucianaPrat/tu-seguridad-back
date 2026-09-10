@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
-import { Camera, MonitorMode } from '@prisma/client';
+import { Camera, MonitorMode, SnapshotReason } from '@prisma/client';
 import { Counter } from 'prom-client';
 import {
   EnvNames,
@@ -30,6 +30,14 @@ import {
   OccupancyEngine,
   ZoneInput,
 } from './occupancy.engine';
+
+/**
+ * What asked for this frame. A scheduled tick polls whether or not anything
+ * happened; an event-triggered one runs because the recorder classified motion
+ * as human or vehicle, which is what makes the detector answering "nobody" a
+ * labelled miss rather than an ordinary quiet frame.
+ */
+export type PollTrigger = 'schedule' | 'event';
 
 @Injectable()
 export class PipelineService {
@@ -81,6 +89,7 @@ export class PipelineService {
     spaceId: string,
     camera: Camera,
     image: CapturedImage,
+    trigger: PollTrigger = 'schedule',
   ): Promise<Either<AnalysisResult>> {
     const unusable = this.rejectUnusableCamera<AnalysisResult>(camera);
     if (unusable) {
@@ -116,10 +125,21 @@ export class PipelineService {
     // says the pipeline ran, not that anybody was seen, and "the upstream found
     // nobody" and "it found somebody this threshold dropped" are different
     // problems with different owners.
-    this.personsDetected.inc({
-      cameraId: camera.id,
-      outcome: detectionOutcome(detection.data.persons.length, persons.length),
-    });
+    const outcome = detectionOutcome(
+      detection.data.persons.length,
+      persons.length,
+    );
+    this.personsDetected.inc({ cameraId: camera.id, outcome, trigger });
+    // The recall ledger. The recorder classified motion here and the detector
+    // answered nobody: a labelled miss, free, and today the frame is thrown
+    // away because only an alert persists one. `filtered` is deliberately not
+    // included — that is our own threshold refusing a sighting, a different
+    // problem with a different fix. Awaited rather than fired and forgotten:
+    // no alert is possible on this path, so nothing is waiting on it, and an
+    // unawaited write would outlive the span the poll is timed by.
+    if (outcome === 'empty' && trigger === 'event') {
+      await this.recordLedgerMiss(spaceId, camera, image);
+    }
     const anchors: AnchorWithScore[] = persons.map((person) => ({
       anchor: toPercentPoint(person.anchor),
       detScore: person.detScore,
@@ -211,7 +231,13 @@ export class PipelineService {
       await this.alertEvents.record(spaceId, alerts);
     }
 
-    return buildData({ persons, zoneResults, alerts, occupancyPending });
+    return buildData({
+      persons,
+      personsReported: detection.data.persons.length,
+      zoneResults,
+      alerts,
+      occupancyPending,
+    });
   }
 
   /**
@@ -252,6 +278,45 @@ export class PipelineService {
    * Re-encoding can push a frame that was under `SNAPSHOT_MAX_BYTES` over it,
    * and an alert with no evidence at all is the worse outcome.
    */
+  /**
+   * Keeps the untouched frame of an event-triggered poll the detector answered
+   * empty, so the upstream's recall can be re-measured on the pixels it
+   * actually saw rather than guessed at. Unannotated on purpose: there is
+   * nothing to draw, and a re-encode would change the bytes under measurement.
+   *
+   * Everything that can go wrong here is logged and dropped. No alert is
+   * possible on this path — nobody was detected — but a throw would reach
+   * `pollGuarded`, which would mark the camera errored and count the poll a
+   * failure. An audit copy must not be able to do that.
+   */
+  private async recordLedgerMiss(
+    spaceId: string,
+    camera: Camera,
+    image: CapturedImage,
+  ): Promise<void> {
+    if (!this.configService.get<boolean>(EnvNames.SNAPSHOT_KEEP_MISSES)) {
+      return;
+    }
+    try {
+      const stored = await this.snapshotService.store(
+        spaceId,
+        camera.id,
+        image,
+        false,
+        SnapshotReason.ledger_miss,
+      );
+      if (!stored.ok) {
+        this.logger.warn(
+          `recall ledger frame for camera ${camera.id} was not stored: ${stored.code}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `recall ledger frame for camera ${camera.id} was not stored: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   private async storeEvidence(
     spaceId: string,
     camera: Camera,
@@ -274,7 +339,13 @@ export class PipelineService {
       evidence !== image &&
       this.configService.get<boolean>(EnvNames.SNAPSHOT_KEEP_RAW)
     ) {
-      const raw = await this.snapshotService.store(spaceId, camera.id, image);
+      const raw = await this.snapshotService.store(
+        spaceId,
+        camera.id,
+        image,
+        false,
+        SnapshotReason.raw_copy,
+      );
       if (!raw.ok) {
         this.logger.warn(
           `raw evidence copy for camera ${camera.id} was not stored: ${raw.code}`,

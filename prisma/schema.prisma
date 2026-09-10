@@ -40,6 +40,18 @@ enum AlertChannel {
   email
 }
 
+/// Why a snapshot row exists, when it is not the evidence behind an alert.
+/// Evidence rows and live thumbnails leave it null, so the column is the only
+/// thing that tells an audit copy apart from the frame an operator was shown.
+enum SnapshotReason {
+  /// The recorder reported motion and the detector reported nobody: a labelled
+  /// miss, kept so the upstream's recall can be re-measured on it.
+  ledger_miss
+  /// The untouched capture stored beside an annotated evidence frame when
+  /// `SNAPSHOT_KEEP_RAW` is on.
+  raw_copy
+}
+
 enum EventDeliveryStatus {
   pending
   sent
@@ -256,11 +268,20 @@ model Snapshot {
   /// immutable, so the live frame cannot be one of them.
   isLive Boolean @default(false) @map("is_live")
 
+  /// Null on alert evidence and on the live frame. Set on rows kept for audit,
+  /// which are otherwise indistinguishable from evidence: the retention sweep
+  /// filters on age alone, so without this the recall ledger could not be
+  /// listed, exported or given a lifetime of its own.
+  reason SnapshotReason?
+
   camera      Camera       @relation(fields: [cameraId], references: [id], onDelete: Restrict)
   alertEvents AlertEvent[]
 
   @@index([cameraId, capturedAt])
   @@index([cameraId, isLive])
+  /// The ledger export reads a date range of one reason. Without this it is a
+  /// full scan of the largest table in the schema.
+  @@index([reason, capturedAt])
   @@map("snapshots")
 }
 
