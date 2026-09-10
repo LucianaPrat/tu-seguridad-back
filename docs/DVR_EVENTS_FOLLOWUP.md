@@ -49,17 +49,25 @@ same state it started in (`center` present, alongside the two original notificat
 
 ## Still owed
 
-### 1. A real motion event has not been observed through the shipped code
+### 1. ~~A real motion event has not been observed~~ — closed 2026-09-09 23:11
 
-The linkage, the stream and the parser are all verified, and motion notifications were observed by
-hand earlier in the session — but the end-to-end path _through `DvrEventListener` into a capture_ has
-only been exercised against mocks. Nobody was available to walk in front of a camera during the final
-validation.
+Closed in a live deployment. The recorder pushed a motion notification on channel 8, the listener
+matched it to its camera, fired the capture, and the detector found one person:
 
-**To close it**: set `DVR_EVENTS_ENABLED=true` and `POLLING_ENABLED=true`, walk past a wired channel
-(3, 4, 5, 7 or 8) and expect a capture within a second or two, exactly one despite the four-to-five
-pulse burst, `dvr_event_motion_total{outcome="triggered"}` up by one and `{outcome="debounced"}`
-taking the rest.
+```
+dvr_event_motion_total{channel="8",outcome="triggered"} 1
+camera b542e035… saw 1 person(s), 0 area(s) confirmed
+camera b542e035… now polling detection every 5s
+```
+
+Two things that run confirms beyond the path itself: escalation is per camera — only that one left the
+300-second watchdog rung — and `0 area(s) confirmed` is the occupancy window doing its job, since the
+cadence rises on the raw sighting and only falls on the confirmed one.
+
+**What it did not exercise: the debounce.** That notification arrived alone, with no `debounced`
+series beside it. Earlier in the session a walk past a channel produced four to five pulses, so the
+window is expected to matter, but there is still no field evidence of it collapsing a burst. Item 2
+below is the measurement that would settle both the window and its default.
 
 ### 2. `DVR_EVENTS_DEBOUNCE_SECONDS` is a guess
 
