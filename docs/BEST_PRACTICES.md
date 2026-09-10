@@ -160,3 +160,63 @@ Both were reproduced against a fake infinite multipart server, not inferred.
 - **An axios `timeout` is disarmed once the response headers land.** It therefore does not protect a
   stream that later goes quiet. `DvrEventListener` arms its own watchdog before the connect, covering
   the TCP connect, the headers and the idle period from one timer.
+
+## Measuring against recorded video (recorder playback)
+
+The recorder keeps **continuous** video (`CMR`, all week) going back **at least three weeks** at 10 fps.
+That is a labelled dataset nobody has to collect: any past moment can be re-analysed. The recipe,
+verified 2026-09-10.
+
+**1. Find the segment and its playback URI.** Track ids are `<channel>01` — channel 8 is `801`.
+
+```bash
+curl -s --digest -u admin:"$PASS" -X POST \
+  'http://192.168.1.250/ISAPI/ContentMgmt/search' \
+  -H 'Content-Type: application/xml' --data-binary '<?xml version="1.0" encoding="UTF-8"?>
+<CMSearchDescription><searchID>{A1B2C3D4-1111-2222-3333-444455556666}</searchID>
+<trackIDList><trackID>801</trackID></trackIDList>
+<timeSpanList><timeSpan>
+<startTime>2026-09-09T23:11:00Z</startTime><endTime>2026-09-09T23:12:00Z</endTime>
+</timeSpan></timeSpanList>
+<maxResults>5</maxResults><searchResultPostion>0</searchResultPostion>
+<metadataList><metadataDescriptor>//recordType.meta.std-cgi.com</metadataDescriptor></metadataList>
+</CMSearchDescription>'
+```
+
+Note `searchResultPostion` — the misspelling is the device's, and the correct spelling is rejected.
+The reply carries `<playbackURI>` with `starttime`/`endtime` already filled in.
+
+**2. Pull frames.** The URI needs credentials injected and TCP transport:
+
+```bash
+ffmpeg -rtsp_transport tcp \
+  -i "rtsp://admin:$PASS@192.168.1.250:554/Streaming/tracks/801/?starttime=20260909T231120Z&endtime=20260909T231140Z" \
+  -vf fps=2 -frames:v 40 -q:v 3 out/f_%03d.jpg
+```
+
+Frame _N_ maps to `starttime + (N−1)/fps`, and the mapping can be checked against the timestamp the
+recorder burns into the image. 2 fps is enough — detections come in contiguous half-second runs, so
+denser sampling buys nothing.
+
+**3. Score them.** `scripts/try-detect.ts` takes a directory and prints a TSV plus a summary:
+
+```bash
+npx ts-node scripts/try-detect.ts out/ 5000
+```
+
+The second argument is the gap in ms; the script clamps to a 5 s floor. That floor was chosen when the
+upstream limit was unknown. **The limit is 1 request/second per IP**, so the floor is about five times
+more conservative than it needs to be — worth lowering before running a large sample.
+
+**Time zones:** the recorder's `dateTime` fields carry no offset and its search accepts a `Z` suffix
+while treating the values as local. Use the same wall-clock the recorder prints and do not convert.
+
+### What the search will not give you
+
+`ContentMgmt/search` returns **one continuous block**, never per-event segments, because the recorder
+records continuously rather than on motion. There is no `preRecordTimeSeconds` on the track, and the
+Hik-Connect app's per-event clip is a fixed 2 m 10 s pad from the event timestamp, not a measured
+boundary. `POST /ISAPI/ContentMgmt/logSearch` refused four different body shapes with
+`Invalid XML Content`; whether a device log is reachable is unverified. **The analysis window is ours
+to choose** — which is an advantage, since continuous recording is what allows sampling the seconds
+_before_ a notification, where the best frames turn out to be.
