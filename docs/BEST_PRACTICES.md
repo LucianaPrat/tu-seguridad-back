@@ -201,12 +201,13 @@ denser sampling buys nothing.
 **3. Score them.** `scripts/try-detect.ts` takes a directory and prints a TSV plus a summary:
 
 ```bash
-npx ts-node scripts/try-detect.ts out/ 5000
+npx ts-node scripts/try-detect.ts out/
 ```
 
-The second argument is the gap in ms; the script clamps to a 5 s floor. That floor was chosen when the
-upstream limit was unknown. **The limit is 1 request/second per IP**, so the floor is about five times
-more conservative than it needs to be — worth lowering before running a large sample.
+The optional second argument is the gap in ms; it defaults to 2 000 and the script clamps to a 1.5 s
+floor. **The limit is 1 request/second per IP**, so 2 s carries half again the stated rate as margin
+and a 40-frame event costs about eighty seconds. The floor was 5 s while the limit was unknown, which
+made the same event eight minutes and a ten-event sample unaffordable.
 
 **Time zones:** the recorder's `dateTime` fields carry no offset and its search accepts a `Z` suffix
 while treating the values as local. Use the same wall-clock the recorder prints and do not convert.
