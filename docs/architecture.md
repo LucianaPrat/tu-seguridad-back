@@ -3,7 +3,7 @@
 Who talks to whom, over what, and who starts it. Every arrow points from the side that opens the
 connection. Paths are relative to `/api/v1` unless they start with `/ISAPI`, `/v3` or a full URL.
 
-Keep this file in step with the code: a PR that adds or changes a controller route, a gateway event,
+Keep this file in step with the code (the component diagram is copied into `README.md`; change both): a PR that adds or changes a controller route, a gateway event,
 an ISAPI call, a MediaMTX call or an outbound client updates the diagram in the same PR.
 
 ## Components

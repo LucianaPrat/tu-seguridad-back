@@ -10,6 +10,48 @@ All 25 setup-plan tasks done — see [`plans/01.setup.tasks.md`](plans/01.setup.
 
 Third plan, [`03.tenant-alert-data-model`](plans/03.tenant-alert-data-model.md), **complete**: the setup-era single-admin camera/polygon-zone/zone-event schema is gone, replaced by the tenant model the frontend needs — a `Space` as tenant root, one DVR per space owning its discovered cameras, percentage-rectangle monitor zones, snapshot bytes in MySQL behind a space-scoped route, and alert history with per-channel delivery attempts. It was a deliberate breaking change to schema and API, safe only because production held no data. Task-by-task record: [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md). What it deliberately did **not** ship — the notification provider itself, webhook authentication, snapshot retention, detection cooldown — is under [Roadmap](#roadmap).
 
+## Architecture
+
+Arrow = who calls whom. Solid = HTTP request/response. Dashed = push.
+
+```mermaid
+flowchart LR
+  WEB["Web"]
+  API["Backend"]
+  MTX["MediaMTX"]
+  DVR["DVR"]
+  FA["face-auth"]
+  DB[("MySQL")]
+  MAIL["SMTP"]
+
+  WEB -->|HTTP| API
+  WEB -->|HLS video| MTX
+  API -.->|"socket.io (web not listening)"| WEB
+
+  API -->|HTTP| MTX
+  MTX -->|HTTP auth hook| API
+  MTX -->|RTSP| DVR
+
+  API -->|HTTP| DVR
+  DVR -.->|motion events| API
+
+  API -->|HTTP| FA
+  API --> DB
+  API --> MAIL
+
+  LLM["LLM gateway<br/>chat, STT, TTS"]
+  OTEL["OTel collector"]
+  GRAF["Grafana Cloud"]
+  SENTRY["Sentry"]
+
+  API -->|HTTP| LLM
+  API -->|OTLP traces| OTEL
+  OTEL -->|OTLP| GRAF
+  API -->|errors| SENTRY
+```
+
+Optional: LLM gateway, OTel collector, Sentry; each off unless its env is set. Flows (DVR motion to alert, live view) and known gaps: [`docs/architecture.md`](docs/architecture.md).
+
 ## Stack
 
 | Concern | Choice |
@@ -582,6 +624,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | [`plans/03.tenant-alert-data-model.tasks.md`](plans/03.tenant-alert-data-model.tasks.md) | Live status per task, the design decisions taken along the way, verification evidence, and what was deliberately deferred. |
 | [`plans/DATA_MODEL_REQUIREMENTS.md`](plans/DATA_MODEL_REQUIREMENTS.md) | The UI-derived input for plan 03: what the frontend screens need, kept distinct from the backend decisions. |
 | [`docs/decisions/`](docs/decisions/) | Decision records. `001` — why snapshot bytes live in MySQL and what replacing that touches. `002` — why live video is RTSP into MediaMTX and HLS out, and how a segment request is authorized. |
+| [`docs/architecture.md`](docs/architecture.md) | Communication map: who calls whom (web, backend, DVR, MediaMTX, externals), the two cross-component flows, known gaps. The README's diagram is a copy of its first one. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Decisions behind the layering: accessor conventions, resilience/observability choices, deviations from plan. |
 | [`AGENTS.md`](AGENTS.md) | Project facts, git identity, `Applicable standards` map, check commands, repo-specific rules, declared overrides. Read this before the central standards. |
 | [`.standards/`](.standards/README.md) | Central engineering standards, consumed as a submodule. Read order, precedence, per-stack rules. Never edited from here. |
