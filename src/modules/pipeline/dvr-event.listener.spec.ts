@@ -80,6 +80,7 @@ describe(DvrEventListener.name, () => {
   let dvrAccessor: {
     findSpaceIdsWithDvr: jest.Mock;
     findCredentialsBySpaceId: jest.Mock;
+    findBySpaceId: jest.Mock;
   };
   let cameraAccessor: { findPollableBySpace: jest.Mock };
   let dvrClient: { openEventStream: jest.Mock };
@@ -113,6 +114,7 @@ describe(DvrEventListener.name, () => {
     dvrAccessor = {
       findSpaceIdsWithDvr: jest.fn().mockResolvedValue(['space-a']),
       findCredentialsBySpaceId: jest.fn().mockResolvedValue(credentials),
+      findBySpaceId: jest.fn().mockResolvedValue({ spaceId: 'space-a' }),
     };
     cameraAccessor = {
       findPollableBySpace: jest
@@ -423,6 +425,77 @@ describe(DvrEventListener.name, () => {
       await listener.reconcile();
 
       expect(signal.aborted).toBe(false);
+    });
+  });
+
+  describe('status', () => {
+    it('reads as never connected before the first pass', async () => {
+      expect(await listener.statusFor('space-a')).toEqual({
+        connected: false,
+        since: null,
+        lastHeardAt: null,
+        lastMotionAt: null,
+        lastDrop: null,
+      });
+    });
+
+    it('is null for a space with no recorder', async () => {
+      dvrAccessor.findBySpaceId.mockResolvedValue(null);
+
+      expect(await listener.statusFor('space-a')).toBeNull();
+    });
+
+    it('records the open connection, the heartbeat and the motion', async () => {
+      await connect(keepalive, motion('4'));
+
+      const status = await listener.statusFor('space-a');
+
+      expect(status).toMatchObject({ connected: true, lastDrop: null });
+      expect(status?.since).toBeInstanceOf(Date);
+      expect(status?.lastHeardAt).toBeInstanceOf(Date);
+      expect(status?.lastMotionAt).toBeInstanceOf(Date);
+    });
+
+    it('keeps the heartbeat time apart from the motion time', async () => {
+      await connect(keepalive);
+
+      const status = await listener.statusFor('space-a');
+
+      expect(status?.lastHeardAt).toBeInstanceOf(Date);
+      expect(status?.lastMotionAt).toBeNull();
+    });
+
+    it('reads as down, with the reason, once the recorder refuses', async () => {
+      // Fake timers for the same reason as the refusal test under lifecycle.
+      jest.useFakeTimers();
+      try {
+        dvrClient.openEventStream.mockResolvedValue(
+          buildError(ErrorCode.UPSTREAM_ERROR, 'nope'),
+        );
+
+        await listener.reconcile();
+        await jest.advanceTimersByTimeAsync(0);
+
+        expect(await listener.statuses()).toEqual([
+          expect.objectContaining({ connected: false, lastDrop: 'error' }),
+        ]);
+      } finally {
+        listener.onModuleDestroy();
+        await jest.advanceTimersByTimeAsync(RECONNECT_CEILING_MS);
+        jest.useRealTimers();
+      }
+    });
+
+    it('lists every recorder, including one never reached', async () => {
+      dvrAccessor.findSpaceIdsWithDvr.mockResolvedValue(['space-a', 'space-b']);
+      dvrAccessor.findCredentialsBySpaceId.mockImplementation((spaceId) =>
+        Promise.resolve(spaceId === 'space-a' ? credentials : null),
+      );
+      await connect();
+
+      const statuses = await listener.statuses();
+
+      expect(statuses.map((status) => status.connected)).toEqual([true, false]);
     });
   });
 

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { Public } from '../../cross/decorators/public.decorator';
+import { DvrEventsHealthIndicator } from './dvr-events.health-indicator';
 import { FaceAuthHealthIndicator } from './face-auth.health-indicator';
 import { PrismaHealthIndicator } from './prisma.health-indicator';
 
@@ -24,6 +25,7 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly prismaHealthIndicator: PrismaHealthIndicator,
     private readonly faceAuthHealthIndicator: FaceAuthHealthIndicator,
+    private readonly dvrEventsHealthIndicator: DvrEventsHealthIndicator,
   ) {}
 
   @Public()
@@ -66,7 +68,9 @@ export class HealthController {
   @ApiOperation({
     summary: 'Upstream reachability',
     description:
-      'Public. Short-timeout reachability check against the face-auth detection API. ' +
+      'Public. Short-timeout reachability check against the face-auth detection API, ' +
+      'and whether every configured recorder has its event connection open ' +
+      '(`dvr-events`: counts only; per-space detail is `GET /api/v1/dvr/events`). ' +
       'Deliberately separate from `/health/ready`: a degraded upstream is reported ' +
       'here without marking the instance not-ready, because camera and zone ' +
       'management keep working without it. Only person detection stops.',
@@ -76,6 +80,7 @@ export class HealthController {
   dependencies() {
     return this.health.check([
       () => this.faceAuthHealthIndicator.isHealthy('face-auth'),
+      () => this.dvrEventsHealthIndicator.isHealthy('dvr-events'),
     ]);
   }
 }
