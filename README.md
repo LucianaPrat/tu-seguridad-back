@@ -630,6 +630,7 @@ All validated by Joi in `src/cross/config/env-validation.schema.ts` (`.env.examp
 | [`.standards/`](.standards/README.md) | Central engineering standards, consumed as a submodule. Read order, precedence, per-stack rules. Never edited from here. |
 | [`docs/STANDARDS_GAPS.md`](docs/STANDARDS_GAPS.md) | Where this repo does not meet the central standards yet, and the fix for each. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Pointers into the central workflow + what this repo's CI actually runs. |
+| [`docs/FINDINGS_2026-11-14.md`](docs/FINDINGS_2026-11-14.md) | Communication-mapping session: email link bug, socket push with no listener, routes the web never calls, monitoring plan for the recorder connection, local DB restore. |
 | [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) | Tooling/ops gotchas learned building this repo. |
 | [`ops/otel-collector/`](ops/otel-collector/README.md) | The trace collector sidecar: modes, scripts, PM2, why it is its own instance and not face-api's. Deployed by hand, not by `deploy.yml`. |
 | [`CLAUDE.md`](CLAUDE.md) | Claude Code specific notes on top of `AGENTS.md`. |
