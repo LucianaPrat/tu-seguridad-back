@@ -1738,7 +1738,7 @@
     },
     "/health/dependencies": {
       "get": {
-        "description": "Public. Short-timeout reachability check against the face-auth detection API. Deliberately separate from `/health/ready`: a degraded upstream is reported here without marking the instance not-ready, because camera and zone management keep working without it. Only person detection stops.",
+        "description": "Public. Short-timeout reachability check against the face-auth detection API, and whether every configured recorder has its event connection open (`dvr-events`: counts only; per-space detail is `GET /api/v1/dvr/events`). Deliberately separate from `/health/ready`: a degraded upstream is reported here without marking the instance not-ready, because camera and zone management keep working without it. Only person detection stops.",
         "operationId": "HealthController_dependencies",
         "parameters": [],
         "responses": {
@@ -1906,6 +1906,101 @@
         "summary": "Upstream reachability",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/dvr/events": {
+      "get": {
+        "description": "Whether this API currently has the space recorder event stream open, when it last heard from it, and when it last reported motion. Any member may read it.",
+        "operationId": "DvrEventsController_status_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DvrEventStatusDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The space has no recorder configured yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Recorder event connection status",
+        "tags": [
+          "dvr"
         ]
       }
     },
@@ -2724,6 +2819,417 @@
         "summary": "Read a stored snapshot",
         "tags": [
           "snapshots"
+        ]
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "description": "Alerts raised inside the caller space, newest first. Paging is keyset, not offset: send back the `nextCursor` of the previous page, and stop when it comes back `null`. The cursor is opaque — one detection frame writes an event per entered area with the same `detectedAt`, so it carries the event id too and a timestamp of your own will not work in its place. Each item keeps the camera label copied at detection time, so a deleted camera still renders.",
+        "operationId": "AlertEventsController_query_v1",
+        "parameters": [
+          {
+            "name": "alertType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "intruder",
+                "suspicious"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Inclusive lower bound on detectedAt, ISO 8601",
+            "schema": {
+              "example": "2026-08-01T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "nextCursor from the previous page",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of history, plus the cursor for the next one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertEventPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — A cursor this API did not issue, a `limit` over the ceiling, or a malformed `from`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Page the alert history of the space",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/acknowledgements": {
+      "post": {
+        "description": "Two callers use this route, and the field they send says which. A notification provider sends `correlationId`, the value issued with the delivery, which no other route returns and no message ever carries. The recipient of an alert email sends `token`, the value in the acknowledge link of that mail — the frontend page behind the link posts it here. Exactly one of the two, never both. The first call acknowledges the alert; a repeat, an unknown id and a token that fails its signature are answered identically, so the response reveals no event. Public: no session exists on either path.",
+        "operationId": "AlertEventsController_acknowledge_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboundAcknowledgementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Same answer for a match, a repeat, an unknown id and a bad token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Both credentials sent or neither, or one over the maximum token length.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "summary": "Acknowledge an alert with a delivery credential",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/{id}": {
+      "get": {
+        "description": "One alert with the camera label and alert type copied at detection time, the snapshot that raised it if one was stored, and who acknowledged it. History is immutable: logically deleting the camera or the zone it names does not change it.",
+        "operationId": "AlertEventsController_findOne_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Alert event id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The alert.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertEventDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read one alert",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/{id}/deliveries": {
+      "get": {
+        "description": "One row per channel and recipient the alert was routed to, with its status and the timestamp of any provider callback. Attempts are planned, not yet sent — no provider ships with this API — so they stay `pending`. The correlation id is never in this response: it is what the acknowledgement route accepts, and a member holding it could acknowledge an alert they never received.",
+        "operationId": "AlertEventsController_findDeliveries_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Alert event id. Resolved inside the caller space only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery attempts planned for that alert.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventDeliveryDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the delivery attempts of an alert",
+        "tags": [
+          "events"
         ]
       }
     },
@@ -3822,417 +4328,6 @@
         "summary": "Analyze an uploaded frame",
         "tags": [
           "cameras"
-        ]
-      }
-    },
-    "/api/v1/events": {
-      "get": {
-        "description": "Alerts raised inside the caller space, newest first. Paging is keyset, not offset: send back the `nextCursor` of the previous page, and stop when it comes back `null`. The cursor is opaque — one detection frame writes an event per entered area with the same `detectedAt`, so it carries the event id too and a timestamp of your own will not work in its place. Each item keeps the camera label copied at detection time, so a deleted camera still renders.",
-        "operationId": "AlertEventsController_query_v1",
-        "parameters": [
-          {
-            "name": "alertType",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "intruder",
-                "suspicious"
-              ]
-            }
-          },
-          {
-            "name": "from",
-            "required": false,
-            "in": "query",
-            "description": "Inclusive lower bound on detectedAt, ISO 8601",
-            "schema": {
-              "example": "2026-08-01T00:00:00.000Z",
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "maximum": 100,
-              "default": 25,
-              "type": "number"
-            }
-          },
-          {
-            "name": "cursor",
-            "required": false,
-            "in": "query",
-            "description": "nextCursor from the previous page",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "One page of history, plus the cursor for the next one.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AlertEventPageDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_ERROR` — A cursor this API did not issue, a `limit` over the ceiling, or a malformed `from`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "VALIDATION_ERROR"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "UNAUTHORIZED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "FORBIDDEN"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Page the alert history of the space",
-        "tags": [
-          "events"
-        ]
-      }
-    },
-    "/api/v1/events/acknowledgements": {
-      "post": {
-        "description": "Two callers use this route, and the field they send says which. A notification provider sends `correlationId`, the value issued with the delivery, which no other route returns and no message ever carries. The recipient of an alert email sends `token`, the value in the acknowledge link of that mail — the frontend page behind the link posts it here. Exactly one of the two, never both. The first call acknowledges the alert; a repeat, an unknown id and a token that fails its signature are answered identically, so the response reveals no event. Public: no session exists on either path.",
-        "operationId": "AlertEventsController_acknowledge_v1",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InboundAcknowledgementDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Accepted. Same answer for a match, a repeat, an unknown id and a bad token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AcknowledgementDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_ERROR` — Both credentials sent or neither, or one over the maximum token length.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "VALIDATION_ERROR"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {}
-        ],
-        "summary": "Acknowledge an alert with a delivery credential",
-        "tags": [
-          "events"
-        ]
-      }
-    },
-    "/api/v1/events/{id}": {
-      "get": {
-        "description": "One alert with the camera label and alert type copied at detection time, the snapshot that raised it if one was stored, and who acknowledged it. History is immutable: logically deleting the camera or the zone it names does not change it.",
-        "operationId": "AlertEventsController_findOne_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "Alert event id. Resolved inside the caller space only.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The alert.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AlertEventDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "UNAUTHORIZED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "FORBIDDEN"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Read one alert",
-        "tags": [
-          "events"
-        ]
-      }
-    },
-    "/api/v1/events/{id}/deliveries": {
-      "get": {
-        "description": "One row per channel and recipient the alert was routed to, with its status and the timestamp of any provider callback. Attempts are planned, not yet sent — no provider ships with this API — so they stay `pending`. The correlation id is never in this response: it is what the acknowledgement route accepts, and a member holding it could acknowledge an alert they never received.",
-        "operationId": "AlertEventsController_findDeliveries_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "Alert event id. Resolved inside the caller space only.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Delivery attempts planned for that alert.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EventDeliveryDto"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "UNAUTHORIZED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "FORBIDDEN"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — No alert with that id in the caller space.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiErrorDto"
-                    },
-                    {
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "List the delivery attempts of an alert",
-        "tags": [
-          "events"
         ]
       }
     },
@@ -6158,6 +6253,55 @@
           "total"
         ]
       },
+      "DvrEventStatusDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the event listener is on (`DVR_EVENTS_ENABLED`). When it is off, nothing below is tracked and alerts come from polling alone."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "Event connection open. It closes after `DVR_EVENTS_IDLE_SECONDS` of silence, so `true` also means the recorder was heard from recently."
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When the current connection opened or, while disconnected, since when the recorder has been unreachable. Null if it was never reached."
+          },
+          "lastHeardAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Last message of any kind. The recorder sends a heartbeat about every 10 s, so this moves even with no motion."
+          },
+          "lastMotionAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Last motion notification. Long gaps are normal at night or in an empty place; they do not mean the connection is broken."
+          },
+          "lastDrop": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "error",
+              "closed"
+            ],
+            "nullable": true,
+            "description": "Why the last connection ended: `idle` (went silent), `error` (refused, unreachable, bad credentials), `closed` (the recorder ended it)."
+          }
+        },
+        "required": [
+          "enabled",
+          "connected",
+          "since",
+          "lastHeardAt",
+          "lastMotionAt",
+          "lastDrop"
+        ]
+      },
       "DvrDto": {
         "type": "object",
         "properties": {
@@ -6303,6 +6447,176 @@
         },
         "required": [
           "channels"
+        ]
+      },
+      "AlertEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cameraId": {
+            "type": "string",
+            "nullable": true
+          },
+          "zoneId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null when the camera monitors the full frame"
+          },
+          "cameraLabel": {
+            "type": "string",
+            "example": "Camera 01 – Front gate"
+          },
+          "alertType": {
+            "type": "string",
+            "enum": [
+              "intruder",
+              "suspicious"
+            ]
+          },
+          "detectedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "snapshotUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Authenticated URL of the frame the alert was raised on"
+          },
+          "personsDetected": {
+            "type": "number",
+            "nullable": true,
+            "description": "Anchors inside the area on the frame that raised the alert. Null on an alert recorded before the pipeline stored it."
+          },
+          "confidence": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.913,
+            "description": "Highest detection score among those anchors, 0-1. Null on an alert recorded before the pipeline stored it."
+          },
+          "acknowledgedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "acknowledgedByUserId": {
+            "type": "number",
+            "nullable": true
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "call",
+                "whatsapp",
+                "email"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "cameraLabel",
+          "alertType",
+          "detectedAt",
+          "channels"
+        ]
+      },
+      "AlertEventPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertEventDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Opaque cursor for the next page; null when the last page was returned"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InboundAcknowledgementDto": {
+        "type": "object",
+        "properties": {
+          "correlationId": {
+            "type": "string",
+            "description": "The correlation id sent with the delivery. Provider callbacks only."
+          },
+          "token": {
+            "type": "string",
+            "description": "The token from the acknowledge link of an alert email."
+          }
+        }
+      },
+      "EventDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "call",
+              "whatsapp",
+              "email"
+            ]
+          },
+          "recipientUserId": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "failed",
+              "delivered"
+            ]
+          },
+          "sentAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "inboundReceivedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the provider callback for this attempt arrived"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "eventId",
+          "channel",
+          "recipientUserId",
+          "status",
+          "createdAt"
         ]
       },
       "CameraDto": {
@@ -6493,176 +6807,6 @@
           "byteSize",
           "capturedAt",
           "url"
-        ]
-      },
-      "AlertEventDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "cameraId": {
-            "type": "string",
-            "nullable": true
-          },
-          "zoneId": {
-            "type": "string",
-            "nullable": true,
-            "description": "Null when the camera monitors the full frame"
-          },
-          "cameraLabel": {
-            "type": "string",
-            "example": "Camera 01 – Front gate"
-          },
-          "alertType": {
-            "type": "string",
-            "enum": [
-              "intruder",
-              "suspicious"
-            ]
-          },
-          "detectedAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "snapshotUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "Authenticated URL of the frame the alert was raised on"
-          },
-          "personsDetected": {
-            "type": "number",
-            "nullable": true,
-            "description": "Anchors inside the area on the frame that raised the alert. Null on an alert recorded before the pipeline stored it."
-          },
-          "confidence": {
-            "type": "number",
-            "nullable": true,
-            "example": 0.913,
-            "description": "Highest detection score among those anchors, 0-1. Null on an alert recorded before the pipeline stored it."
-          },
-          "acknowledgedAt": {
-            "format": "date-time",
-            "type": "string",
-            "nullable": true
-          },
-          "acknowledgedByUserId": {
-            "type": "number",
-            "nullable": true
-          },
-          "channels": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "call",
-                "whatsapp",
-                "email"
-              ]
-            }
-          }
-        },
-        "required": [
-          "id",
-          "cameraLabel",
-          "alertType",
-          "detectedAt",
-          "channels"
-        ]
-      },
-      "AlertEventPageDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AlertEventDto"
-            }
-          },
-          "nextCursor": {
-            "type": "string",
-            "nullable": true,
-            "description": "Opaque cursor for the next page; null when the last page was returned"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "InboundAcknowledgementDto": {
-        "type": "object",
-        "properties": {
-          "correlationId": {
-            "type": "string",
-            "description": "The correlation id sent with the delivery. Provider callbacks only."
-          },
-          "token": {
-            "type": "string",
-            "description": "The token from the acknowledge link of an alert email."
-          }
-        }
-      },
-      "EventDeliveryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "eventId": {
-            "type": "string"
-          },
-          "channel": {
-            "type": "string",
-            "enum": [
-              "call",
-              "whatsapp",
-              "email"
-            ]
-          },
-          "recipientUserId": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "sent",
-              "failed",
-              "delivered"
-            ]
-          },
-          "sentAt": {
-            "format": "date-time",
-            "type": "string",
-            "nullable": true
-          },
-          "deliveredAt": {
-            "format": "date-time",
-            "type": "string",
-            "nullable": true
-          },
-          "inboundReceivedAt": {
-            "format": "date-time",
-            "type": "string",
-            "nullable": true,
-            "description": "When the provider callback for this attempt arrived"
-          },
-          "error": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "eventId",
-          "channel",
-          "recipientUserId",
-          "status",
-          "createdAt"
         ]
       },
       "StreamAuthorizationDto": {

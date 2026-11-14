@@ -53,7 +53,37 @@ interface OpenStream {
 }
 
 /** Why a connection ended, as the drops counter reports it. */
-type DropReason = 'idle' | 'error' | 'closed';
+export type DropReason = 'idle' | 'error' | 'closed';
+
+/**
+ * What this process knows about one recorder's event connection.
+ *
+ * In memory and per process, which is enough: the API runs as a single fork,
+ * and a restart reconnects within one reconcile pass anyway.
+ */
+export interface DvrEventStatus {
+  connected: boolean;
+  /**
+   * When the current connection opened or, while disconnected, when the
+   * recorder was first lost. Retries that keep failing leave it alone, so it
+   * reads as "down since".
+   */
+  since: Date | null;
+  /** Last part of any kind. The heartbeat counts, so this moves every ~10 s. */
+  lastHeardAt: Date | null;
+  /** Last motion notification, matched to a camera or not. */
+  lastMotionAt: Date | null;
+  lastDrop: DropReason | null;
+}
+
+/** A recorder this process has not reached yet, or whose row it cannot read. */
+const NEVER_CONNECTED: DvrEventStatus = {
+  connected: false,
+  since: null,
+  lastHeardAt: null,
+  lastMotionAt: null,
+  lastDrop: null,
+};
 
 /**
  * Captures a frame when the recorder says something moved, instead of when a
@@ -90,6 +120,13 @@ export class DvrEventListener
    * is deleted.
    */
   private readonly motionDueAt = new Map<string, number>();
+
+  /**
+   * Per recorder, kept after its supervisor exits so a recorder that went away
+   * still reads as down. Bounded by the space count; readers only ask about
+   * spaces that still have a recorder.
+   */
+  private readonly status = new Map<string, DvrEventStatus>();
 
   private stopping = false;
   private registered = false;
@@ -213,6 +250,26 @@ export class DvrEventListener
     }
   }
 
+  get enabled(): boolean {
+    return Boolean(
+      this.configService.get<boolean>(EnvNames.DVR_EVENTS_ENABLED),
+    );
+  }
+
+  /** The event connection of one space's recorder, or null if it has none. */
+  async statusFor(spaceId: string): Promise<DvrEventStatus | null> {
+    const dvr = await this.dvrAccessor.findBySpaceId(spaceId);
+    return dvr ? { ...(this.status.get(spaceId) ?? NEVER_CONNECTED) } : null;
+  }
+
+  /** Every recorder that should be connected, and whether it is. */
+  async statuses(): Promise<DvrEventStatus[]> {
+    const spaceIds = await this.dvrAccessor.findSpaceIdsWithDvr();
+    return spaceIds.map((spaceId) => ({
+      ...(this.status.get(spaceId) ?? NEVER_CONNECTED),
+    }));
+  }
+
   /**
    * Drops the camera's motion window, so a channel that comes back is not
    * gated by the window of the camera that used to hold its id.
@@ -314,6 +371,11 @@ export class DvrEventListener
 
       this.streamsActive.inc();
       counted = true;
+      this.mark(spaceId, {
+        connected: true,
+        since: new Date(),
+        lastDrop: null,
+      });
       this.logger.log(`dvr event stream open for space ${spaceId}`);
 
       for await (const event of opened.data) {
@@ -321,7 +383,10 @@ export class DvrEventListener
         // its idle beat while it is busy reporting motion.
         watchdog.refresh();
         received = true;
+        const heardAt = new Date();
+        this.mark(spaceId, { lastHeardAt: heardAt });
         if (event.kind === 'motion') {
+          this.mark(spaceId, { lastMotionAt: heardAt });
           // Guarded: `onMotion` reads the database, and a blip there would
           // otherwise break this loop, destroy the socket and back the whole
           // recorder off — for one notification that could simply be dropped.
@@ -353,7 +418,24 @@ export class DvrEventListener
         this.streamsActive.dec();
       }
       this.streamDrops.inc({ reason: outcome });
+      const before = this.status.get(spaceId);
+      this.mark(spaceId, {
+        connected: false,
+        // A retry that fails again must not reset how long it has been down.
+        since:
+          before && !before.connected && before.since
+            ? before.since
+            : new Date(),
+        lastDrop: outcome,
+      });
     }
+  }
+
+  private mark(spaceId: string, change: Partial<DvrEventStatus>): void {
+    this.status.set(spaceId, {
+      ...(this.status.get(spaceId) ?? NEVER_CONNECTED),
+      ...change,
+    });
   }
 
   /**

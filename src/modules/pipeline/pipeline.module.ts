@@ -9,6 +9,7 @@ import { SnapshotsModule } from '../snapshots/snapshots.module';
 import { AlertCooldown } from './alert-cooldown';
 import { CadenceEngine } from './cadence.engine';
 import { DvrEventListener } from './dvr-event.listener';
+import { DvrEventsController } from './dvr-events.controller';
 import { OccupancyEngine } from './occupancy.engine';
 import { PipelineService } from './pipeline.service';
 import { PollingScheduler } from './polling.scheduler';
@@ -24,6 +25,7 @@ import { PollingScheduler } from './polling.scheduler';
     SnapshotsModule,
     EventsModule,
   ],
+  controllers: [DvrEventsController],
   providers: [
     PipelineService,
     PollingScheduler,
