@@ -2,6 +2,8 @@
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 
+# The agent copies the bundle as root; hand it to the user the app runs as.
+sudo chown -R ec2-user:ec2-user "$APP_DIR"
 cd "$APP_DIR"
 
 mv file.env .env

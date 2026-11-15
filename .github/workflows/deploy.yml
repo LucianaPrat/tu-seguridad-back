@@ -129,6 +129,6 @@ jobs:
           echo "Deployment ID: $DEPLOYMENT_ID"
           aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID" || {
             aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
-              --query 'deploymentInfo.[status,errorInformation]' --output text
+              --query 'deploymentInfo.errorInformation' --output json
             exit 1
           }
