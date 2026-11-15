@@ -2,8 +2,7 @@ name: Deploy to EC2 via CodeDeploy
 
 on:
   push:
-    # TEMP: ci/codedeploy-pipeline deploys while the pipeline is debugged. Remove before merging.
-    branches: [main, ci/codedeploy-pipeline]
+    branches: [main]
     paths-ignore:
       - 'docs/**'
       - 'plans/**'
