@@ -134,7 +134,7 @@ jobs:
             for target in $(aws deploy list-deployment-targets --deployment-id "$DEPLOYMENT_ID" \
               --query 'targetIds' --output text); do
               aws deploy get-deployment-target --deployment-id "$DEPLOYMENT_ID" --target-id "$target" \
-                --query "deploymentTarget.instanceTarget.lifecycleEvents[?status=='Failed'].[lifecycleEventName,diagnostics.scriptName,diagnostics.logTail]" \
+                --query "deploymentTarget.instanceTarget.lifecycleEvents[?status=='Failed'].[lifecycleEventName,diagnostics.errorCode,diagnostics.scriptName,diagnostics.message,diagnostics.logTail]" \
                 --output text
             done
             exit 1
