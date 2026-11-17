@@ -1,0 +1,94 @@
+name: Deploy
+
+# Production runs on a single PM2 host (fork mode, instances: 1) — no containers,
+# no orchestrator. Deploy = SSH in, fetch the target SHA, build, migrate, reload.
+#
+# NOTE: `pm2 reload` in fork mode with instances: 1 is a fast restart, NOT a
+# zero-downtime swap. Acceptable at current scale (8-camera home security);
+# revisit (cluster mode / a second instance) if downtime ever matters.
+#
+# ROLLBACK: every run prints the deployed SHA to its job summary. To roll back,
+# re-run this workflow via "Run workflow" and pass a previously deployed SHA as
+# the `sha` input. No automated rollback logic is needed at this scale.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Git SHA to deploy (pass a previously deployed SHA to roll back)'
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Resolve target SHA
+        id: target
+        run: echo "sha=${{ github.event.inputs.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          command_timeout: 15m
+          envs: TARGET_SHA,APP_DIR,APP_PORT
+          script: |
+            set -euo pipefail
+            cd "$APP_DIR"
+
+            git fetch --all --prune
+            git checkout --force "$TARGET_SHA"
+
+            # Full install (build needs devDeps — nest/tsc); slim afterwards.
+            npm ci
+            npm run build
+
+            # Decrypt production secrets to .env using the age key on the host
+            # (~/.config/sops/age/keys.txt). See docs/BEST_PRACTICES.md.
+            sops -d secrets.enc.yaml > .env
+
+            # Migrations run BEFORE the reload: a failing migration aborts here
+            # (set -e) and leaves the previous build running untouched.
+            npx prisma migrate deploy
+
+            npm prune --omit=dev
+
+            pm2 reload ecosystem.config.js --env production --update-env
+
+            # Post-deploy health gate: fail the job if /health/ready never 200s.
+            ok=0
+            for i in $(seq 1 10); do
+              if curl -fsS "http://127.0.0.1:${APP_PORT}/health/ready" >/dev/null; then
+                ok=1; break
+              fi
+              sleep 3
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "health check failed after reload" >&2
+              exit 1
+            fi
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          APP_DIR: ${{ secrets.PROD_APP_DIR }}
+          APP_PORT: ${{ vars.PROD_APP_PORT || '3000' }}
+
+      - name: Record deployed SHA
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo ""
+            echo "- Target SHA: \`${{ steps.target.outputs.sha }}\`"
+            echo "- Result: ${{ job.status }}"
+            echo ""
+            echo "Rollback: re-run this workflow and pass a previously deployed SHA as the \`sha\` input."
+          } >> "$GITHUB_STEP_SUMMARY"
