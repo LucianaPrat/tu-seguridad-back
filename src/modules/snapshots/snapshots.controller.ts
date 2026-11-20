@@ -9,6 +9,10 @@ import {
 // `import type` is required: these appear in decorated parameter positions and
 // TS1272 rejects value imports there under isolatedModules.
 import type { Request, Response } from 'express';
+import {
+  CAMERA_FORBIDDEN_MESSAGE,
+  canSeeCamera,
+} from '../../cross/common/permissions';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { ErrorCode } from '../../cross/common/constants';
@@ -64,7 +68,8 @@ export class SnapshotsController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      "Caller has not completed their profile, or a guest without the snapshot's camera.",
     [ErrorCode.NOT_FOUND]: 'No snapshot with that id in the caller space.',
   })
   async read(
@@ -79,6 +84,10 @@ export class SnapshotsController {
         result.code,
         result.message ?? 'Snapshot not found',
       );
+    }
+
+    if (!canSeeCamera(user, result.data.cameraId)) {
+      throw buildGuardException(ErrorCode.FORBIDDEN, CAMERA_FORBIDDEN_MESSAGE);
     }
 
     res.setHeader('Cache-Control', CACHE_CONTROL);

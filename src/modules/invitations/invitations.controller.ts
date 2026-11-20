@@ -35,6 +35,7 @@ import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
@@ -93,17 +94,21 @@ export class InvitationsController {
     return this.invitationsService.create(user.spaceId, user.sub, dto);
   }
 
-  /** Who was invited to the space is an administrator's business. */
-  @Roles(SpaceMemberRole.admin)
+  /** Pending invitations belong to the Members section. */
+  @RequireMenu('members')
   @Get()
   @ApiOperation({
     summary: 'List the pending invitations of the space',
     description:
-      'Admin only. Pending means not accepted, declined, revoked or expired. Newest ' +
+      'Members section. Pending means not accepted, declined, revoked or expired. Newest ' +
       'first, never carrying the token.',
   })
   @ApiOkResponse({ type: InvitationListDto })
-  @ApiFailures(ADMIN_FAILURES)
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the members section, or has an incomplete profile.',
+  })
   findPending(
     @CurrentUser() user: JwtPayload,
   ): Promise<Either<InvitationListDto>> {

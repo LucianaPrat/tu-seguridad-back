@@ -27,6 +27,8 @@ export interface AlertEventQuery {
   /** Inclusive lower bound; the UI filters history forward from a date. */
   from?: Date;
   take: number;
+  /** Guest scope; undefined = every camera. */
+  cameraIds?: string[];
   cursor?: AlertEventCursor;
 }
 
@@ -76,9 +78,14 @@ export class AlertEventAccessorService {
   findById(
     spaceId: string,
     eventId: string,
+    cameraIds?: string[],
   ): Promise<AlertEventWithChannels | null> {
     return this.prisma.alertEvent.findFirst({
-      where: { id: eventId, spaceId },
+      where: {
+        id: eventId,
+        spaceId,
+        ...(cameraIds ? { cameraId: { in: cameraIds } } : {}),
+      },
       include: { deliveries: { select: { channel: true } } },
     });
   }
@@ -97,6 +104,9 @@ export class AlertEventAccessorService {
     const where: Prisma.AlertEventWhereInput = { spaceId };
     if (query.alertType) {
       where.alertType = query.alertType;
+    }
+    if (query.cameraIds) {
+      where.cameraId = { in: query.cameraIds };
     }
     if (query.from) {
       where.detectedAt = { gte: query.from };

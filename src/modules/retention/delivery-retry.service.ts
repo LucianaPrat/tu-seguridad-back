@@ -112,6 +112,7 @@ export class DeliveryRetryService {
     try {
       const recipients = await this.spaceMemberAccessor.findActiveRecipients(
         event.spaceId,
+        event.cameraId,
       );
       await this.alertEmail.resend(event, deliveries, recipients);
     } catch (error) {

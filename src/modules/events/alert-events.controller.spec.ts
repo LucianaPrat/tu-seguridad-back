@@ -30,9 +30,31 @@ describe('AlertEventsController', () => {
 
   it('delegates the history query with the caller space', async () => {
     await controller.query(user, { alertType: 'intruder' });
-    expect(alertEventsService.query).toHaveBeenCalledWith('space-uuid', {
-      alertType: 'intruder',
-    });
+    expect(alertEventsService.query).toHaveBeenCalledWith(
+      'space-uuid',
+      { alertType: 'intruder' },
+      undefined,
+    );
+  });
+
+  it('scopes a guest to its cameras', async () => {
+    const guest = buildPrincipal({ role: 'guest', cameraIds: ['cam-1'] });
+    await controller.query(guest, {});
+    await controller.findOne(guest, 'event-1');
+    await controller.findDeliveries(guest, 'event-1');
+    expect(alertEventsService.query).toHaveBeenCalledWith('space-uuid', {}, [
+      'cam-1',
+    ]);
+    expect(alertEventsService.findById).toHaveBeenCalledWith(
+      'space-uuid',
+      'event-1',
+      ['cam-1'],
+    );
+    expect(alertEventsService.findDeliveries).toHaveBeenCalledWith(
+      'space-uuid',
+      'event-1',
+      ['cam-1'],
+    );
   });
 
   it('delegates findOne with the caller space', async () => {
@@ -40,6 +62,7 @@ describe('AlertEventsController', () => {
     expect(alertEventsService.findById).toHaveBeenCalledWith(
       'space-uuid',
       'event-1',
+      undefined,
     );
   });
 
@@ -48,6 +71,7 @@ describe('AlertEventsController', () => {
     expect(alertEventsService.findDeliveries).toHaveBeenCalledWith(
       'space-uuid',
       'event-1',
+      undefined,
     );
   });
 

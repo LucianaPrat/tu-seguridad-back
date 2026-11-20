@@ -42,6 +42,7 @@ describe('AuthService', () => {
     countPendingForEmail: jest.Mock;
     findPendingByToken: jest.Mock;
   };
+  let dvrAccessor: { findBySpaceId: jest.Mock };
   let passwordHash: {
     hash: jest.Mock;
     verify: jest.Mock;
@@ -72,6 +73,7 @@ describe('AuthService', () => {
       countPendingForEmail: jest.fn().mockResolvedValue(2),
       findPendingByToken: jest.fn(),
     };
+    dvrAccessor = { findBySpaceId: jest.fn().mockResolvedValue({ id: 'dvr' }) };
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
       verify: jest.fn().mockResolvedValue(true),
@@ -88,6 +90,7 @@ describe('AuthService', () => {
       passwordHash,
       sessionService as never,
       invitationAccessor as never,
+      dvrAccessor as never,
     );
   });
 
@@ -353,6 +356,17 @@ describe('AuthService', () => {
       });
     });
 
+    it('reports hasDvr false while the space has no recorder', async () => {
+      dvrAccessor.findBySpaceId.mockResolvedValue(null);
+
+      const result = await service.me(claims);
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { currentSpace: { hasDvr: false } },
+      });
+    });
+
     it('returns the profile with its space context', async () => {
       const result = await service.me(claims);
 
@@ -376,6 +390,7 @@ describe('AuthService', () => {
             id: 'space-1',
             name: 'My Secure Space',
             role: 'admin',
+            hasDvr: true,
             menuAccess: [],
             cameraIds: [],
           },

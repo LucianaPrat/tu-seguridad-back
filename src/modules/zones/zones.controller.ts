@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  UseGuards,
   Post,
   Put,
 } from '@nestjs/common';
@@ -18,7 +19,9 @@ import { SpaceMemberRole } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
+import { CameraAccessGuard } from '../../cross/guards/camera-access.guard';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { CreateZoneDto } from './dto/create-zone.dto';
@@ -36,6 +39,7 @@ import { ZonesService } from './zones.service';
 export class ZonesController {
   constructor(private readonly zonesService: ZonesService) {}
 
+  @UseGuards(CameraAccessGuard)
   @Get('cameras/:cameraId/zones')
   @ApiOperation({
     summary: 'List the monitor zones of a camera',
@@ -54,7 +58,8 @@ export class ZonesController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   findByCamera(
@@ -64,12 +69,13 @@ export class ZonesController {
     return this.zonesService.findByCamera(user.spaceId, cameraId);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Post('cameras/:cameraId/zones')
   @ApiOperation({
     summary: 'Create a monitor zone',
     description:
-      'Admin only. Adds one percentage rectangle to a camera. Coordinates are percent ' +
+      'Admin or collaborator with the dvr section. Adds one percentage rectangle to a camera. Coordinates are percent ' +
       'of frame, not pixels, so the zone keeps its meaning if the recorder changes ' +
       'resolution. The rectangle must stay inside the frame and have a positive area; ' +
       'a rectangle that does not answers `INVALID_ZONE`.',
@@ -85,7 +91,7 @@ export class ZonesController {
     [ErrorCode.INVALID_ZONE]: 'Rectangle is outside the frame or has no area.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   create(
@@ -119,12 +125,13 @@ export class ZonesController {
     return this.zonesService.findById(user.spaceId, id);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Put('zones/:id')
   @ApiOperation({
     summary: 'Update a monitor zone',
     description:
-      'Admin only. Partial update — the sent fields are merged onto the stored zone and ' +
+      'Admin or collaborator with the dvr section. Partial update — the sent fields are merged onto the stored zone and ' +
       'the merged rectangle is what gets validated, so moving one edge cannot push the ' +
       'zone out of the frame.',
   })
@@ -139,7 +146,7 @@ export class ZonesController {
       'The merged rectangle is outside the frame or has no area.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No zone with that id in the caller space.',
   })
   update(
@@ -150,12 +157,13 @@ export class ZonesController {
     return this.zonesService.update(user.spaceId, id, dto);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Delete('zones/:id')
   @ApiOperation({
     summary: 'Delete a monitor zone',
     description:
-      'Admin only. Logical delete: the zone leaves every read and stops raising alerts, ' +
+      'Admin or collaborator with the dvr section. Logical delete: the zone leaves every read and stops raising alerts, ' +
       'the alerts it already raised stay in the history.',
   })
   @ApiParam({
@@ -166,7 +174,7 @@ export class ZonesController {
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No zone with that id in the caller space.',
   })
   remove(

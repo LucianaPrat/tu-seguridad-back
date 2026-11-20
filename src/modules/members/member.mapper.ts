@@ -1,7 +1,11 @@
 import { SpaceMemberRosterRecord } from '../../data/accessors/space-member.accessor';
+import { toMemberPermissions } from '../../cross/common/permissions';
 import { MemberDto } from './dto/member.dto';
 
-export function toMemberDto(member: SpaceMemberRosterRecord): MemberDto {
+export function toMemberDto(
+  member: SpaceMemberRosterRecord,
+  withPermissions: boolean,
+): MemberDto {
   return {
     id: member.user.id,
     email: member.user.email,
@@ -13,5 +17,7 @@ export function toMemberDto(member: SpaceMemberRosterRecord): MemberDto {
     lastLoginAt: member.user.lastLoginAt,
     profileCompleted: member.user.profileCompleted,
     receiveAlerts: member.receiveAlerts,
+    role: member.role,
+    ...(withPermissions ? toMemberPermissions(member) : {}),
   };
 }

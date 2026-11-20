@@ -14,6 +14,7 @@ describe('EventsGateway', () => {
   const secret = 'gateway-test-secret';
   const spaceA = 'space-a-uuid';
   const spaceB = 'space-b-uuid';
+  const spaceGuest = 'space-guest-uuid';
 
   let app: INestApplication;
   let jwtService: JwtService;
@@ -23,9 +24,18 @@ describe('EventsGateway', () => {
   // Everyone is a member except the space named here.
   const spaceWithoutMember = 'space-without-member-uuid';
   const spaceMemberAccessor = {
-    findBySpaceAndUser: jest.fn((spaceId: string) =>
-      Promise.resolve(spaceId === spaceWithoutMember ? null : { userId: 1 }),
-    ),
+    findBySpaceAndUser: jest.fn((spaceId: string) => {
+      if (spaceId === spaceWithoutMember) return Promise.resolve(null);
+      if (spaceId === spaceGuest) {
+        return Promise.resolve({
+          userId: 1,
+          role: 'guest',
+          menuAccess: [],
+          cameraIds: ['cam-1'],
+        });
+      }
+      return Promise.resolve({ userId: 1 });
+    }),
   };
 
   beforeAll(async () => {
@@ -145,7 +155,7 @@ describe('EventsGateway', () => {
         done();
       });
 
-      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'evt-1' });
+      gateway.broadcast(spaceA, null, ALERT_EVENT_MESSAGE, { id: 'evt-1' });
     });
   }, 5000);
 
@@ -161,8 +171,44 @@ describe('EventsGateway', () => {
         done();
       });
 
-      gateway.broadcast(spaceB, ALERT_EVENT_MESSAGE, { id: 'other-space' });
-      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'own-space' });
+      gateway.broadcast(spaceB, null, ALERT_EVENT_MESSAGE, {
+        id: 'other-space',
+      });
+      gateway.broadcast(spaceA, null, ALERT_EVENT_MESSAGE, { id: 'own-space' });
+    });
+  }, 5000);
+
+  it('delivers a guest only the broadcasts of its own cameras', (done) => {
+    const client = connect(tokenFor(spaceGuest));
+
+    client.on('connect', () => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
+        // cam-2 and a camera-less event went first; either arriving here
+        // means the guest is in the space room or a foreign camera room.
+        expect(payload).toEqual({ id: 'own' });
+        client.close();
+        done();
+      });
+
+      gateway.broadcast(spaceGuest, 'cam-2', ALERT_EVENT_MESSAGE, { id: 'x' });
+      gateway.broadcast(spaceGuest, null, ALERT_EVENT_MESSAGE, { id: 'none' });
+      gateway.broadcast(spaceGuest, 'cam-1', ALERT_EVENT_MESSAGE, {
+        id: 'own',
+      });
+    });
+  }, 5000);
+
+  it('delivers a non-guest the broadcast of any camera of its space', (done) => {
+    const client = connect(tokenFor(spaceA));
+
+    client.on('connect', () => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
+        expect(payload).toEqual({ id: 'cam-9' });
+        client.close();
+        done();
+      });
+
+      gateway.broadcast(spaceA, 'cam-9', ALERT_EVENT_MESSAGE, { id: 'cam-9' });
     });
   }, 5000);
 

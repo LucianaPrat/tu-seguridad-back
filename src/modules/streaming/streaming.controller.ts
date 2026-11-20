@@ -79,7 +79,7 @@ export class StreamingController {
     [ErrorCode.UNAUTHORIZED]:
       'No token, an expired or invalid one, a refresh token, or one carrying no space.',
     [ErrorCode.FORBIDDEN]:
-      'A action other than `read`, a protocol other than `hls`, or an incomplete profile.',
+      'A action other than `read`, a protocol other than `hls`, an incomplete profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]: 'The path names no camera in the caller space.',
     [ErrorCode.CONFLICT]: 'The camera is disabled.',
     [ErrorCode.VALIDATION_ERROR]:

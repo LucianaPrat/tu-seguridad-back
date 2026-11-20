@@ -106,6 +106,14 @@ describe('CamerasService', () => {
       }
     });
 
+    it('passes the camera scope to the accessor', async () => {
+      cameraAccessor.findAll.mockResolvedValue([]);
+
+      await service.findAll(spaceId, ['c']);
+
+      expect(cameraAccessor.findAll).toHaveBeenCalledWith(spaceId, ['c']);
+    });
+
     it('reports no snapshot url for a camera that has never stored one', async () => {
       cameraAccessor.findAll.mockResolvedValue([buildCamera()]);
 

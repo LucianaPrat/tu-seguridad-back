@@ -110,11 +110,12 @@ describe('Alert routings (e2e)', () => {
     });
   });
 
-  it('refuses the write to a plain member of the space', async () => {
+  it('refuses the write to a guest of the space', async () => {
     const member = await seedMember(
       ctx.prisma,
       admin.spaceId,
       'plain@example.com',
+      { role: 'guest' },
     );
     const memberToken = await loginAs(
       ctx.httpServer,

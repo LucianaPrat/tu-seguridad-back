@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, SpaceMember } from '@prisma/client';
+import { Prisma, SpaceMember, SpaceMemberRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Only the columns the roster renders. `include: { user: true }` would hand the
 // module layer every member's `passwordHash`.
 const ROSTER_SELECT = {
   receiveAlerts: true,
+  role: true,
+  menuAccess: true,
+  cameraIds: true,
   user: {
     select: {
       id: true,
@@ -73,9 +76,21 @@ export class SpaceMemberAccessorService {
     });
   }
 
-  findActiveRecipients(spaceId: string): Promise<AlertRecipientRecord[]> {
+  findActiveRecipients(
+    spaceId: string,
+    cameraId: string | null,
+  ): Promise<AlertRecipientRecord[]> {
     return this.prisma.spaceMember.findMany({
-      where: { spaceId, receiveAlerts: true, user: { isActive: true } },
+      where: {
+        spaceId,
+        receiveAlerts: true,
+        user: { isActive: true },
+        // A guest only hears about its own cameras; an event with no camera reaches no guest.
+        OR: [
+          { role: { not: SpaceMemberRole.guest } },
+          ...(cameraId ? [{ cameraIds: { array_contains: [cameraId] } }] : []),
+        ],
+      },
       select: ALERT_RECIPIENT_SELECT,
       orderBy: { userId: 'asc' },
     });
@@ -91,15 +106,26 @@ export class SpaceMemberAccessorService {
     });
   }
 
-  setReceiveAlerts(
+  update(
     spaceId: string,
     userId: number,
-    receiveAlerts: boolean,
+    data: Prisma.SpaceMemberUpdateInput,
   ): Promise<SpaceMemberRosterRecord> {
     return this.prisma.spaceMember.update({
       where: { spaceId_userId: { spaceId, userId } },
-      data: { receiveAlerts },
+      data,
       select: ROSTER_SELECT,
     });
+  }
+
+  /** Drops the membership and forgets it as the user's last space, together. */
+  async remove(spaceId: string, userId: number): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.spaceMember.deleteMany({ where: { spaceId, userId } }),
+      this.prisma.user.updateMany({
+        where: { id: userId, lastSpaceId: spaceId },
+        data: { lastSpaceId: null },
+      }),
+    ]);
   }
 }

@@ -246,10 +246,13 @@ describe('DVR, cameras and snapshots (e2e)', () => {
     expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
   });
 
-  it("keeps camera configuration out of a plain member's hands", async () => {
+  it("keeps camera configuration out of a guest's hands", async () => {
     await configureDvr();
     const [camera] = await listCameras();
-    await seedMember(ctx.prisma, admin.spaceId, 'member@example.com');
+    await seedMember(ctx.prisma, admin.spaceId, 'member@example.com', {
+      role: 'guest',
+      cameraIds: [camera.id],
+    });
     const memberToken = await loginAs(
       ctx.httpServer,
       'member@example.com',

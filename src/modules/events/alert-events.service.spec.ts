@@ -168,11 +168,21 @@ describe('AlertEventsService', () => {
       );
     });
 
+    it('plans deliveries for the recipients of the event camera', async () => {
+      await service.record(spaceId, [buildCandidate()]);
+
+      expect(memberAccessor.findActiveRecipients).toHaveBeenCalledWith(
+        spaceId,
+        'camera-uuid',
+      );
+    });
+
     it('broadcasts the stored event to its own space only', async () => {
       await service.record(spaceId, [buildCandidate()]);
 
       expect(gateway.broadcast).toHaveBeenCalledWith(
         spaceId,
+        'camera-uuid',
         ALERT_EVENT_MESSAGE,
         expect.objectContaining({
           id: 'event-1',
@@ -211,6 +221,7 @@ describe('AlertEventsService', () => {
       // payload matches what GET /events/:id answers for the same alert.
       expect(gateway.broadcast).toHaveBeenCalledWith(
         spaceId,
+        'camera-uuid',
         ALERT_EVENT_MESSAGE,
         expect.objectContaining({ channels: ['email', 'whatsapp'] }),
       );
@@ -258,6 +269,28 @@ describe('AlertEventsService', () => {
   });
 
   describe('query', () => {
+    it('forwards the guest camera scope to the accessor', async () => {
+      await service.query(spaceId, {}, ['cam-1']);
+
+      expect(alertEventAccessor.query).toHaveBeenCalledWith(
+        spaceId,
+        expect.objectContaining({ cameraIds: ['cam-1'] }),
+      );
+    });
+
+    it('forwards the guest camera scope on findById', async () => {
+      alertEventAccessor.findById.mockResolvedValue(null);
+
+      const result = await service.findById(spaceId, 'event-1', ['cam-1']);
+
+      expect(alertEventAccessor.findById).toHaveBeenCalledWith(
+        spaceId,
+        'event-1',
+        ['cam-1'],
+      );
+      expect(result).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    });
+
     it('asks for one row past the page and reports no next cursor when it is absent', async () => {
       alertEventAccessor.query.mockResolvedValue([buildEvent()]);
 

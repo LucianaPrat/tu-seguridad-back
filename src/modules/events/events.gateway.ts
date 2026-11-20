@@ -7,10 +7,12 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { SpaceMemberRole } from '@prisma/client';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Gauge } from 'prom-client';
 import { Server, Socket } from 'socket.io';
 import { verifyAccessToken } from '../../cross/common/access-token';
+import { toMemberPermissions } from '../../cross/common/permissions';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { MetricNames } from '../../cross/metrics/metric-names';
 
@@ -18,6 +20,9 @@ import { MetricNames } from '../../cross/metrics/metric-names';
 export const ALERT_EVENT_MESSAGE = 'alert-event';
 
 const spaceRoom = (spaceId: string) => `space:${spaceId}`;
+// Guests never join the space room: one room per camera they may see.
+const cameraRoom = (spaceId: string, cameraId: string) =>
+  `space:${spaceId}:camera:${cameraId}`;
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
@@ -83,7 +88,16 @@ export class EventsGateway
     }
     // `join` is synchronous on the in-memory adapter and a promise on a
     // clustered one; awaiting covers both.
-    await client.join(spaceRoom(payload.spaceId));
+    const spaceId = payload.spaceId;
+    // ponytail: rooms are fixed at connect; a role/camera change applies on reconnect.
+    // Re-join on member PATCH if live revocation matters.
+    const rooms =
+      member.role === SpaceMemberRole.guest
+        ? toMemberPermissions(member).cameraIds.map((cameraId) =>
+            cameraRoom(spaceId, cameraId),
+          )
+        : [spaceRoom(spaceId)];
+    await client.join(rooms);
 
     // Counted here, past every rejection: a socket that carried no token, an
     // invalid one, or a token with no space is gone by now, and counting it
@@ -112,7 +126,14 @@ export class EventsGateway
    * to one space. What an alert looks like on the wire belongs to the
    * alert-event domain, which calls this with its own DTO.
    */
-  broadcast(spaceId: string, event: string, payload: unknown): void {
-    this.server.to(spaceRoom(spaceId)).emit(event, payload);
+  broadcast(
+    spaceId: string,
+    cameraId: string | null,
+    event: string,
+    payload: unknown,
+  ): void {
+    const rooms = [spaceRoom(spaceId)];
+    if (cameraId) rooms.push(cameraRoom(spaceId, cameraId));
+    this.server.to(rooms).emit(event, payload);
   }
 }

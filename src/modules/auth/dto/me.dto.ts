@@ -5,6 +5,12 @@ import { MENU_KEYS } from '../../../cross/common/permissions';
 import { SpaceSummaryDto } from '../../spaces/dto/space-summary.dto';
 
 export class CurrentSpaceDto extends SpaceSummaryDto {
+  @ApiProperty({
+    description:
+      'Whether the space has a recorder configured; replaces probing `GET /dvr`, which needs the dvr section.',
+  })
+  hasDvr!: boolean;
+
   @ApiProperty({ enum: MENU_KEYS, isArray: true })
   menuAccess!: MenuKey[];
 

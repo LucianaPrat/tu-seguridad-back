@@ -90,6 +90,7 @@ export class AlertEventsService {
       // `GET /events/:id` answers for the same alert.
       this.gateway.broadcast(
         spaceId,
+        event.cameraId,
         ALERT_EVENT_MESSAGE,
         toAlertEventDto({ ...event, deliveries: planned.deliveries }),
       );
@@ -110,6 +111,7 @@ export class AlertEventsService {
   async query(
     spaceId: string,
     query: QueryAlertEventsDto,
+    cameraIds?: string[],
   ): Promise<Either<AlertEventPageDto>> {
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
     if (query.cursor && !cursor) {
@@ -126,6 +128,7 @@ export class AlertEventsService {
       alertType: query.alertType,
       from: query.from ? new Date(query.from) : undefined,
       take: take + 1,
+      cameraIds,
       cursor: cursor ?? undefined,
     });
 
@@ -140,8 +143,13 @@ export class AlertEventsService {
   async findById(
     spaceId: string,
     eventId: string,
+    cameraIds?: string[],
   ): Promise<Either<AlertEventDto>> {
-    const event = await this.alertEventAccessor.findById(spaceId, eventId);
+    const event = await this.alertEventAccessor.findById(
+      spaceId,
+      eventId,
+      cameraIds,
+    );
     if (!event) {
       return buildError(ErrorCode.NOT_FOUND, `Event ${eventId} not found`);
     }
@@ -151,8 +159,13 @@ export class AlertEventsService {
   async findDeliveries(
     spaceId: string,
     eventId: string,
+    cameraIds?: string[],
   ): Promise<Either<EventDeliveryDto[]>> {
-    const event = await this.alertEventAccessor.findById(spaceId, eventId);
+    const event = await this.alertEventAccessor.findById(
+      spaceId,
+      eventId,
+      cameraIds,
+    );
     if (!event) {
       return buildError(ErrorCode.NOT_FOUND, `Event ${eventId} not found`);
     }
@@ -227,7 +240,7 @@ export class AlertEventsService {
   ): Promise<PlannedDeliveries> {
     const [routings, recipients] = await Promise.all([
       this.routingAccessor.findEnabled(spaceId, event.alertType),
-      this.memberAccessor.findActiveRecipients(spaceId),
+      this.memberAccessor.findActiveRecipients(spaceId, event.cameraId),
     ]);
 
     const drafts: EventDeliveryDraft[] = routings.flatMap((routing) =>

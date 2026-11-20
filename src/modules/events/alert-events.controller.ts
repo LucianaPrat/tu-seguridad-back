@@ -16,8 +16,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ErrorCode } from '../../cross/common/constants';
+import { cameraScope } from '../../cross/common/permissions';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
@@ -35,11 +37,12 @@ import { QueryAlertEventsDto } from './dto/query-alert-events.dto';
 export class AlertEventsController {
   constructor(private readonly alertEventsService: AlertEventsService) {}
 
+  @RequireMenu('events')
   @Get()
   @ApiOperation({
     summary: 'Page the alert history of the space',
     description:
-      'Alerts raised inside the caller space, newest first. Paging is keyset, not ' +
+      'Alerts raised inside the caller space, newest first (a guest sees only its cameras). Paging is keyset, not ' +
       'offset: send back the `nextCursor` of the previous page, and stop when it comes ' +
       'back `null`. The cursor is opaque — one detection frame writes an event per ' +
       'entered area with the same `detectedAt`, so it carries the event id too and a ' +
@@ -54,13 +57,18 @@ export class AlertEventsController {
     [ErrorCode.VALIDATION_ERROR]:
       'A cursor this API did not issue, a `limit` over the ceiling, or a malformed `from`.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the events section, or has an incomplete profile.',
   })
   query(
     @CurrentUser() user: JwtPayload,
     @Query() query: QueryAlertEventsDto,
   ): Promise<Either<AlertEventPageDto>> {
-    return this.alertEventsService.query(user.spaceId, query);
+    return this.alertEventsService.query(
+      user.spaceId,
+      query,
+      cameraScope(user),
+    );
   }
 
   /**
@@ -100,6 +108,7 @@ export class AlertEventsController {
     return this.alertEventsService.acknowledgeInbound(dto);
   }
 
+  @RequireMenu('events')
   @Get(':id')
   @ApiOperation({
     summary: 'Read one alert',
@@ -115,16 +124,22 @@ export class AlertEventsController {
   @ApiOkResponse({ type: AlertEventDto, description: 'The alert.' })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the events section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No alert with that id in the caller space.',
   })
   findOne(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<Either<AlertEventDto>> {
-    return this.alertEventsService.findById(user.spaceId, id);
+    return this.alertEventsService.findById(
+      user.spaceId,
+      id,
+      cameraScope(user),
+    );
   }
 
+  @RequireMenu('events')
   @Get(':id/deliveries')
   @ApiOperation({
     summary: 'List the delivery attempts of an alert',
@@ -145,13 +160,18 @@ export class AlertEventsController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the events section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No alert with that id in the caller space.',
   })
   findDeliveries(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<Either<EventDeliveryDto[]>> {
-    return this.alertEventsService.findDeliveries(user.spaceId, id);
+    return this.alertEventsService.findDeliveries(
+      user.spaceId,
+      id,
+      cameraScope(user),
+    );
   }
 }

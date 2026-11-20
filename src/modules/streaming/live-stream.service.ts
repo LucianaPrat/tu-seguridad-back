@@ -4,6 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Camera } from '@prisma/client';
 import { verifyAccessToken } from '../../cross/common/access-token';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import {
+  CAMERA_FORBIDDEN_MESSAGE,
+  canSeeCamera,
+  toMemberPermissions,
+} from '../../cross/common/permissions';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
@@ -175,6 +180,15 @@ export class LiveStreamService {
         ErrorCode.FORBIDDEN,
         'You are no longer a member of this space',
       );
+    }
+
+    if (
+      !canSeeCamera(
+        { role: member.role, ...toMemberPermissions(member) },
+        request.path,
+      )
+    ) {
+      return buildError(ErrorCode.FORBIDDEN, CAMERA_FORBIDDEN_MESSAGE);
     }
 
     const memoKey = `${spaceId}\u0000${request.path}`;

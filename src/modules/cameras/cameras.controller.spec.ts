@@ -41,7 +41,19 @@ describe('CamerasController', () => {
 
   it('delegates findAll with the caller space', async () => {
     await controller.findAll(user);
-    expect(camerasService.findAll).toHaveBeenCalledWith('space-uuid');
+    expect(camerasService.findAll).toHaveBeenCalledWith(
+      'space-uuid',
+      undefined,
+    );
+  });
+
+  it('scopes findAll to the cameras of a guest', async () => {
+    await controller.findAll(
+      buildPrincipal({ role: 'guest', cameraIds: ['cam-1'] }),
+    );
+    expect(camerasService.findAll).toHaveBeenCalledWith('space-uuid', [
+      'cam-1',
+    ]);
   });
 
   it('delegates findOne with the caller space', async () => {

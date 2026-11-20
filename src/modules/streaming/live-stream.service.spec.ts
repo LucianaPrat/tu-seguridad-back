@@ -239,6 +239,33 @@ describe('LiveStreamService', () => {
       expect(cameraAccessor.findById).not.toHaveBeenCalled();
     });
 
+    it('refuses a guest a camera outside its membership, before any camera lookup', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        userId: 1,
+        role: 'guest',
+        menuAccess: [],
+        cameraIds: ['other-camera'],
+      });
+
+      const result = await service.authorize(request);
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.FORBIDDEN });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
+    });
+
+    it('authorizes a guest on a camera of its membership', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        userId: 1,
+        role: 'guest',
+        menuAccess: [],
+        cameraIds: ['camera-uuid'],
+      });
+
+      const result = await service.authorize(request);
+
+      expect(result).toEqual({ ok: true, data: { authorized: true } });
+    });
+
     it('refuses a refresh token presented as a reader credential', async () => {
       jwtService.verify.mockReturnValue({ ...claims, type: 'refresh' });
 

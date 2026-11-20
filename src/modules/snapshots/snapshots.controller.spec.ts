@@ -68,6 +68,29 @@ describe('SnapshotsController', () => {
     expect(response.end).toHaveBeenCalledWith(data);
   });
 
+  it('answers 403 to a guest whose cameras exclude the snapshot camera', async () => {
+    snapshotService.read.mockResolvedValue(
+      buildData({
+        cameraId: 'cam-2',
+        mimeType: 'image/png',
+        byteSize: 1,
+        sha256: 'abc',
+        data: Buffer.from('x'),
+      }),
+    );
+    const guest = buildPrincipal({ role: 'guest', cameraIds: ['cam-1'] });
+
+    await expect(
+      controller.read(
+        guest,
+        'snapshot-uuid',
+        request as unknown as Request,
+        response as unknown as Response,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(response.end).not.toHaveBeenCalled();
+  });
+
   /**
    * The live row keeps its id when a new capture overwrites it, so a positive
    * `max-age` would let the browser answer a refresh with the previous frame.

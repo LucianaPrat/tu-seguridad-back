@@ -43,13 +43,11 @@ describe('Per-request membership (e2e)', () => {
   const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
   // An admin-only route that needs no fixtures to answer 200.
-  const putRoutings = (token: string) =>
+  const renameSpace = (token: string) =>
     request(ctx.httpServer)
-      .put('/api/v1/alert-routings')
+      .patch('/api/v1/spaces/current')
       .set(bearer(token))
-      .send({
-        items: [{ alertType: 'intruder', channel: 'call', enabled: true }],
-      });
+      .send({ name: 'Renamed' });
 
   const me = (token: string) =>
     request(ctx.httpServer).get('/api/v1/auth/me').set(bearer(token));
@@ -61,7 +59,7 @@ describe('Per-request membership (e2e)', () => {
       'promoted@example.com',
     );
     const token = await loginAs(ctx.httpServer, member.email, E2E_PASSWORD);
-    expect((await putRoutings(token)).status).toBe(403);
+    expect((await renameSpace(token)).status).toBe(403);
 
     await ctx.prisma.spaceMember.update({
       where: {
@@ -70,7 +68,7 @@ describe('Per-request membership (e2e)', () => {
       data: { role: 'admin', menuAccess: DEFAULT_MENU_ACCESS.admin },
     });
 
-    expect((await putRoutings(token)).status).toBe(200);
+    expect((await renameSpace(token)).status).toBe(200);
     expect(typedBody<MeBody>(await me(token)).role).toBe('admin');
 
     await ctx.prisma.spaceMember.update({
@@ -80,7 +78,7 @@ describe('Per-request membership (e2e)', () => {
       data: { role: 'collaborator' },
     });
 
-    expect((await putRoutings(token)).status).toBe(403);
+    expect((await renameSpace(token)).status).toBe(403);
   });
 
   it('answers 403 once the membership behind the token is deleted', async () => {

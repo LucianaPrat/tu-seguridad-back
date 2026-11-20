@@ -41,3 +41,25 @@ export function toMemberPermissions(member: {
       : [],
   };
 }
+
+export const CAMERA_FORBIDDEN_MESSAGE = 'You do not have access to this camera';
+
+interface CameraScoped {
+  role: SpaceMemberRole;
+  cameraIds: string[];
+}
+
+/** Cameras a principal is limited to; `undefined` means every camera of the space. */
+export function cameraScope(principal: CameraScoped): string[] | undefined {
+  return principal.role === SpaceMemberRole.guest
+    ? principal.cameraIds
+    : undefined;
+}
+
+export function canSeeCamera(
+  principal: CameraScoped,
+  cameraId: string | null,
+): boolean {
+  const scope = cameraScope(principal);
+  return scope === undefined || (cameraId !== null && scope.includes(cameraId));
+}

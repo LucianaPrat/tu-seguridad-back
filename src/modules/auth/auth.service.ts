@@ -7,6 +7,7 @@ import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import { SessionContext } from '../../cross/common/session-context.type';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { PasswordHashService } from '../../cross/crypto/password-hash.service';
+import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
 import { InvitationAccessorService } from '../../data/accessors/invitation.accessor';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { SpaceAccessorService } from '../../data/accessors/space.accessor';
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly passwordHash: PasswordHashService,
     private readonly sessionService: SessionService,
     private readonly invitationAccessor: InvitationAccessorService,
+    private readonly dvrAccessor: DvrAccessorService,
   ) {}
 
   /**
@@ -222,9 +224,10 @@ export class AuthService {
       }
     }
 
-    const [memberships, pendingInvitationsCount] = await Promise.all([
+    const [memberships, pendingInvitationsCount, dvr] = await Promise.all([
       this.spaceMemberAccessor.findManyByUserIdWithSpace(user.id),
       this.invitationAccessor.countPendingForEmail(user.email),
+      space ? this.dvrAccessor.findBySpaceId(space.id) : null,
     ]);
 
     return buildData({
@@ -252,6 +255,7 @@ export class AuthService {
               id: space.id,
               name: space.name,
               role: member.role,
+              hasDvr: dvr !== null,
               ...toMemberPermissions(member),
             }
           : null,
