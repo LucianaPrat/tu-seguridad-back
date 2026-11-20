@@ -110,7 +110,13 @@ export class AuthService {
       locale: dto.locale,
     };
     try {
-      if (dto.inviteToken) {
+      // A pending invitation wins over a fresh space even without the token
+      // (link lost, /register opened by hand): the user lands on /spaces/start
+      // with the invitation listed instead of in an empty space's DVR wizard.
+      if (
+        dto.inviteToken ||
+        (await this.invitationAccessor.countPendingForEmail(email)) > 0
+      ) {
         // No space and no membership: the invitation stays pending and the
         // client accepts it next, which is what creates the membership.
         const user = await this.userAccessor.create(profile);

@@ -48,6 +48,7 @@ interface MeBody {
     cameraIds: string[];
   } | null;
   spaces: { id: string }[];
+  pendingInvitationsCount: number;
 }
 
 interface ErrorBody {
@@ -215,6 +216,26 @@ describe('Invitations (e2e)', () => {
       menuAccess: ['home', 'monitor'],
       cameraIds: [cameraId],
     });
+  });
+
+  it('registers without the token into no space when the email has a pending invitation', async () => {
+    await invite({ email: 'lost@example.com', role: 'guest' });
+
+    const registered = await request(ctx.httpServer)
+      .post('/api/v1/auth/register')
+      .send({
+        email: 'lost@example.com',
+        password: E2E_PASSWORD,
+        firstName: 'Grace',
+        lastName: 'Hopper',
+        phone: '+5491122334455',
+        spaceName: 'Espacio de Grace',
+      });
+    expect(registered.status).toBe(201);
+    const me = await meOf(typedBody<AccessTokenBody>(registered).accessToken);
+    expect(me.currentSpace).toBeNull();
+    expect(me.spaces).toHaveLength(0);
+    expect(me.pendingInvitationsCount).toBe(1);
   });
 
   it('previews a pending invitation by token', async () => {
