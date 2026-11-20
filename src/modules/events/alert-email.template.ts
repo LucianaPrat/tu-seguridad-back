@@ -1,4 +1,4 @@
-import { AlertType } from '@prisma/client';
+import { AlertType, Locale } from '@prisma/client';
 
 /**
  * The alert email, as an incident notice rather than a product announcement.
@@ -21,20 +21,86 @@ import { AlertType } from '@prisma/client';
  * stacking the buttons, which every client is free to ignore.
  */
 
-/** Per alert type: how it is announced, and the one colour that is allowed to shout. */
-const ALERT_PRESENTATION: Record<
-  AlertType,
-  { eyebrow: string; sentence: (camera: string) => string; signal: string }
-> = {
-  intruder: {
-    eyebrow: 'Intruder alert',
-    sentence: (camera) => `A person was detected at ${camera}.`,
-    signal: '#C8371B',
+/** Per alert type: the one colour that is allowed to shout. */
+const ALERT_SIGNAL: Record<AlertType, string> = {
+  intruder: '#C8371B',
+  suspicious: '#B0761A',
+};
+
+/** One small `{ es, en }` copy table; no template engine. */
+interface AlertCopy {
+  eyebrow: Record<AlertType, string>;
+  sentence: Record<AlertType, (camera: string) => string>;
+  atCamera: (time: string, camera: string) => string;
+  inFrame: string;
+  footer: (firstName: string) => string;
+  camera: string;
+  detected: string;
+  people: string;
+  match: (confidence: string) => string;
+  viewText: string;
+  ackText: string;
+  timeZone: string;
+  peopleInFrame: string;
+  confidence: string;
+  view: string;
+  ack: string;
+  alt: (time: string, camera: string) => string;
+}
+
+const COPY: Record<Locale, AlertCopy> = {
+  en: {
+    eyebrow: { intruder: 'Intruder alert', suspicious: 'Suspicious activity' },
+    sentence: {
+      intruder: (camera) => `A person was detected at ${camera}.`,
+      suspicious: (camera) => `Unusual activity at ${camera}.`,
+    },
+    atCamera: (time, camera) => `${time} at ${camera}`,
+    inFrame: 'in frame',
+    footer: (firstName) =>
+      `Sent to ${firstName} because alerts for this space go out by email. ` +
+      `Change that in the dashboard, under Members.`,
+    camera: 'Camera:   ',
+    detected: 'Detected: ',
+    people: 'People:   ',
+    match: (confidence) => `${confidence} confidence`,
+    viewText: 'View the alert:   ',
+    ackText: 'Mark as handled:  ',
+    timeZone: 'Time zone',
+    peopleInFrame: 'People in frame',
+    confidence: 'Detection confidence',
+    view: 'View the alert',
+    ack: 'Mark as handled',
+    alt: (time, camera) =>
+      `Frame captured at ${time} by ${camera}, each detected person outlined in green`,
   },
-  suspicious: {
-    eyebrow: 'Suspicious activity',
-    sentence: (camera) => `Unusual activity at ${camera}.`,
-    signal: '#B0761A',
+  es: {
+    eyebrow: {
+      intruder: 'Alerta de intruso',
+      suspicious: 'Actividad sospechosa',
+    },
+    sentence: {
+      intruder: (camera) => `Se detectó una persona en ${camera}.`,
+      suspicious: (camera) => `Actividad inusual en ${camera}.`,
+    },
+    atCamera: (time, camera) => `${time} en ${camera}`,
+    inFrame: 'en cuadro',
+    footer: (firstName) =>
+      `Enviado a ${firstName} porque las alertas de este espacio se envían por correo. ` +
+      `Puedes cambiarlo en el panel, en Miembros.`,
+    camera: 'Cámara:   ',
+    detected: 'Detectado:',
+    people: 'Personas: ',
+    match: (confidence) => `${confidence} de confianza`,
+    viewText: 'Ver la alerta:    ',
+    ackText: 'Marcar atendida:  ',
+    timeZone: 'Zona horaria',
+    peopleInFrame: 'Personas en cuadro',
+    confidence: 'Confianza de detección',
+    view: 'Ver la alerta',
+    ack: 'Marcar como atendida',
+    alt: (time, camera) =>
+      `Fotograma capturado a las ${time} por ${camera}, cada persona detectada resaltada en verde`,
   },
 };
 
@@ -58,6 +124,7 @@ export interface AlertMailContent {
   /** Highest `detScore` of the frame, 0..1. Null on an alert recorded before the column existed. */
   confidence: number | null;
   recipientFirstName: string;
+  locale: Locale;
   eventUrl: string;
   acknowledgeUrl: string;
   /** Content id of the inline snapshot, or null when the alert stored no frame. */
@@ -139,10 +206,12 @@ function factRow(label: string, value: string): string {
 }
 
 export function buildAlertMail(content: AlertMailContent): AlertMail {
-  const presentation = ALERT_PRESENTATION[content.alertType];
+  const copy = COPY[content.locale];
+  const signal = ALERT_SIGNAL[content.alertType];
+  const eyebrow = copy.eyebrow[content.alertType];
   const when = formatDetectedAt(content.detectedAt, content.timezone);
-  const subject = `${presentation.eyebrow} — ${content.cameraLabel}`;
-  const sentence = presentation.sentence(content.cameraLabel);
+  const subject = `${eyebrow} — ${content.cameraLabel}`;
+  const sentence = copy.sentence[content.alertType](content.cameraLabel);
   const people =
     content.personsDetected === null ? null : String(content.personsDetected);
   // The number the detector reported, as the whole percent a person reads at a
@@ -153,8 +222,8 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
       : `${Math.round(content.confidence * 100)}%`;
 
   const preheader = [
-    `${when.time} at ${content.cameraLabel}`,
-    people === null ? null : `${people} in frame`,
+    copy.atCamera(when.time, content.cameraLabel),
+    people === null ? null : `${people} ${copy.inFrame}`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -162,30 +231,28 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
   // No greeting, in either part. This is an incident notice, and the first line
   // has to be the incident; the recipient's name belongs in the footer that
   // explains why the message arrived at all.
-  const footer =
-    `Sent to ${content.recipientFirstName} because alerts for this space go out by email. ` +
-    `Change that in the dashboard, under Members.`;
+  const footer = copy.footer(content.recipientFirstName);
 
   const text = [
     sentence,
     '',
-    `Camera:   ${content.cameraLabel}`,
-    `Detected: ${when.date} ${when.time} (${when.zone})`,
-    ...(people === null ? [] : [`People:   ${people}`]),
-    ...(confidence === null ? [] : [`Match:    ${confidence} confidence`]),
+    `${copy.camera} ${content.cameraLabel}`,
+    `${copy.detected} ${when.date} ${when.time} (${when.zone})`,
+    ...(people === null ? [] : [`${copy.people} ${people}`]),
+    ...(confidence === null ? [] : [`${copy.match(confidence)}`]),
     '',
-    `View the alert:   ${content.eventUrl}`,
-    `Mark as handled:  ${content.acknowledgeUrl}`,
+    `${copy.viewText}${content.eventUrl}`,
+    `${copy.ackText}${content.acknowledgeUrl}`,
     '',
     footer,
   ].join('\n');
 
   const frame = content.snapshotCid
-    ? `<img src="cid:${escapeHtml(content.snapshotCid)}" width="600" alt="Frame captured at ${escapeHtml(when.time)} by ${escapeHtml(content.cameraLabel)}, each detected person outlined in green" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;background-color:${INK};" />`
+    ? `<img src="cid:${escapeHtml(content.snapshotCid)}" width="600" alt="${escapeHtml(copy.alt(when.time, content.cameraLabel))}" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;background-color:${INK};" />`
     : '';
 
   const html = `<!DOCTYPE html>
-<html lang="en"><head>
+<html lang="${content.locale}"><head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta name="color-scheme" content="light only" />
@@ -204,8 +271,8 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
 <tr><td align="center" style="padding:28px 12px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:${PAPER};border:1px solid ${LINE};border-radius:12px;overflow:hidden;">
 
-<tr><td class="pad" style="padding:30px 34px 22px 34px;border-top:3px solid ${presentation.signal};">
-<div style="font-family:${MONO};font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${presentation.signal};padding-bottom:12px;">${escapeHtml(presentation.eyebrow)}</div>
+<tr><td class="pad" style="padding:30px 34px 22px 34px;border-top:3px solid ${signal};">
+<div style="font-family:${MONO};font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${signal};padding-bottom:12px;">${escapeHtml(eyebrow)}</div>
 <div style="font-family:${SANS};font-size:23px;line-height:1.32;font-weight:600;color:${INK};">${escapeHtml(sentence)}</div>
 </td></tr>
 
@@ -220,17 +287,17 @@ export function buildAlertMail(content: AlertMailContent): AlertMail {
 
 <tr><td class="pad" style="padding:24px 34px 4px 34px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-${factRow('Detected', `${escapeHtml(when.date)} ${escapeHtml(when.time)}`)}
-${factRow('Time zone', escapeHtml(when.zone))}
-${people === null ? '' : factRow('People in frame', escapeHtml(people))}
-${confidence === null ? '' : factRow('Detection confidence', escapeHtml(confidence))}
+${factRow(copy.detected.trim().replace(/:$/, ''), `${escapeHtml(when.date)} ${escapeHtml(when.time)}`)}
+${factRow(copy.timeZone, escapeHtml(when.zone))}
+${people === null ? '' : factRow(copy.peopleInFrame, escapeHtml(people))}
+${confidence === null ? '' : factRow(copy.confidence, escapeHtml(confidence))}
 </table>
 </td></tr>
 
 <tr><td class="pad" style="padding:12px 34px 30px 34px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td class="stack" style="padding:0 10px 0 0;">${button(content.eventUrl, 'View the alert', INK, '#FFFFFF', INK)}</td>
-<td class="stack" style="padding:0;">${button(content.acknowledgeUrl, 'Mark as handled', PAPER, INK, LINE)}</td>
+<td class="stack" style="padding:0 10px 0 0;">${button(content.eventUrl, copy.view, INK, '#FFFFFF', INK)}</td>
+<td class="stack" style="padding:0;">${button(content.acknowledgeUrl, copy.ack, PAPER, INK, LINE)}</td>
 </tr></table>
 </td></tr>
 

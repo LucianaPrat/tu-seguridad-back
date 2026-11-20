@@ -60,6 +60,12 @@ enum EventDeliveryStatus {
   delivered
 }
 
+/// UI and mail language.
+enum Locale {
+  es
+  en
+}
+
 model User {
   id               Int       @id @default(autoincrement())
   email            String    @unique
@@ -73,6 +79,7 @@ model User {
   profileCompleted Boolean   @default(false) @map("profile_completed")
   createdAt        DateTime  @default(now()) @map("created_at")
   lastSpaceId      String?   @map("last_space_id")
+  locale           Locale    @default(es)
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   memberships             SpaceMember[]
@@ -142,6 +149,7 @@ model Invitation {
   cameraIds       Json?           @map("camera_ids")
   declinedAt      DateTime?       @map("declined_at")
   revokedAt       DateTime?       @map("revoked_at")
+  locale          Locale          @default(es)
 
   space       Space @relation(fields: [spaceId], references: [id], onDelete: Restrict)
   invitedBy   User  @relation("InvitationInvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)

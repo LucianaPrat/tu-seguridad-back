@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { SpaceMemberRole } from '@prisma/client';
+import { Locale, SpaceMemberRole } from '@prisma/client';
 import type { MenuKey } from '../../../cross/common/permissions';
 import { MENU_KEYS } from '../../../cross/common/permissions';
 import { SpaceSummaryDto } from '../../spaces/dto/space-summary.dto';
@@ -42,6 +42,9 @@ export class MeDto {
 
   @ApiProperty()
   isActive!: boolean;
+
+  @ApiProperty({ enum: Locale, description: 'UI and mail language' })
+  locale!: Locale;
 
   @ApiProperty({
     description:

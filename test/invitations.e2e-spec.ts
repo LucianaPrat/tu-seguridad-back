@@ -78,7 +78,12 @@ describe('Invitations (e2e)', () => {
   const bearer = (value: string) => ({ Authorization: `Bearer ${value}` });
 
   function invite(
-    body: { email: string; role?: string; cameraIds?: string[] },
+    body: {
+      email: string;
+      role?: string;
+      cameraIds?: string[];
+      locale?: string;
+    },
     as = token,
   ) {
     return request(ctx.httpServer)
@@ -340,5 +345,48 @@ describe('Invitations (e2e)', () => {
         where: { email: 'someone-else@example.com' },
       }),
     ).toBeNull();
+  });
+
+  describe('locale', () => {
+    it('delivers with the requested locale, and resend reuses it', async () => {
+      const created = await invite({ email: 'en@example.com', locale: 'en' });
+      expect(created.status).toBe(201);
+      expect(ctx.fakeCredentialDelivery.deliveries[0].locale).toBe('en');
+
+      const { id } = typedBody<InvitationBody>(created);
+      const resent = await request(ctx.httpServer)
+        .post(`/api/v1/invitations/${id}/resend`)
+        .set(bearer(token));
+      expect(resent.status).toBe(200);
+      expect(ctx.fakeCredentialDelivery.deliveries[1].locale).toBe('en');
+    });
+
+    it("defaults to the inviter's locale", async () => {
+      // Own tenant: the shared admin's locale must not change.
+      const owner = await seedTenant(
+        ctx.prisma,
+        'en-owner@example.com',
+        'Mine',
+      );
+      await ctx.prisma.user.update({
+        where: { id: owner.userId },
+        data: { locale: 'en' },
+      });
+      const ownerToken = await loginAs(
+        ctx.httpServer,
+        owner.email,
+        E2E_PASSWORD,
+      );
+
+      expect(
+        (await invite({ email: 'a@example.com' }, ownerToken)).status,
+      ).toBe(201);
+      expect(ctx.fakeCredentialDelivery.deliveries[0].locale).toBe('en');
+    });
+
+    it('rejects an unknown locale', async () => {
+      const res = await invite({ email: 'fr@example.com', locale: 'fr' });
+      expect(res.status).toBe(400);
+    });
   });
 });

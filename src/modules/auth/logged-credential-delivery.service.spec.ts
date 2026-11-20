@@ -7,6 +7,7 @@ describe('LoggedCredentialDeliveryService', () => {
     email: 'member@example.com',
     token: 'raw-secret-token',
     expiresAt: new Date('2026-08-25T00:00:00.000Z'),
+    locale: 'es' as const,
   };
 
   function serviceFor(nodeEnv: string) {

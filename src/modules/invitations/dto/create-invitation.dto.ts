@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { SpaceMemberRole } from '@prisma/client';
+import { Locale, SpaceMemberRole } from '@prisma/client';
 import {
   ArrayUnique,
   IsArray,
@@ -40,4 +40,12 @@ export class CreateInvitationDto {
   @ArrayUnique()
   @IsUUID('4', { each: true })
   cameraIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: Locale,
+    description: "Mail language. Defaults to the inviter's own locale.",
+  })
+  @IsOptional()
+  @IsEnum(Locale)
+  locale?: Locale;
 }

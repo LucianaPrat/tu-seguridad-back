@@ -9,6 +9,7 @@ function content(overrides: Partial<AlertMailContent> = {}): AlertMailContent {
     personsDetected: 2,
     confidence: 0.847,
     recipientFirstName: 'Ada',
+    locale: 'en',
     eventUrl: 'http://localhost:5173/app/events/event-1',
     acknowledgeUrl:
       'http://localhost:5173/app/events/event-1/acknowledge?token=delivery-1.sig',
@@ -112,5 +113,14 @@ describe('buildAlertMail', () => {
     expect(html).not.toMatch(/@font-face|<link/);
     expect(html).not.toMatch(/display:\s*(flex|grid)/);
     expect(html).toContain('role="presentation"');
+  });
+
+  it('renders in Spanish for an es recipient', () => {
+    const mail = buildAlertMail(content({ locale: 'es' }));
+    expect(mail.subject).toBe('Alerta de intruso — Front door – Street side');
+    expect(mail.text).toContain('Ver la alerta:');
+    expect(mail.text).toContain('http://localhost:5173/app/events/event-1');
+    expect(mail.html).toContain('<html lang="es">');
+    expect(mail.html).toContain('Marcar como atendida');
   });
 });

@@ -13,6 +13,7 @@ import { SpaceAccessorService } from '../../data/accessors/space.accessor';
 import { UserAccessorService } from '../../data/accessors/user.accessor';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { MeDto } from './dto/me.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { RegisterDto } from './dto/register.dto';
 import { TokenPairDto } from './dto/token-pair.dto';
 import { SessionService } from './session.service';
@@ -104,6 +105,7 @@ export class AuthService {
       phone: dto.phone,
       profileCompleted: true,
       lastLoginAt: new Date(),
+      locale: dto.locale,
     };
     try {
       if (dto.inviteToken) {
@@ -189,6 +191,18 @@ export class AuthService {
     return buildData(await this.sessionService.issue(user, member, context));
   }
 
+  async updateMe(
+    claims: AccessTokenClaims,
+    dto: UpdateMeDto,
+  ): Promise<Either<MeDto>> {
+    const user = await this.userAccessor.findById(claims.sub);
+    if (!user?.isActive) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
+    await this.userAccessor.setLocale(user.id, dto.locale);
+    return this.me(claims);
+  }
+
   async me(claims: AccessTokenClaims): Promise<Either<MeDto>> {
     const user = await this.userAccessor.findById(claims.sub);
     if (!user?.isActive) {
@@ -221,6 +235,7 @@ export class AuthService {
       phone: user.phone,
       avatarUrl: user.avatarUrl,
       isActive: user.isActive,
+      locale: user.locale,
       profileCompleted: user.profileCompleted,
       spaceId: space?.id ?? null,
       spaceName: space?.name ?? null,

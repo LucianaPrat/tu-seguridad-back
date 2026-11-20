@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Locale } from '@prisma/client';
 import {
   IsEmail,
+  IsEnum,
   IsOptional,
   IsString,
   Matches,
@@ -68,4 +70,12 @@ export class RegisterDto {
   @MinLength(1)
   @MaxLength(AuthPolicy.MAX_TOKEN_LENGTH)
   inviteToken?: string;
+
+  @ApiPropertyOptional({
+    enum: Locale,
+    description: 'UI and mail language. Defaults to es.',
+  })
+  @IsOptional()
+  @IsEnum(Locale)
+  locale?: Locale;
 }

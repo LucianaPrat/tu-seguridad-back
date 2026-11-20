@@ -30,7 +30,7 @@ export type SpaceMemberRosterRecord = Prisma.SpaceMemberGetPayload<{
 // are not a notification's business.
 const ALERT_RECIPIENT_SELECT = {
   userId: true,
-  user: { select: { email: true, firstName: true } },
+  user: { select: { email: true, firstName: true, locale: true } },
 } as const;
 
 export type AlertRecipientRecord = Prisma.SpaceMemberGetPayload<{

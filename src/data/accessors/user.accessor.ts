@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, User } from '@prisma/client';
+import { Locale, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface ProfileCompletionFields {
@@ -28,6 +28,10 @@ export class UserAccessorService {
 
   updatePassword(id: number, passwordHash: string): Promise<User> {
     return this.prisma.user.update({ where: { id }, data: { passwordHash } });
+  }
+
+  setLocale(id: number, locale: Locale): Promise<User> {
+    return this.prisma.user.update({ where: { id }, data: { locale } });
   }
 
   completeProfile(id: number, fields: ProfileCompletionFields): Promise<User> {

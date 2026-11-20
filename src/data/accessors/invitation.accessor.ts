@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, SpaceMember, SpaceMemberRole } from '@prisma/client';
+import { Locale, Prisma, SpaceMember, SpaceMemberRole } from '@prisma/client';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { MenuKey } from '../../cross/common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,6 +22,7 @@ const PUBLIC_SELECT = {
   cameraIds: true,
   declinedAt: true,
   revokedAt: true,
+  locale: true,
   space: { select: { name: true } },
   invitedBy: { select: { firstName: true, lastName: true } },
 } as const;
@@ -39,6 +40,7 @@ export interface CreateInvitationInput {
   role: SpaceMemberRole;
   menuAccess: MenuKey[];
   cameraIds: string[];
+  locale?: Locale;
 }
 
 /** The single definition of "pending", shared by every read and write below. */
@@ -69,6 +71,7 @@ export class InvitationAccessorService {
         role: input.role,
         menuAccess: input.menuAccess,
         cameraIds: input.cameraIds,
+        locale: input.locale,
       },
       select: PUBLIC_SELECT,
     });

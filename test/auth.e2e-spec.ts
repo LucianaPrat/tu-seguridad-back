@@ -194,4 +194,53 @@ describe('Auth (e2e)', () => {
     expect(ready.status).toBe(200);
     expect(typedBody<HealthReadyBody>(ready).info.db.status).toBe('up');
   });
+
+  describe('locale', () => {
+    const bearer = (value: string) => ({ Authorization: `Bearer ${value}` });
+    const meOf = async (accessToken: string) =>
+      typedBody<{ locale: string }>(
+        await request(ctx.httpServer)
+          .get('/api/v1/auth/me')
+          .set(bearer(accessToken)),
+      );
+
+    async function registerOwn(locale?: string) {
+      const res = await request(ctx.httpServer)
+        .post('/api/v1/auth/register')
+        .send({
+          email: `locale-${locale ?? 'none'}-${Date.now()}@example.com`,
+          password: 'e2e-password-1234',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          phone: '+5491122334455',
+          spaceName: 'Locale space',
+          ...(locale ? { locale } : {}),
+        });
+      expect(res.status).toBe(201);
+      return typedBody<AccessTokenBody>(res).accessToken;
+    }
+
+    it('stores the locale given at registration and defaults to es', async () => {
+      expect((await meOf(await registerOwn('en'))).locale).toBe('en');
+      expect((await meOf(await registerOwn())).locale).toBe('es');
+    });
+
+    it('changes the locale on PATCH /auth/me and rejects an unknown one', async () => {
+      const accessToken = await registerOwn('en');
+
+      const patched = await request(ctx.httpServer)
+        .patch('/api/v1/auth/me')
+        .set(bearer(accessToken))
+        .send({ locale: 'es' });
+      expect(patched.status).toBe(200);
+      expect(typedBody<{ locale: string }>(patched).locale).toBe('es');
+      expect((await meOf(accessToken)).locale).toBe('es');
+
+      const invalid = await request(ctx.httpServer)
+        .patch('/api/v1/auth/me')
+        .set(bearer(accessToken))
+        .send({ locale: 'fr' });
+      expect(invalid.status).toBe(400);
+    });
+  });
 });

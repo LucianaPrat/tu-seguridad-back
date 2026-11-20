@@ -1,4 +1,4 @@
-import type { SpaceMemberRole } from '@prisma/client';
+import type { Locale, SpaceMemberRole } from '@prisma/client';
 
 /**
  * Outbound delivery of a raw one-time credential (invitation link, magic link,
@@ -17,6 +17,8 @@ export interface CredentialDelivery {
   email: string;
   token: string;
   expiresAt: Date;
+  /** Language of the mail: the invitation's for an invitation, the user's otherwise. */
+  locale: Locale;
   /** Only for purpose 'invitation': what the mail says about who invited whom to what. */
   invitation?: {
     spaceName: string;

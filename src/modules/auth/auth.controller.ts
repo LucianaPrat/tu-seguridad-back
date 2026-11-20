@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -35,6 +36,7 @@ import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { LoginDto } from './dto/login.dto';
 import { MeDto } from './dto/me.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { SwitchSpaceDto } from './dto/switch-space.dto';
 import { readRefreshCookie } from './refresh-cookie';
 import { RefreshCookieService } from './refresh-cookie.service';
@@ -207,6 +209,26 @@ export class AuthController {
   })
   me(@CurrentClaims() claims: AccessTokenClaims): Promise<Either<MeDto>> {
     return this.authService.me(claims);
+  }
+
+  @AllowIncompleteProfile()
+  @AllowNoSpace()
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Update the current user',
+    description:
+      'Only the language (`locale`) can be changed for now. Returns the same body as `GET /auth/me`.',
+  })
+  @ApiOkResponse({ type: MeDto, description: 'Updated account.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: 'Unknown locale.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+  })
+  updateMe(
+    @CurrentClaims() claims: AccessTokenClaims,
+    @Body() dto: UpdateMeDto,
+  ): Promise<Either<MeDto>> {
+    return this.authService.updateMe(claims, dto);
   }
 
   @AllowNoSpace()

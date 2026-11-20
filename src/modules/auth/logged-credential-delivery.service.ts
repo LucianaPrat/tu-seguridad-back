@@ -36,7 +36,7 @@ export class LoggedCredentialDeliveryService implements CredentialDeliveryPort {
         ? ` [space "${invitation.spaceName}", invited by ${invitation.inviterName}, role ${invitation.role}]`
         : '';
       this.logger.warn(
-        `[development only] ${delivery.purpose} credential for ${delivery.email}${context}: ${delivery.token} (expires ${delivery.expiresAt.toISOString()})`,
+        `[development only] ${delivery.purpose} credential (${delivery.locale}) for ${delivery.email}${context}: ${delivery.token} (expires ${delivery.expiresAt.toISOString()})`,
       );
       return Promise.resolve();
     }
@@ -45,6 +45,7 @@ export class LoggedCredentialDeliveryService implements CredentialDeliveryPort {
       msg: 'credential delivery pending a provider',
       purpose: delivery.purpose,
       recipient: delivery.email,
+      locale: delivery.locale,
       expiresAt: delivery.expiresAt.toISOString(),
     });
     return Promise.resolve();

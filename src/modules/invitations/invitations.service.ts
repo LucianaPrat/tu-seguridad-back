@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SpaceMemberRole, User } from '@prisma/client';
+import { Locale, SpaceMemberRole, User } from '@prisma/client';
 import {
   CredentialTtl,
   ErrorCode,
@@ -40,6 +40,8 @@ export interface InviteInput {
   role: SpaceMemberRole;
   menuAccess?: MenuKey[];
   cameraIds?: string[];
+  /** Defaults to the inviter's own locale. */
+  locale?: Locale;
 }
 
 @Injectable()
@@ -115,6 +117,9 @@ export class InvitationsService {
       role: input.role,
       menuAccess: input.menuAccess ?? DEFAULT_MENU_ACCESS[input.role],
       cameraIds,
+      locale:
+        input.locale ??
+        (await this.userAccessor.findById(invitedByUserId))?.locale,
     });
     await this.deliver(invitation, token);
 
@@ -266,6 +271,7 @@ export class InvitationsService {
       email: invitation.email,
       token,
       expiresAt: invitation.expiresAt,
+      locale: invitation.locale,
       invitation: {
         spaceName: invitation.space.name,
         inviterName: invitedByName(invitation),

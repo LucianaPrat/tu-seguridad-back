@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EnvNames } from '../../cross/common/constants';
 import { MailerService } from '../../cross/mail/mailer.service';
-import type { SpaceMemberRole } from '@prisma/client';
+import type { Locale, SpaceMemberRole } from '@prisma/client';
 import {
   CredentialDelivery,
   CredentialDeliveryPort,
@@ -14,29 +14,85 @@ import {
  * assumption about the client's routes, not a contract the client publishes —
  * when the real routes exist, this map is the single place to correct.
  */
-const CREDENTIAL_MAIL: Record<
-  DeliveredCredentialPurpose,
-  { path: string; subject: string }
+const CREDENTIAL_PATH: Record<DeliveredCredentialPurpose, string> = {
+  invitation: '/invitations/accept',
+  magic_link: '/auth/magic',
+  password_reset: '/auth/reset-password',
+};
+
+// One small copy table per mail; `{ es, en }` keyed by the recipient's locale.
+const GENERIC_COPY: Record<
+  Exclude<DeliveredCredentialPurpose, 'invitation'>,
+  Record<
+    Locale,
+    { subject: string; button: string; expiry: (at: string) => string }
+  >
 > = {
-  invitation: {
-    path: '/invitations/accept',
-    subject: 'You have been invited to Tu Seguridad',
-  },
   magic_link: {
-    path: '/auth/magic',
-    subject: 'Your Tu Seguridad sign-in link',
+    en: {
+      subject: 'Your Tu Seguridad sign-in link',
+      button: 'Continue',
+      expiry: (at) => `The link expires at ${at} and can be used once.`,
+    },
+    es: {
+      subject: 'Tu enlace de acceso a Tu Seguridad',
+      button: 'Continuar',
+      expiry: (at) => `El enlace vence el ${at} y se puede usar una sola vez.`,
+    },
   },
   password_reset: {
-    path: '/auth/reset-password',
-    subject: 'Reset your Tu Seguridad password',
+    en: {
+      subject: 'Reset your Tu Seguridad password',
+      button: 'Continue',
+      expiry: (at) => `The link expires at ${at} and can be used once.`,
+    },
+    es: {
+      subject: 'Restablece tu contraseña de Tu Seguridad',
+      button: 'Continuar',
+      expiry: (at) => `El enlace vence el ${at} y se puede usar una sola vez.`,
+    },
   },
 };
 
-// Product UI language; code and comments stay English.
-const ROLE_LABEL: Record<SpaceMemberRole, string> = {
-  admin: 'Administrador',
-  collaborator: 'Colaborador',
-  guest: 'Invitado',
+const INVITATION_COPY: Record<
+  Locale,
+  {
+    subject: (inviter: string, space: string) => string;
+    roles: Record<SpaceMemberRole, string>;
+    intro: (inviter: string, space: string) => string;
+    role: string;
+    button: string;
+    expiry: (date: string) => string;
+  }
+> = {
+  es: {
+    subject: (inviter, space) =>
+      `${inviter} te invitó a ${space} en Tu Seguridad`,
+    roles: {
+      admin: 'Administrador',
+      collaborator: 'Colaborador',
+      guest: 'Invitado',
+    },
+    intro: (inviter, space) =>
+      `${inviter} te invitó a ${space} en Tu Seguridad.`,
+    role: 'Rol',
+    button: 'Ver invitación',
+    expiry: (date) => `La invitación vence el ${date}.`,
+  },
+  en: {
+    subject: (inviter, space) =>
+      `${inviter} invited you to ${space} on Tu Seguridad`,
+    roles: {
+      admin: 'Administrator',
+      collaborator: 'Collaborator',
+      guest: 'Guest',
+    },
+    intro: (inviter, space) =>
+      `${inviter} invited you to ${space} on Tu Seguridad.`,
+    role: 'Role',
+    button: 'View invitation',
+    expiry: (date) => `Expires on ${date}.`,
+  },
 };
 
 /** Names are user input and land in HTML, so they are escaped there. */
@@ -50,8 +106,11 @@ function escapeHtml(value: string): string {
 }
 
 // UTC on purpose: the mail is rendered once for a recipient whose timezone is unknown.
-function formatDate(date: Date): string {
-  return date.toISOString().slice(0, 10).split('-').reverse().join('/');
+function formatDate(date: Date, locale: Locale): string {
+  const [year, month, day] = date.toISOString().slice(0, 10).split('-');
+  return locale === 'en'
+    ? `${month}/${day}/${year}`
+    : `${day}/${month}/${year}`;
 }
 
 /**
@@ -76,7 +135,7 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
   }
 
   async deliver(delivery: CredentialDelivery): Promise<void> {
-    const { path, subject: genericSubject } = CREDENTIAL_MAIL[delivery.purpose];
+    const path = CREDENTIAL_PATH[delivery.purpose];
     // Concatenated rather than `new URL(path, base)`: a leading-slash path is
     // absolute, so resolving it against a base would silently drop any subpath
     // the frontend is mounted under. URL still owns the query encoding.
@@ -88,12 +147,9 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
           delivery.invitation,
           link.href,
           delivery.expiresAt,
+          delivery.locale,
         )
-      : {
-          subject: genericSubject,
-          text: `${genericSubject}\n\n${link.href}\n\nThe link expires at ${expiresAt} and can be used once.`,
-          html: `<p>${genericSubject}</p><p><a href="${link.href}">Continue</a></p><p>The link expires at ${expiresAt} and can be used once.</p>`,
-        };
+      : this.genericContent(delivery, link.href, expiresAt);
 
     try {
       const sent = await this.mailer.send({
@@ -125,20 +181,40 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
     }
   }
 
+  private genericContent(
+    delivery: CredentialDelivery,
+    href: string,
+    expiresAt: string,
+  ): { subject: string; text: string; html: string } {
+    const copy =
+      GENERIC_COPY[delivery.purpose as keyof typeof GENERIC_COPY][
+        delivery.locale
+      ];
+    const expiry = copy.expiry(expiresAt);
+    return {
+      subject: copy.subject,
+      text: `${copy.subject}\n\n${href}\n\n${expiry}`,
+      html: `<p>${copy.subject}</p><p><a href="${href}">${copy.button}</a></p><p>${expiry}</p>`,
+    };
+  }
+
   private invitationContent(
     invitation: NonNullable<CredentialDelivery['invitation']>,
     href: string,
     expiresAt: Date,
+    locale: Locale,
   ): { subject: string; text: string; html: string } {
     const { spaceName, inviterName } = invitation;
-    const role = ROLE_LABEL[invitation.role];
-    const expiry = formatDate(expiresAt);
+    const copy = INVITATION_COPY[locale];
+    const role = copy.roles[invitation.role];
+    const expiry = copy.expiry(formatDate(expiresAt, locale));
+    const safeInviter = escapeHtml(inviterName);
+    const safeSpace = escapeHtml(spaceName);
     // The subject is a header, not HTML: it takes the raw names.
-    const subject = `${inviterName} te invitó a ${spaceName} en Tu Seguridad`;
     return {
-      subject,
-      text: `${inviterName} te invitó a ${spaceName} en Tu Seguridad.\n\nRol: ${role}\n\nVer invitación: ${href}\n\nLa invitación vence el ${expiry}.`,
-      html: `<p><strong>${escapeHtml(inviterName)}</strong> te invitó a <strong>${escapeHtml(spaceName)}</strong> en Tu Seguridad.</p><p>Rol: ${role}</p><p><a href="${href}">Ver invitación</a></p><p>La invitación vence el ${expiry}.</p>`,
+      subject: copy.subject(inviterName, spaceName),
+      text: `${copy.intro(inviterName, spaceName)}\n\n${copy.role}: ${role}\n\n${copy.button}: ${href}\n\n${expiry}`,
+      html: `<p>${copy.intro(`<strong>${safeInviter}</strong>`, `<strong>${safeSpace}</strong>`)}</p><p>${copy.role}: ${role}</p><p><a href="${href}">${copy.button}</a></p><p>${expiry}</p>`,
     };
   }
 }
