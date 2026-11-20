@@ -381,17 +381,18 @@ describe('tenant-scoped accessors (int)', () => {
       token: invitationToken,
       invitedByUserId: tenant.user.id,
       expiresAt: new Date(Date.now() + 60_000),
+      role: 'collaborator',
+      menuAccess: ['home'],
+      cameraIds: [],
     });
     expect(
-      await invitationAccessor.findUsableByToken(invitationToken),
+      await invitationAccessor.findPendingByToken(invitationToken),
     ).toMatchObject({
       id: invitation.id,
     });
+    expect(await invitationAccessor.revoke(invitation.id)).toBe(true);
     expect(
-      await invitationAccessor.consume(invitationToken, tenant.user.id),
-    ).toBe(true);
-    expect(
-      await invitationAccessor.findUsableByToken(invitationToken),
+      await invitationAccessor.findPendingByToken(invitationToken),
     ).toBeNull();
 
     const consumableToken = 'raw-password-reset-token';

@@ -31,8 +31,12 @@ export class LoggedCredentialDeliveryService implements CredentialDeliveryPort {
     if (this.isDevelopment) {
       // Interpolated into the message on purpose: a structured field named
       // `token` is redacted by the logger's canonical sensitive-field list.
+      const { invitation } = delivery;
+      const context = invitation
+        ? ` [space "${invitation.spaceName}", invited by ${invitation.inviterName}, role ${invitation.role}]`
+        : '';
       this.logger.warn(
-        `[development only] ${delivery.purpose} credential for ${delivery.email}: ${delivery.token} (expires ${delivery.expiresAt.toISOString()})`,
+        `[development only] ${delivery.purpose} credential for ${delivery.email}${context}: ${delivery.token} (expires ${delivery.expiresAt.toISOString()})`,
       );
       return Promise.resolve();
     }

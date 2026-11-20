@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { Invitation, SpaceMember, User } from '@prisma/client';
+import { Prisma, SpaceMember, SpaceMemberRole } from '@prisma/client';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
+import { MenuKey } from '../../cross/common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
-import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 
-/** Every column except the token hash, which never leaves the accessor. */
-const PUBLIC_FIELDS = {
+/**
+ * Every column except the token hash, which never leaves the accessor, plus the
+ * names the invitation mail and the preview need so callers never re-query them.
+ */
+const PUBLIC_SELECT = {
   id: true,
   spaceId: true,
   email: true,
@@ -19,7 +22,13 @@ const PUBLIC_FIELDS = {
   cameraIds: true,
   declinedAt: true,
   revokedAt: true,
+  space: { select: { name: true } },
+  invitedBy: { select: { firstName: true, lastName: true } },
 } as const;
+
+export type InvitationRecord = Prisma.InvitationGetPayload<{
+  select: typeof PUBLIC_SELECT;
+}>;
 
 export interface CreateInvitationInput {
   spaceId: string;
@@ -27,20 +36,19 @@ export interface CreateInvitationInput {
   token: string;
   invitedByUserId: number;
   expiresAt: Date;
+  role: SpaceMemberRole;
+  menuAccess: MenuKey[];
+  cameraIds: string[];
 }
 
-export type InvitationRecord = Omit<Invitation, 'tokenHash'>;
-
-export interface AcceptWithNewUserInput {
-  token: string;
-  email: string;
-  passwordHash: string;
-}
-
-export interface AcceptedInvitation {
-  invitation: InvitationRecord;
-  member: SpaceMember;
-  user: User;
+/** The single definition of "pending", shared by every read and write below. */
+function pendingWhere(now: Date): Prisma.InvitationWhereInput {
+  return {
+    acceptedAt: null,
+    declinedAt: null,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
 }
 
 @Injectable()
@@ -50,47 +58,45 @@ export class InvitationAccessorService {
     private readonly credentialHash: CredentialHashService,
   ) {}
 
-  async create(input: CreateInvitationInput): Promise<InvitationRecord> {
-    const invitation = await this.prisma.invitation.create({
+  create(input: CreateInvitationInput): Promise<InvitationRecord> {
+    return this.prisma.invitation.create({
       data: {
         spaceId: input.spaceId,
         email: input.email.toLowerCase(),
         tokenHash: this.credentialHash.hashInvitation(input.token),
         invitedByUserId: input.invitedByUserId,
         expiresAt: input.expiresAt,
+        role: input.role,
+        menuAccess: input.menuAccess,
+        cameraIds: input.cameraIds,
       },
+      select: PUBLIC_SELECT,
     });
-    return this.withoutHash(invitation);
   }
 
-  async findUsableByToken(
+  findPendingByToken(
     token: string,
     now = new Date(),
   ): Promise<InvitationRecord | null> {
-    const invitation = await this.prisma.invitation.findFirst({
+    return this.prisma.invitation.findFirst({
       where: {
         tokenHash: this.credentialHash.hashInvitation(token),
-        acceptedAt: null,
-        expiresAt: { gt: now },
+        ...pendingWhere(now),
       },
+      select: PUBLIC_SELECT,
     });
-    return invitation ? this.withoutHash(invitation) : null;
   }
 
-  async consume(
-    token: string,
-    createdUserId: number,
+  /** `spaceId` scopes the lookup for admin routes; the invitee's routes omit it. */
+  findPendingById(
+    id: string,
+    spaceId?: string,
     now = new Date(),
-  ): Promise<boolean> {
-    const result = await this.prisma.invitation.updateMany({
-      where: {
-        tokenHash: this.credentialHash.hashInvitation(token),
-        acceptedAt: null,
-        expiresAt: { gt: now },
-      },
-      data: { acceptedAt: now, createdUserId },
+  ): Promise<InvitationRecord | null> {
+    return this.prisma.invitation.findFirst({
+      where: { id, ...(spaceId ? { spaceId } : {}), ...pendingWhere(now) },
+      select: PUBLIC_SELECT,
     });
-    return result.count === 1;
   }
 
   findPendingBySpaceAndEmail(
@@ -99,157 +105,110 @@ export class InvitationAccessorService {
     now = new Date(),
   ): Promise<InvitationRecord | null> {
     return this.prisma.invitation.findFirst({
-      where: {
-        spaceId,
-        email: email.toLowerCase(),
-        acceptedAt: null,
-        expiresAt: { gt: now },
-      },
-      select: PUBLIC_FIELDS,
+      where: { spaceId, email: email.toLowerCase(), ...pendingWhere(now) },
+      select: PUBLIC_SELECT,
+    });
+  }
+
+  findPendingForEmail(
+    email: string,
+    now = new Date(),
+  ): Promise<InvitationRecord[]> {
+    return this.prisma.invitation.findMany({
+      where: { email: email.toLowerCase(), ...pendingWhere(now) },
+      orderBy: { createdAt: 'desc' },
+      select: PUBLIC_SELECT,
     });
   }
 
   countPendingForEmail(email: string, now = new Date()): Promise<number> {
     return this.prisma.invitation.count({
-      where: {
-        email: email.toLowerCase(),
-        acceptedAt: null,
-        declinedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: now },
-      },
+      where: { email: email.toLowerCase(), ...pendingWhere(now) },
     });
   }
 
-  /**
-   * Pending invitations of a space: unaccepted and unexpired, newest first. Reuses
-   * `PUBLIC_FIELDS` so the token hash never leaves the accessor.
-   */
   findPendingBySpace(
     spaceId: string,
     now = new Date(),
   ): Promise<InvitationRecord[]> {
     return this.prisma.invitation.findMany({
-      where: { spaceId, acceptedAt: null, expiresAt: { gt: now } },
+      where: { spaceId, ...pendingWhere(now) },
       orderBy: { createdAt: 'desc' },
-      select: PUBLIC_FIELDS,
+      select: PUBLIC_SELECT,
+    });
+  }
+
+  /** `false` when the invitation stopped being pending in the meantime. */
+  async revoke(id: string, now = new Date()): Promise<boolean> {
+    const result = await this.prisma.invitation.updateMany({
+      where: { id, ...pendingWhere(now) },
+      data: { revokedAt: now },
+    });
+    return result.count === 1;
+  }
+
+  async decline(id: string, now = new Date()): Promise<boolean> {
+    const result = await this.prisma.invitation.updateMany({
+      where: { id, ...pendingWhere(now) },
+      data: { declinedAt: now },
+    });
+    return result.count === 1;
+  }
+
+  /** New token and expiry on the same row: the old link stops resolving at once. */
+  renew(id: string, token: string, expiresAt: Date): Promise<InvitationRecord> {
+    return this.prisma.invitation.update({
+      where: { id },
+      data: {
+        tokenHash: this.credentialHash.hashInvitation(token),
+        expiresAt,
+      },
+      select: PUBLIC_SELECT,
     });
   }
 
   /**
-   * Acceptance for an address with no account yet: the user, its membership and
-   * the invitation's consumption are one write. A user created without its
-   * membership could not sign in, and a consumed invitation with no user would
-   * be unrecoverable — the raw token exists only in the delivered link.
-   *
-   * The invitation is re-checked inside the transaction, so two clicks on the
-   * same link produce one member and one `null`.
+   * Consumes the invitation and creates the membership as one write, so a
+   * membership never exists without its invitation being settled. The pending
+   * re-check inside the transaction makes two clicks produce one member and one
+   * `null`. An existing membership in the space is reused rather than failing,
+   * which keeps accepting idempotent.
    */
-  acceptWithNewUser(
-    input: AcceptWithNewUserInput,
+  accept(
+    id: string,
+    member: Prisma.SpaceMemberUncheckedCreateInput,
     now = new Date(),
-  ): Promise<AcceptedInvitation | null> {
+  ): Promise<SpaceMember | null> {
     return this.prisma.$transaction(async (transaction) => {
-      const consumable = await transaction.invitation.updateMany({
-        where: {
-          tokenHash: this.credentialHash.hashInvitation(input.token),
-          acceptedAt: null,
-          expiresAt: { gt: now },
-        },
+      const consumed = await transaction.invitation.updateMany({
+        where: { id, ...pendingWhere(now) },
         data: { acceptedAt: now },
       });
-      if (consumable.count !== 1) {
+      if (consumed.count !== 1) {
         return null;
       }
-
-      const invitation = await transaction.invitation.findFirstOrThrow({
-        where: { tokenHash: this.credentialHash.hashInvitation(input.token) },
-        select: PUBLIC_FIELDS,
-      });
-      const user = await transaction.user.create({
-        data: {
-          email: input.email.toLowerCase(),
-          passwordHash: input.passwordHash,
-          // The account has no name, phone or password of its own until it
-          // completes its profile, and `profile_completed` is what gates it.
-          firstName: '',
-          lastName: '',
-          phone: '',
-        },
-      });
-      const member = await transaction.spaceMember.create({
-        data: {
-          spaceId: invitation.spaceId,
-          userId: user.id,
-          role: 'collaborator',
-          menuAccess: DEFAULT_MENU_ACCESS.collaborator,
-          cameraIds: [],
-          invitedByUserId: invitation.invitedByUserId,
-        },
-      });
-      await transaction.invitation.update({
-        where: { id: invitation.id },
-        data: { createdUserId: user.id },
-      });
-      return {
-        invitation: { ...invitation, createdUserId: user.id },
-        member,
-        user,
-      };
-    });
-  }
-
-  /**
-   * Acceptance by an address that already has an account and no membership: link
-   * it, consume the invitation, leave the credentials alone.
-   */
-  acceptWithExistingUser(
-    token: string,
-    userId: number,
-    now = new Date(),
-  ): Promise<Omit<AcceptedInvitation, 'user'> | null> {
-    return this.prisma.$transaction(async (transaction) => {
-      const consumable = await transaction.invitation.updateMany({
+      const existing = await transaction.spaceMember.findUnique({
         where: {
-          tokenHash: this.credentialHash.hashInvitation(token),
-          acceptedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { acceptedAt: now, createdUserId: userId },
-      });
-      if (consumable.count !== 1) {
-        return null;
-      }
-
-      const invitation = await transaction.invitation.findFirstOrThrow({
-        where: { tokenHash: this.credentialHash.hashInvitation(token) },
-        select: PUBLIC_FIELDS,
-      });
-      const member = await transaction.spaceMember.create({
-        data: {
-          spaceId: invitation.spaceId,
-          userId,
-          role: 'collaborator',
-          menuAccess: DEFAULT_MENU_ACCESS.collaborator,
-          cameraIds: [],
-          invitedByUserId: invitation.invitedByUserId,
+          spaceId_userId: { spaceId: member.spaceId, userId: member.userId },
         },
       });
-      return { invitation, member };
+      return existing ?? transaction.spaceMember.create({ data: member });
     });
   }
 
   /**
-   * Retention sweep. An invitation is settled once it has expired or been
-   * accepted; both keep their row for the window before it goes. The accepted
-   * ones are the reason the window is not zero — `createdUserId` is how a space
-   * owner answers "who invited this member", and that question outlives the
-   * invitation.
+   * Retention sweep. An invitation is settled once it has expired, been accepted,
+   * declined or revoked; each keeps its row for the window before it goes.
    */
   async deleteSettledBefore(before: Date, limit: number): Promise<number> {
     const doomed = await this.prisma.invitation.findMany({
       where: {
-        OR: [{ expiresAt: { lt: before } }, { acceptedAt: { lt: before } }],
+        OR: [
+          { expiresAt: { lt: before } },
+          { acceptedAt: { lt: before } },
+          { declinedAt: { lt: before } },
+          { revokedAt: { lt: before } },
+        ],
       },
       select: { id: true },
       take: limit,
@@ -261,13 +220,5 @@ export class InvitationAccessorService {
       where: { id: { in: doomed.map((row) => row.id) } },
     });
     return count;
-  }
-
-  private withoutHash({
-    tokenHash: _tokenHash,
-    ...invitation
-  }: Invitation): InvitationRecord {
-    void _tokenHash;
-    return invitation;
   }
 }

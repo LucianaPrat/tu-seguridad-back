@@ -7,15 +7,32 @@ import {
   SeededAdmin,
 } from './utils/bootstrap-e2e-app';
 import { refreshCookie } from './utils/refresh-cookie';
-import { E2E_PASSWORD, seedMember } from './utils/seed-tenant';
+import { E2E_PASSWORD, seedMember, seedTenant } from './utils/seed-tenant';
 import { truncateAll } from './utils/truncate-all';
 import { typedBody } from './utils/typed-body';
 
 interface InvitationBody {
   id: string;
   email: string;
-  expiresAt: string;
-  createdAt: string;
+  role: string;
+  menuAccess: string[];
+  cameraIds: string[];
+}
+
+interface MineBody {
+  id: string;
+  spaceId: string;
+  spaceName: string;
+  invitedByName: string;
+  role: string;
+}
+
+interface PreviewBody {
+  id: string;
+  spaceName: string;
+  email: string;
+  role: string;
+  userExists: boolean;
 }
 
 interface AccessTokenBody {
@@ -24,11 +41,13 @@ interface AccessTokenBody {
 }
 
 interface MeBody {
-  id: number;
-  email: string;
-  spaceId: string;
-  role: string;
-  profileCompleted: boolean;
+  currentSpace: {
+    id: string;
+    role: string;
+    menuAccess: string[];
+    cameraIds: string[];
+  } | null;
+  spaces: { id: string }[];
 }
 
 interface ErrorBody {
@@ -56,33 +75,224 @@ describe('Invitations (e2e)', () => {
     ctx.fakeCredentialDelivery.deliveries = [];
   });
 
-  function auth(bearer = token) {
-    return { Authorization: `Bearer ${bearer}` };
-  }
+  const bearer = (value: string) => ({ Authorization: `Bearer ${value}` });
 
-  function invite(email: string, bearer = token) {
+  function invite(
+    body: { email: string; role?: string; cameraIds?: string[] },
+    as = token,
+  ) {
     return request(ctx.httpServer)
       .post('/api/v1/invitations')
-      .set(auth(bearer))
-      .send({ email });
+      .set(bearer(as))
+      .send({ role: 'collaborator', ...body });
   }
 
-  function accept(inviteToken: string) {
-    return request(ctx.httpServer)
-      .post('/api/v1/invitations/accept')
-      .send({ token: inviteToken });
+  const lastToken = () => ctx.fakeCredentialDelivery.lastTokenFor('invitation');
+
+  const preview = (inviteToken: string) =>
+    request(ctx.httpServer).get('/api/v1/invitations/preview').query({
+      token: inviteToken,
+    });
+
+  const mine = (as: string) =>
+    request(ctx.httpServer).get('/api/v1/invitations/mine').set(bearer(as));
+
+  const act = (as: string, id: string, action: 'accept' | 'decline') =>
+    request(ctx.httpServer)
+      .post(`/api/v1/invitations/${id}/${action}`)
+      .set(bearer(as));
+
+  const meOf = async (as: string) =>
+    typedBody<MeBody>(
+      await request(ctx.httpServer).get('/api/v1/auth/me').set(bearer(as)),
+    );
+
+  const register = (email: string, inviteToken: string) =>
+    request(ctx.httpServer).post('/api/v1/auth/register').send({
+      email,
+      password: E2E_PASSWORD,
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      phone: '+5491122334455',
+      inviteToken,
+    });
+
+  async function seedCamera(): Promise<string> {
+    const dvr = await ctx.prisma.dvr.create({
+      data: {
+        spaceId: admin.spaceId,
+        url: 'http://192.168.1.10:8000',
+        username: 'u',
+        passwordEncrypted: 'x',
+        timezone: 'UTC',
+      },
+    });
+    const camera = await ctx.prisma.camera.create({
+      data: { dvrId: dvr.id, externalId: '1', name: 'Door' },
+    });
+    return camera.id;
   }
 
-  it('creates an invitation and delivers the raw token out of band, never in the body', async () => {
-    const res = await invite('new-member@example.com');
+  it('mails the raw token, never returning it in the body', async () => {
+    const res = await invite({ email: 'new@example.com' });
 
     expect(res.status).toBe(201);
     const body = typedBody<InvitationBody>(res);
-    expect(body).toMatchObject({ email: 'new-member@example.com' });
-    expect(Object.keys(body)).not.toContain('token');
-    const deliveredToken =
-      ctx.fakeCredentialDelivery.lastTokenFor('invitation');
-    expect(JSON.stringify(body)).not.toContain(deliveredToken);
+    expect(body).toMatchObject({
+      email: 'new@example.com',
+      role: 'collaborator',
+      cameraIds: [],
+    });
+    expect(body.menuAccess).toEqual(
+      expect.arrayContaining(['home', 'monitor', 'events']),
+    );
+    expect(JSON.stringify(body)).not.toContain(lastToken());
+    expect(ctx.fakeCredentialDelivery.deliveries[0].invitation).toMatchObject({
+      spaceName: admin.spaceName,
+      role: 'collaborator',
+    });
+  });
+
+  it('invites a user who owns another space, who then accepts into the inviter space', async () => {
+    const other = await seedTenant(ctx.prisma, 'owner@example.com', 'Theirs');
+    const otherToken = await loginAs(ctx.httpServer, other.email, E2E_PASSWORD);
+
+    const created = await invite({ email: other.email, role: 'guest' });
+    expect(created.status).toBe(201);
+
+    const inbox = await mine(otherToken);
+    expect(inbox.status).toBe(200);
+    const [entry] = typedBody<MineBody[]>(inbox);
+    expect(entry).toMatchObject({
+      spaceId: admin.spaceId,
+      spaceName: admin.spaceName,
+      role: 'guest',
+    });
+
+    const accepted = await act(otherToken, entry.id, 'accept');
+    expect(accepted.status).toBe(200);
+    expect(typedBody<AccessTokenBody>(accepted).refreshToken).toBeUndefined();
+    expect(refreshCookie(accepted)).toContain('HttpOnly');
+
+    const me = await meOf(typedBody<AccessTokenBody>(accepted).accessToken);
+    expect(me.currentSpace).toMatchObject({
+      id: admin.spaceId,
+      role: 'guest',
+    });
+    expect(me.spaces).toHaveLength(2);
+    expect((await mine(otherToken)).body).toEqual([]);
+  });
+
+  it('registers with an inviteToken into no space, then accept creates the membership from the invitation', async () => {
+    const cameraId = await seedCamera();
+    await invite({
+      email: 'Fresh@Example.com',
+      role: 'guest',
+      cameraIds: [cameraId],
+    });
+
+    const registered = await register('fresh@example.com', lastToken());
+    expect(registered.status).toBe(201);
+    const session = typedBody<AccessTokenBody>(registered).accessToken;
+    const before = await meOf(session);
+    expect(before.currentSpace).toBeNull();
+    expect(before.spaces).toHaveLength(0);
+
+    const [entry] = typedBody<MineBody[]>(await mine(session));
+    const accepted = await act(session, entry.id, 'accept');
+    expect(accepted.status).toBe(200);
+
+    const after = await meOf(typedBody<AccessTokenBody>(accepted).accessToken);
+    expect(after.spaces).toHaveLength(1);
+    expect(after.currentSpace).toMatchObject({
+      id: admin.spaceId,
+      role: 'guest',
+      menuAccess: ['home', 'monitor'],
+      cameraIds: [cameraId],
+    });
+  });
+
+  it('previews a pending invitation by token', async () => {
+    await invite({ email: 'new@example.com', role: 'admin' });
+
+    const res = await preview(lastToken());
+
+    expect(res.status).toBe(200);
+    expect(typedBody<PreviewBody>(res)).toMatchObject({
+      spaceName: admin.spaceName,
+      email: 'new@example.com',
+      role: 'admin',
+      userExists: false,
+    });
+  });
+
+  it('refuses to accept while signed in as a different address', async () => {
+    const created = await invite({ email: 'invitee@example.com' });
+    const id = typedBody<InvitationBody>(created).id;
+    const other = await seedTenant(ctx.prisma, 'stranger@example.com', 'Other');
+    const otherToken = await loginAs(ctx.httpServer, other.email, E2E_PASSWORD);
+
+    const res = await act(otherToken, id, 'accept');
+
+    expect(res.status).toBe(403);
+    expect(typedBody<ErrorBody>(res).code).toBe('FORBIDDEN');
+  });
+
+  it.each(['declined', 'revoked', 'expired'] as const)(
+    'cannot be accepted once %s, and is no longer previewable',
+    async (state) => {
+      const invitee = await seedTenant(
+        ctx.prisma,
+        'invitee@example.com',
+        'Own',
+      );
+      const inviteeToken = await loginAs(
+        ctx.httpServer,
+        invitee.email,
+        E2E_PASSWORD,
+      );
+      const created = await invite({ email: invitee.email });
+      const id = typedBody<InvitationBody>(created).id;
+      const inviteToken = lastToken();
+
+      if (state === 'declined') {
+        const res = await act(inviteeToken, id, 'decline');
+        expect(res.status).toBe(204);
+      } else if (state === 'revoked') {
+        const res = await request(ctx.httpServer)
+          .delete(`/api/v1/invitations/${id}`)
+          .set(bearer(token));
+        expect(res.status).toBe(204);
+      } else {
+        await ctx.prisma.invitation.update({
+          where: { id },
+          data: { expiresAt: new Date(Date.now() - 1000) },
+        });
+      }
+
+      const accepted = await act(inviteeToken, id, 'accept');
+      expect(accepted.status).toBe(409);
+      expect(typedBody<ErrorBody>(accepted).code).toBe('CONFLICT');
+      const previewed = await preview(inviteToken);
+      expect(previewed.status).toBe(404);
+      expect(typedBody<ErrorBody>(previewed).code).toBe('NOT_FOUND');
+    },
+  );
+
+  it('resend invalidates the old token and the new one works', async () => {
+    const created = await invite({ email: 'new@example.com' });
+    const id = typedBody<InvitationBody>(created).id;
+    const oldToken = lastToken();
+
+    const res = await request(ctx.httpServer)
+      .post(`/api/v1/invitations/${id}/resend`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const newToken = lastToken();
+    expect(newToken).not.toBe(oldToken);
+    expect((await preview(oldToken)).status).toBe(404);
+    expect((await preview(newToken)).status).toBe(200);
   });
 
   it("keeps inviting out of a plain member's hands", async () => {
@@ -93,111 +303,42 @@ describe('Invitations (e2e)', () => {
       E2E_PASSWORD,
     );
 
-    const res = await invite('another@example.com', memberToken);
+    const res = await invite({ email: 'another@example.com' }, memberToken);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('refuses a duplicate pending invitation and an existing member', async () => {
+    await invite({ email: 'twice@example.com' });
+    const duplicate = await invite({ email: 'twice@example.com' });
+    const member = await invite({ email: admin.email });
+
+    expect(duplicate.status).toBe(409);
+    expect(typedBody<ErrorBody>(duplicate).code).toBe('CONFLICT');
+    expect(member.status).toBe(409);
+  });
+
+  it('rejects cameras that are not in the space', async () => {
+    const res = await invite({
+      email: 'new@example.com',
+      cameraIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(res.status).toBe(400);
+    expect(typedBody<ErrorBody>(res).code).toBe('VALIDATION_ERROR');
+  });
+
+  it('refuses to register with an inviteToken for a different email', async () => {
+    await invite({ email: 'invited@example.com' });
+
+    const res = await register('someone-else@example.com', lastToken());
 
     expect(res.status).toBe(403);
     expect(typedBody<ErrorBody>(res).code).toBe('FORBIDDEN');
-  });
-
-  /**
-   * Two clicks on the same link, close enough that both pass the usability
-   * check before either has consumed the invitation. The database settles it;
-   * the loser is a conflict, not a fault, and used to surface as a 500.
-   */
-  it('answers the loser of a concurrent accept with a conflict, never a fault', async () => {
-    await invite('racing@example.com');
-    const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');
-
-    const [first, second] = await Promise.all([
-      accept(inviteToken),
-      accept(inviteToken),
-    ]);
-    const statuses = [first.status, second.status].sort((a, b) => a - b);
-
-    expect(statuses).not.toContain(500);
-    expect(statuses[0]).toBe(200);
-    expect([401, 409]).toContain(statuses[1]);
-  });
-
-  it('accepts the delivered token, creates one membership in the inviting space and opens a session', async () => {
-    await invite('new-member@example.com');
-    const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');
-
-    const res = await accept(inviteToken);
-
-    expect(res.status).toBe(200);
-    const body = typedBody<AccessTokenBody>(res);
-    expect(body.accessToken).toEqual(expect.any(String));
-    // The refresh token rides the cookie now — leaking it in the body would
-    // hand it straight back to any XSS.
-    expect(body.refreshToken).toBeUndefined();
-    const cookie = refreshCookie(res);
-    expect(cookie).toContain('HttpOnly');
-
-    const me = await request(ctx.httpServer)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${body.accessToken}`);
-    expect(me.status).toBe(200);
-    const meBody = typedBody<MeBody>(me);
-    expect(meBody).toMatchObject({
-      email: 'new-member@example.com',
-      spaceId: admin.spaceId,
-      role: 'collaborator',
-      profileCompleted: false,
-    });
-
-    const memberships = await ctx.prisma.spaceMember.findMany({
-      where: { userId: meBody.id },
-    });
-    expect(memberships).toHaveLength(1);
-  });
-
-  it('gates a freshly accepted invitation to profile completion', async () => {
-    await invite('new-member@example.com');
-    const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');
-    const accepted = await accept(inviteToken);
-    const { accessToken } = typedBody<AccessTokenBody>(accepted);
-
-    const res = await request(ctx.httpServer)
-      .get('/api/v1/cameras')
-      .set('Authorization', `Bearer ${accessToken}`);
-
-    expect(res.status).toBe(403);
-    expect(typedBody<ErrorBody>(res).code).toBe('FORBIDDEN');
-  });
-
-  it('answers 401 on a replayed token — an invitation is single use', async () => {
-    await invite('new-member@example.com');
-    const inviteToken = ctx.fakeCredentialDelivery.lastTokenFor('invitation');
-
-    const first = await accept(inviteToken);
-    const replay = await accept(inviteToken);
-
-    expect(first.status).toBe(200);
-    expect(replay.status).toBe(401);
-    expect(typedBody<ErrorBody>(replay).code).toBe('UNAUTHORIZED');
-  });
-
-  it('answers 401 on an unknown token, revealing nothing about the address', async () => {
-    const res = await accept('garbage-token-that-was-never-issued');
-
-    expect(res.status).toBe(401);
-    expect(typedBody<ErrorBody>(res).code).toBe('UNAUTHORIZED');
-  });
-
-  it('refuses a second pending invitation for the same address in the same space', async () => {
-    await invite('twice@example.com');
-
-    const res = await invite('twice@example.com');
-
-    expect(res.status).toBe(409);
-    expect(typedBody<ErrorBody>(res).code).toBe('CONFLICT');
-  });
-
-  it('refuses to invite an email that already belongs to a space', async () => {
-    const res = await invite(admin.email);
-
-    expect(res.status).toBe(409);
-    expect(typedBody<ErrorBody>(res).code).toBe('CONFLICT');
+    expect(
+      await ctx.prisma.user.findUnique({
+        where: { email: 'someone-else@example.com' },
+      }),
+    ).toBeNull();
   });
 });

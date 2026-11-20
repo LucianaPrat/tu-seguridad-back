@@ -138,7 +138,7 @@ describe('Members (e2e)', () => {
     await request(ctx.httpServer)
       .post('/api/v1/invitations')
       .set(auth())
-      .send({ email: 'invited@example.com' })
+      .send({ email: 'invited@example.com', role: 'collaborator' })
       .expect(201);
 
     const res = await request(ctx.httpServer)
@@ -149,7 +149,10 @@ describe('Members (e2e)', () => {
     expect(res.status).toBe(200);
     const body = typedBody<InvitationListBody>(res);
     expect(body.total).toBe(1);
-    expect(body.items[0]).toMatchObject({ email: 'invited@example.com' });
+    expect(body.items[0]).toMatchObject({
+      email: 'invited@example.com',
+      role: 'collaborator',
+    });
     expect(JSON.stringify(body)).not.toContain('token');
   });
 

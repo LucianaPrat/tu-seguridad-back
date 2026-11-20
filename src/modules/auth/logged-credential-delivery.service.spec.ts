@@ -29,6 +29,25 @@ describe('LoggedCredentialDeliveryService', () => {
     );
   });
 
+  it('also prints space, inviter and role for an invitation in development', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await serviceFor('development').deliver({
+      ...delivery,
+      invitation: {
+        spaceName: 'Casa',
+        inviterName: 'Ada Lovelace',
+        role: 'guest',
+      },
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'space "Casa", invited by Ada Lovelace, role guest',
+      ),
+    );
+  });
+
   it('never logs the token in production', async () => {
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();

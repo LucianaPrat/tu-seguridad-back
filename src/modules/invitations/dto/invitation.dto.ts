@@ -1,4 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { SpaceMemberRole } from '@prisma/client';
+import { MENU_KEYS, MenuKey } from '../../../cross/common/permissions';
 
 /**
  * What an administrator gets back after inviting somebody. The raw token is
@@ -11,6 +13,15 @@ export class InvitationDto {
 
   @ApiProperty({ example: 'member@example.com' })
   email!: string;
+
+  @ApiProperty({ enum: SpaceMemberRole })
+  role!: SpaceMemberRole;
+
+  @ApiProperty({ enum: MENU_KEYS, isArray: true })
+  menuAccess!: MenuKey[];
+
+  @ApiProperty({ type: [String] })
+  cameraIds!: string[];
 
   @ApiProperty()
   expiresAt!: Date;

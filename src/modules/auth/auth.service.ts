@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, Space, SpaceMember } from '@prisma/client';
-import { ErrorCode } from '../../cross/common/constants';
+import { ErrorCode, InvitationMessage } from '../../cross/common/constants';
 import { normalizeEmail } from '../../cross/common/normalize-email';
 import { toMemberPermissions } from '../../cross/common/permissions';
 import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
@@ -74,23 +74,48 @@ export class AuthService {
     context: SessionContext,
   ): Promise<Either<TokenPairDto>> {
     const email = normalizeEmail(dto.email);
+
+    // Checked before the address is probed: a bad or foreign token must answer
+    // the same whether or not the address already has an account.
+    if (dto.inviteToken) {
+      const invitation = await this.invitationAccessor.findPendingByToken(
+        dto.inviteToken,
+      );
+      if (!invitation) {
+        return buildError(ErrorCode.NOT_FOUND, InvitationMessage.NOT_FOUND);
+      }
+      if (invitation.email !== email) {
+        return buildError(
+          ErrorCode.FORBIDDEN,
+          InvitationMessage.EMAIL_MISMATCH,
+        );
+      }
+    }
     if (await this.userAccessor.findByEmail(email)) {
       return buildError(ErrorCode.CONFLICT, 'Email is already registered');
     }
 
     const passwordHash = await this.passwordHash.hash(dto.password);
+    const profile = {
+      email,
+      passwordHash,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      phone: dto.phone,
+      profileCompleted: true,
+      lastLoginAt: new Date(),
+    };
     try {
+      if (dto.inviteToken) {
+        // No space and no membership: the invitation stays pending and the
+        // client accepts it next, which is what creates the membership.
+        const user = await this.userAccessor.create(profile);
+        return buildData(await this.sessionService.issue(user, null, context));
+      }
       const owned = await this.spaceAccessor.createWithOwner({
-        user: {
-          email,
-          passwordHash,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          profileCompleted: true,
-          lastLoginAt: new Date(),
-        },
-        spaceName: dto.spaceName,
+        user: profile,
+        // Validated by RegisterDto: required whenever there is no inviteToken.
+        spaceName: dto.spaceName!,
       });
       return buildData(
         await this.sessionService.issue(owned.user, owned.member, context),

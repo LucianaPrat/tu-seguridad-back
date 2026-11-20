@@ -82,6 +82,56 @@ describe('SmtpCredentialDeliveryService', () => {
     },
   );
 
+  describe('invitation mail', () => {
+    const invitation = {
+      spaceName: 'Casa <b>& "Co"</b>',
+      inviterName: 'Ada <script>',
+      role: 'collaborator' as const,
+    };
+
+    it('is in Spanish with inviter, space, role, link and expiry date', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await serviceFor().deliver({ ...delivery, invitation });
+
+      const message = sentMessage();
+      expect(message.subject).toBe(
+        'Ada <script> te invitó a Casa <b>& "Co"</b> en Tu Seguridad',
+      );
+      const link = `http://localhost:5173/invitations/accept?token=${TOKEN}`;
+      expect(message.text).toContain('Rol: Colaborador');
+      expect(message.text).toContain(`Ver invitación: ${link}`);
+      expect(message.text).toContain('vence el 25/08/2026');
+      expect(message.html).toContain(`<a href="${link}">Ver invitación</a>`);
+      expect(message.html).toContain('vence el 25/08/2026');
+    });
+
+    it('escapes the names in the HTML body', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await serviceFor().deliver({ ...delivery, invitation });
+
+      const { html } = sentMessage();
+      expect(html).toContain('Ada &lt;script&gt;');
+      expect(html).toContain('Casa &lt;b&gt;&amp; &quot;Co&quot;&lt;/b&gt;');
+      expect(html).not.toContain('<script>');
+    });
+
+    it.each([
+      ['admin', 'Administrador'],
+      ['guest', 'Invitado'],
+    ] as const)('labels the %s role as %s', async (role, label) => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await serviceFor().deliver({
+        ...delivery,
+        invitation: { ...invitation, role },
+      });
+
+      expect(sentMessage().text).toContain(`Rol: ${label}`);
+    });
+  });
+
   it('honours a non-root APP_BASE_URL without swallowing its path', async () => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
 

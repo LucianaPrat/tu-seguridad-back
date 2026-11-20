@@ -96,7 +96,8 @@ export class AuthController {
       'The access token comes back in the body; the refresh token is set only as an ' +
       '`httpOnly`, path-scoped cookie. The account may still need ' +
       '`POST /auth/complete-profile` before the rest of the API opens up — read ' +
-      '`GET /auth/me` to find out.',
+      '`GET /auth/me` to find out. With an `inviteToken` the account is created in no ' +
+      'space; accept the invitation afterwards.',
   })
   @ApiCreatedResponse({
     type: AccessTokenDto,
@@ -105,6 +106,9 @@ export class AuthController {
   @ApiFailures({
     [ErrorCode.VALIDATION_ERROR]:
       'Malformed body, or a password that fails the policy.',
+    [ErrorCode.FORBIDDEN]:
+      'The inviteToken belongs to an invitation sent to a different email.',
+    [ErrorCode.NOT_FOUND]: 'The inviteToken is unknown or no longer pending.',
     [ErrorCode.CONFLICT]: 'That email is already registered.',
   })
   async register(

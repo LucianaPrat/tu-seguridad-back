@@ -105,94 +105,21 @@ describe('auth and membership accessors (int)', () => {
   });
 
   describe('invitation acceptance', () => {
-    async function inviteInto(spaceId: string, invitedByUserId: number) {
-      return invitationAccessor.create({
-        spaceId,
-        email: 'Member@Example.com',
-        token: 'raw-invitation-token',
-        invitedByUserId,
-        expiresAt: new Date(Date.now() + HOUR_MS),
-      });
-    }
-
-    it('creates the user, its membership and consumes the invitation in one write', async () => {
-      const owned = await spaceAccessor.createWithOwner(
-        ownerInput('owner@example.com'),
-      );
-      const invitation = await inviteInto(owned.space.id, owned.user.id);
-
-      const accepted = await invitationAccessor.acceptWithNewUser({
-        token: 'raw-invitation-token',
-        email: 'member@example.com',
-        passwordHash: 'placeholder-hash',
-      });
-
-      expect(accepted).not.toBeNull();
-      expect(accepted?.member.spaceId).toBe(owned.space.id);
-      expect(accepted?.member.role).toBe('collaborator');
-      expect(accepted?.member.invitedByUserId).toBe(owned.user.id);
-      // Created without a name or phone of its own: `profileCompleted` is what
-      // keeps that account off every other route.
-      expect(accepted?.user.profileCompleted).toBe(false);
-      const stored = await prisma.invitation.findUniqueOrThrow({
-        where: { id: invitation.id },
-      });
-      expect(stored.acceptedAt).not.toBeNull();
-      expect(stored.createdUserId).toBe(accepted?.user.id);
+    const pendingInput = (spaceId: string, invitedByUserId: number) => ({
+      spaceId,
+      email: 'Member@Example.com',
+      token: 'raw-invitation-token',
+      invitedByUserId,
+      expiresAt: new Date(Date.now() + HOUR_MS),
+      role: 'guest' as const,
+      menuAccess: ['home' as const],
+      cameraIds: [],
     });
+    const inviteInto = (spaceId: string, invitedByUserId: number) =>
+      invitationAccessor.create(pendingInput(spaceId, invitedByUserId));
 
-    it('rejects a second acceptance of the same token', async () => {
-      const owned = await spaceAccessor.createWithOwner(
-        ownerInput('owner@example.com'),
-      );
-      await inviteInto(owned.space.id, owned.user.id);
-      await invitationAccessor.acceptWithNewUser({
-        token: 'raw-invitation-token',
-        email: 'member@example.com',
-        passwordHash: 'placeholder-hash',
-      });
-
-      const replay = await invitationAccessor.acceptWithNewUser({
-        token: 'raw-invitation-token',
-        email: 'member@example.com',
-        passwordHash: 'placeholder-hash',
-      });
-
-      expect(replay).toBeNull();
-      await expect(prisma.user.count()).resolves.toBe(2);
-      await expect(prisma.spaceMember.count()).resolves.toBe(2);
-    });
-
-    it('rejects an expired invitation', async () => {
-      const owned = await spaceAccessor.createWithOwner(
-        ownerInput('owner@example.com'),
-      );
-      await invitationAccessor.create({
-        spaceId: owned.space.id,
-        email: 'late@example.com',
-        token: 'expired-token',
-        invitedByUserId: owned.user.id,
-        expiresAt: new Date(Date.now() - HOUR_MS),
-      });
-
-      await expect(
-        invitationAccessor.findUsableByToken('expired-token'),
-      ).resolves.toBeNull();
-      await expect(
-        invitationAccessor.acceptWithNewUser({
-          token: 'expired-token',
-          email: 'late@example.com',
-          passwordHash: 'placeholder-hash',
-        }),
-      ).resolves.toBeNull();
-      await expect(prisma.user.count()).resolves.toBe(1);
-    });
-
-    it('links an existing account instead of creating a second one', async () => {
-      const owned = await spaceAccessor.createWithOwner(
-        ownerInput('owner@example.com'),
-      );
-      const existing = await userAccessor.create({
+    async function memberInput(spaceId: string, invitedByUserId: number) {
+      const invitee = await userAccessor.create({
         email: 'member@example.com',
         passwordHash: 'bcrypt-hash',
         firstName: 'Grace',
@@ -200,15 +127,100 @@ describe('auth and membership accessors (int)', () => {
         phone: '+5491199887766',
         profileCompleted: true,
       });
-      await inviteInto(owned.space.id, owned.user.id);
+      return {
+        spaceId,
+        userId: invitee.id,
+        role: 'guest' as const,
+        menuAccess: ['home'],
+        cameraIds: [],
+        invitedByUserId,
+      };
+    }
 
-      const accepted = await invitationAccessor.acceptWithExistingUser(
-        'raw-invitation-token',
-        existing.id,
+    it('creates the membership and consumes the invitation in one write', async () => {
+      const owned = await spaceAccessor.createWithOwner(
+        ownerInput('owner@example.com'),
+      );
+      const invitation = await inviteInto(owned.space.id, owned.user.id);
+
+      const member = await invitationAccessor.accept(
+        invitation.id,
+        await memberInput(owned.space.id, owned.user.id),
       );
 
-      expect(accepted?.member.userId).toBe(existing.id);
-      await expect(prisma.user.count()).resolves.toBe(2);
+      expect(member?.spaceId).toBe(owned.space.id);
+      expect(member?.role).toBe('guest');
+      expect(member?.invitedByUserId).toBe(owned.user.id);
+      const stored = await prisma.invitation.findUniqueOrThrow({
+        where: { id: invitation.id },
+      });
+      expect(stored.acceptedAt).not.toBeNull();
+    });
+
+    it('rejects a second acceptance of the same invitation', async () => {
+      const owned = await spaceAccessor.createWithOwner(
+        ownerInput('owner@example.com'),
+      );
+      const invitation = await inviteInto(owned.space.id, owned.user.id);
+      const input = await memberInput(owned.space.id, owned.user.id);
+      await invitationAccessor.accept(invitation.id, input);
+
+      const replay = await invitationAccessor.accept(invitation.id, input);
+
+      expect(replay).toBeNull();
+      await expect(prisma.spaceMember.count()).resolves.toBe(2);
+    });
+
+    it.each(['declined', 'revoked', 'expired'] as const)(
+      'rejects a %s invitation',
+      async (state) => {
+        const owned = await spaceAccessor.createWithOwner(
+          ownerInput('owner@example.com'),
+        );
+        const invitation = await invitationAccessor.create({
+          ...pendingInput(owned.space.id, owned.user.id),
+          expiresAt: new Date(
+            Date.now() + (state === 'expired' ? -HOUR_MS : HOUR_MS),
+          ),
+        });
+        if (state === 'declined') {
+          await invitationAccessor.decline(invitation.id);
+        }
+        if (state === 'revoked') {
+          await invitationAccessor.revoke(invitation.id);
+        }
+
+        await expect(
+          invitationAccessor.findPendingByToken('raw-invitation-token'),
+        ).resolves.toBeNull();
+        await expect(
+          invitationAccessor.accept(
+            invitation.id,
+            await memberInput(owned.space.id, owned.user.id),
+          ),
+        ).resolves.toBeNull();
+        await expect(prisma.spaceMember.count()).resolves.toBe(1);
+      },
+    );
+
+    it('renew swaps the token: the old link stops resolving', async () => {
+      const owned = await spaceAccessor.createWithOwner(
+        ownerInput('owner@example.com'),
+      );
+      const invitation = await inviteInto(owned.space.id, owned.user.id);
+
+      await invitationAccessor.renew(
+        invitation.id,
+        'new-token',
+        new Date(Date.now() + HOUR_MS),
+      );
+
+      await expect(
+        invitationAccessor.findPendingByToken('raw-invitation-token'),
+      ).resolves.toBeNull();
+      await expect(
+        invitationAccessor.findPendingByToken('new-token'),
+      ).resolves.toMatchObject({ id: invitation.id });
     });
 
     it('never returns the token hash it stored', async () => {
@@ -240,6 +252,9 @@ describe('auth and membership accessors (int)', () => {
         token: 'pending-token',
         invitedByUserId: owned.user.id,
         expiresAt: new Date(Date.now() + HOUR_MS),
+        role: 'collaborator',
+        menuAccess: ['home'],
+        cameraIds: [],
       });
       const accepted = await invitationAccessor.create({
         spaceId: owned.space.id,
@@ -247,11 +262,12 @@ describe('auth and membership accessors (int)', () => {
         token: 'accepted-token',
         invitedByUserId: owned.user.id,
         expiresAt: new Date(Date.now() + HOUR_MS),
+        role: 'collaborator',
+        menuAccess: ['home'],
+        cameraIds: [],
       });
-      await invitationAccessor.acceptWithNewUser({
-        token: 'accepted-token',
-        email: 'accepted@example.com',
-        passwordHash: 'placeholder-hash',
+      await invitationAccessor.accept(accepted.id, {
+        ...(await memberInput(owned.space.id, owned.user.id)),
       });
       await invitationAccessor.create({
         spaceId: owned.space.id,
@@ -259,6 +275,9 @@ describe('auth and membership accessors (int)', () => {
         token: 'expired-token',
         invitedByUserId: owned.user.id,
         expiresAt: new Date(Date.now() - HOUR_MS),
+        role: 'collaborator',
+        menuAccess: ['home'],
+        cameraIds: [],
       });
       await invitationAccessor.create({
         spaceId: otherOwned.space.id,
@@ -266,6 +285,9 @@ describe('auth and membership accessors (int)', () => {
         token: 'other-pending-token',
         invitedByUserId: otherOwned.user.id,
         expiresAt: new Date(Date.now() + HOUR_MS),
+        role: 'collaborator',
+        menuAccess: ['home'],
+        cameraIds: [],
       });
 
       const result = await invitationAccessor.findPendingBySpace(

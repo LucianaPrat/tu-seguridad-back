@@ -31,13 +31,17 @@ describe('AuthService', () => {
     findById: jest.Mock;
     recordLogin: jest.Mock;
     completeProfile: jest.Mock;
+    create: jest.Mock;
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
   let spaceMemberAccessor: {
     findBySpaceAndUser: jest.Mock;
     findManyByUserIdWithSpace: jest.Mock;
   };
-  let invitationAccessor: { countPendingForEmail: jest.Mock };
+  let invitationAccessor: {
+    countPendingForEmail: jest.Mock;
+    findPendingByToken: jest.Mock;
+  };
   let passwordHash: {
     hash: jest.Mock;
     verify: jest.Mock;
@@ -52,6 +56,7 @@ describe('AuthService', () => {
       findById: jest.fn(),
       recordLogin: jest.fn().mockResolvedValue(user),
       completeProfile: jest.fn(),
+      create: jest.fn(),
     };
     spaceAccessor = {
       createWithOwner: jest.fn(),
@@ -65,6 +70,7 @@ describe('AuthService', () => {
     };
     invitationAccessor = {
       countPendingForEmail: jest.fn().mockResolvedValue(2),
+      findPendingByToken: jest.fn(),
     };
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
@@ -224,6 +230,54 @@ describe('AuthService', () => {
       spaceAccessor.createWithOwner.mockRejectedValue(new Error('boom'));
 
       await expect(service.register(dto, context)).rejects.toThrow('boom');
+    });
+
+    describe('with an inviteToken', () => {
+      const inviteDto = {
+        ...dto,
+        spaceName: undefined,
+        inviteToken: 'raw-invite',
+      };
+
+      it('creates the user alone, in no space, and leaves the invitation pending', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue({
+          email: 'new@example.com',
+        });
+        userAccessor.findByEmail.mockResolvedValue(null);
+        userAccessor.create.mockResolvedValue(user);
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+        expect(spaceAccessor.createWithOwner).not.toHaveBeenCalled();
+        expect(userAccessor.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'new@example.com',
+            profileCompleted: true,
+          }),
+        );
+        expect(sessionService.issue).toHaveBeenCalledWith(user, null, context);
+      });
+
+      it('answers not found when the invitation is not pending', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue(null);
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+        expect(userAccessor.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses an email other than the invited one', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue({
+          email: 'someone-else@example.com',
+        });
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toMatchObject({ code: ErrorCode.FORBIDDEN });
+        expect(userAccessor.create).not.toHaveBeenCalled();
+      });
     });
   });
 

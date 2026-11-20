@@ -1,39 +1,60 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
+  Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { SpaceMemberRole } from '@prisma/client';
 // `import type` is required: these appear in decorated parameter positions and
 // TS1272 rejects value imports there under isolatedModules.
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type {
+  AccessTokenClaims,
+  JwtPayload,
+} from '../../cross/common/jwt-payload.type';
 import type { SessionContext } from '../../cross/common/session-context.type';
+import { AllowNoSpace } from '../../cross/decorators/allow-no-space.decorator';
+import { CurrentClaims } from '../../cross/decorators/current-claims.decorator';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
+import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
-import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { AccessTokenDto } from '../auth/dto/access-token.dto';
-import { CredentialTokenDto } from '../auth/dto/credential-token.dto';
 import { RefreshCookieService } from '../auth/refresh-cookie.service';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { InvitationListDto } from './dto/invitation-list.dto';
+import {
+  InvitationPreviewDto,
+  InvitationPreviewQueryDto,
+  MyInvitationDto,
+} from './dto/invitation-preview.dto';
 import { InvitationDto } from './dto/invitation.dto';
 import { InvitationsService } from './invitations.service';
+
+const ADMIN_FAILURES = {
+  [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+  [ErrorCode.FORBIDDEN]:
+    'Caller is not a space admin, or has an incomplete profile.',
+};
 
 @ApiTags('invitations')
 @Controller('invitations')
@@ -50,28 +71,26 @@ export class InvitationsController {
   @ApiOperation({
     summary: 'Invite somebody to the space',
     description:
-      'Admin only. Creates a pending invitation for an email address and hands the ' +
-      'invitee a single-use token, delivered out of band. The token is the whole ' +
-      'credential — the invitee needs no account first.',
+      'Admin only. Creates a pending invitation with the role, menu access and cameras ' +
+      'the invitee will get, and mails a single-use link. The invitee may already have ' +
+      'an account, in this or other spaces.',
   })
   @ApiCreatedResponse({
     type: InvitationDto,
     description: 'Invitation created and pending.',
   })
   @ApiFailures({
+    ...ADMIN_FAILURES,
     [ErrorCode.VALIDATION_ERROR]:
-      'Malformed body, or an email that is not an address.',
-    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Malformed body, or cameraIds that are not cameras of this space.',
     [ErrorCode.CONFLICT]:
-      'That email already belongs to the space, or already has a pending invitation.',
+      'That email is already a member of the space, or already has a pending invitation here.',
   })
   create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateInvitationDto,
   ): Promise<Either<InvitationDto>> {
-    return this.invitationsService.create(user.spaceId, user.sub, dto.email);
+    return this.invitationsService.create(user.spaceId, user.sub, dto);
   }
 
   /** Who was invited to the space is an administrator's business. */
@@ -80,54 +99,144 @@ export class InvitationsController {
   @ApiOperation({
     summary: 'List the pending invitations of the space',
     description:
-      'Admin only. Invitations that are neither accepted nor expired, newest first, ' +
-      'never carrying the token.',
+      'Admin only. Pending means not accepted, declined, revoked or expired. Newest ' +
+      'first, never carrying the token.',
   })
   @ApiOkResponse({ type: InvitationListDto })
-  @ApiFailures({
-    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
-  })
+  @ApiFailures(ADMIN_FAILURES)
   findPending(
     @CurrentUser() user: JwtPayload,
   ): Promise<Either<InvitationListDto>> {
     return this.invitationsService.findPending(user.spaceId);
   }
 
-  /** Public: the invitee has no session yet — the token is the credential. */
+  /** Public: the invitee may have no account yet — the token is the credential. */
   @Public()
   @CredentialThrottle()
+  @Get('preview')
+  @ApiOperation({
+    summary: 'Preview an invitation from its link',
+    description:
+      'Public. Tells the invitee who invited them, to what and whether the address ' +
+      'already has an account, so the client can choose sign-in or registration.',
+  })
+  @ApiOkResponse({ type: InvitationPreviewDto })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: 'Missing token.',
+    [ErrorCode.NOT_FOUND]: 'Unknown, expired or no longer pending invitation.',
+  })
+  preview(
+    @Query() query: InvitationPreviewQueryDto,
+  ): Promise<Either<InvitationPreviewDto>> {
+    return this.invitationsService.preview(query.token);
+  }
+
+  @AllowNoSpace()
+  @Get('mine')
+  @ApiOperation({
+    summary: 'List the pending invitations addressed to the caller',
+  })
+  @ApiOkResponse({ type: MyInvitationDto, isArray: true })
+  @ApiFailures({ [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.' })
+  mine(
+    @CurrentClaims() claims: AccessTokenClaims,
+  ): Promise<Either<MyInvitationDto[]>> {
+    return this.invitationsService.findMine(claims.email);
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Revoke a pending invitation',
+    description: 'Admin only. The link stops working immediately.',
+  })
+  @ApiParam({ name: 'id', description: 'Invitation id, in the caller space.' })
+  @ApiNoContentResponse({ description: 'Invitation revoked. Empty body.' })
+  @ApiFailures({
+    ...ADMIN_FAILURES,
+    [ErrorCode.NOT_FOUND]: 'No pending invitation with that id in this space.',
+  })
+  revoke(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<null>> {
+    return this.invitationsService.revoke(user.spaceId, id);
+  }
+
+  @Roles(SpaceMemberRole.admin)
   @HttpCode(HttpStatus.OK)
-  @Post('accept')
+  @Post(':id/resend')
+  @ApiOperation({
+    summary: 'Resend a pending invitation',
+    description:
+      'Admin only. Issues a new link and expiry and mails it; the previous link stops working.',
+  })
+  @ApiParam({ name: 'id', description: 'Invitation id, in the caller space.' })
+  @ApiOkResponse({ type: InvitationDto })
+  @ApiFailures({
+    ...ADMIN_FAILURES,
+    [ErrorCode.NOT_FOUND]: 'No pending invitation with that id in this space.',
+  })
+  resend(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<InvitationDto>> {
+    return this.invitationsService.resend(user.spaceId, id);
+  }
+
+  @AllowNoSpace()
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/accept')
   @ApiOperation({
     summary: 'Accept an invitation',
     description:
-      'Public — the invitee has no session yet, so the invitation token is the ' +
-      'credential. Consumes the token, joins the space and opens a session: the access ' +
-      'token comes back in the body, the refresh token only as an `httpOnly` ' +
-      'path-scoped cookie. A token is single-use; replaying it answers 401.',
+      'The caller must be signed in as the invited address. Creates the membership ' +
+      'and moves the session into that space: a new access token in the body, the ' +
+      'refresh cookie replaced.',
   })
+  @ApiParam({ name: 'id', description: 'Invitation id.' })
   @ApiOkResponse({
     type: AccessTokenDto,
-    description:
-      'Invitation consumed. Refresh token set as a cookie, never in the body.',
+    description: 'Joined and session moved.',
   })
   @ApiFailures({
-    [ErrorCode.VALIDATION_ERROR]: 'Malformed body.',
-    [ErrorCode.UNAUTHORIZED]:
-      'Unknown, expired or already-used invitation token.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'The invitation was sent to a different address, or the profile is incomplete.',
     [ErrorCode.CONFLICT]:
-      'The invited account is already a member of the space.',
+      'The invitation is no longer pending (accepted, declined, revoked or expired).',
   })
   async accept(
-    @Body() dto: CredentialTokenDto,
+    @CurrentClaims() claims: AccessTokenClaims,
+    @Param('id') id: string,
     @RequestSessionContext() context: SessionContext,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Either<AccessTokenDto>> {
-    return this.refreshCookie.issueSession(
+    return this.refreshCookie.replaceSession(
+      req,
       res,
-      await this.invitationsService.accept(dto.token, context),
+      await this.invitationsService.accept(claims, id, context),
     );
+  }
+
+  @AllowNoSpace()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post(':id/decline')
+  @ApiOperation({ summary: 'Decline an invitation' })
+  @ApiParam({ name: 'id', description: 'Invitation id.' })
+  @ApiNoContentResponse({ description: 'Invitation declined. Empty body.' })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'The invitation was sent to a different address, or the profile is incomplete.',
+    [ErrorCode.CONFLICT]: 'The invitation is no longer pending.',
+  })
+  decline(
+    @CurrentClaims() claims: AccessTokenClaims,
+    @Param('id') id: string,
+  ): Promise<Either<null>> {
+    return this.invitationsService.decline(claims, id);
   }
 }
