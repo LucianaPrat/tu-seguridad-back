@@ -7,6 +7,7 @@ import { asExpiresIn } from '../../cross/common/jwt-payload.type';
 import { JwtAuthGuard } from '../../cross/guards/jwt-auth.guard';
 import { ProfileCompletedGuard } from '../../cross/guards/profile-completed.guard';
 import { RolesGuard } from '../../cross/guards/roles.guard';
+import { SpaceMemberGuard } from '../../cross/guards/space-member.guard';
 import { MailerService } from '../../cross/mail/mailer.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -59,10 +60,12 @@ import { SmtpCredentialDeliveryService } from './smtp-credential-delivery.servic
           ? new SmtpCredentialDeliveryService(config, mailer)
           : new LoggedCredentialDeliveryService(config),
     },
-    // Authentication first, then authorization, then the profile-completion gate.
-    // All three are global: the route someone forgets to decorate is the one that
+    // Authentication first, then membership (which loads the role from the
+    // database), then authorization, then the profile-completion gate.
+    // All four are global: the route someone forgets to decorate is the one that
     // leaks, so protection is the default and `@Public()` is the exception.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: SpaceMemberGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: ProfileCompletedGuard },
   ],

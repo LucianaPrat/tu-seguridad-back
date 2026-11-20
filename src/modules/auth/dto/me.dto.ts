@@ -3,7 +3,8 @@ import { SpaceMemberRole } from '@prisma/client';
 
 /**
  * The space context every screen needs after login. Flat on purpose: the
- * frontend reads `role` as a string today, and a caller has exactly one space.
+ * frontend reads `role` as a string today. The space fields are null for an account
+ * that belongs to no space yet.
  */
 export class MeDto {
   @ApiProperty()
@@ -33,14 +34,18 @@ export class MeDto {
   })
   profileCompleted!: boolean;
 
-  @ApiProperty({ format: 'uuid' })
-  spaceId!: string;
+  @ApiProperty({ format: 'uuid', nullable: true })
+  spaceId!: string | null;
 
-  @ApiProperty({ example: 'My Secure Space' })
-  spaceName!: string;
+  @ApiProperty({ example: 'My Secure Space', nullable: true })
+  spaceName!: string | null;
 
-  @ApiProperty({ enum: SpaceMemberRole, example: SpaceMemberRole.admin })
-  role!: SpaceMemberRole;
+  @ApiProperty({
+    enum: SpaceMemberRole,
+    example: SpaceMemberRole.admin,
+    nullable: true,
+  })
+  role!: SpaceMemberRole | null;
 
   @ApiProperty({ description: 'Whether this member receives alert deliveries' })
   receiveAlerts!: boolean;

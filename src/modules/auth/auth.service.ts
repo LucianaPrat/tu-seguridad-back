@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Space, SpaceMember } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { normalizeEmail } from '../../cross/common/normalize-email';
+import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import { SessionContext } from '../../cross/common/session-context.type';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { PasswordHashService } from '../../cross/crypto/password-hash.service';
@@ -29,8 +30,7 @@ export class AuthService {
 
   /**
    * Every rejection answers with the same message: a wrong password, a
-   * deactivated account and an account with no membership are indistinguishable
-   * from outside, so login cannot be used to probe account state.
+   * deactivated account are indistinguishable from outside, so login cannot be used to probe account state.
    */
   async login(
     email: string,
@@ -53,13 +53,17 @@ export class AuthService {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const member = await this.spaceMemberAccessor.findByUserId(user.id);
-    if (!member) {
+    // An account in no space still logs in; it just gets a session scoped to
+    // nothing until it creates or joins one.
+    const session = await this.sessionService.loadActiveMembership(user.id);
+    if (!session) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
     await this.userAccessor.recordLogin(user.id);
-    return buildData(await this.sessionService.issue(user, member, context));
+    return buildData(
+      await this.sessionService.issue(user, session.member, context),
+    );
   }
 
   async register(
@@ -131,18 +135,25 @@ export class AuthService {
     );
   }
 
-  async me(userId: number): Promise<Either<MeDto>> {
-    const session = await this.sessionService.loadActiveMembership(userId);
-    if (!session) {
+  async me(claims: AccessTokenClaims): Promise<Either<MeDto>> {
+    const user = await this.userAccessor.findById(claims.sub);
+    if (!user?.isActive) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const space = await this.spaceAccessor.findById(session.member.spaceId);
-    if (!space) {
-      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    // Role comes from the membership row, never from the token.
+    let space: Space | null = null;
+    let member: SpaceMember | null = null;
+    if (claims.spaceId) {
+      [space, member] = await Promise.all([
+        this.spaceAccessor.findById(claims.spaceId),
+        this.spaceMemberAccessor.findBySpaceAndUser(claims.spaceId, user.id),
+      ]);
+      if (!space || !member) {
+        return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+      }
     }
 
-    const { user, member } = session;
     return buildData({
       id: user.id,
       email: user.email,
@@ -152,10 +163,10 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       isActive: user.isActive,
       profileCompleted: user.profileCompleted,
-      spaceId: space.id,
-      spaceName: space.name,
-      role: member.role,
-      receiveAlerts: member.receiveAlerts,
+      spaceId: space?.id ?? null,
+      spaceName: space?.name ?? null,
+      role: member?.role ?? null,
+      receiveAlerts: member?.receiveAlerts ?? false,
     });
   }
 }

@@ -45,7 +45,7 @@ export class InvitationsService {
 
     const existingUser = await this.userAccessor.findByEmail(normalizedEmail);
     if (existingUser) {
-      const membership = await this.spaceMemberAccessor.findByUserId(
+      const membership = await this.spaceMemberAccessor.findLatestByUserId(
         existingUser.id,
       );
       if (membership) {
@@ -170,7 +170,8 @@ export class InvitationsService {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_INVITATION_MESSAGE);
     }
 
-    const membership = await this.spaceMemberAccessor.findByUserId(userId);
+    const membership =
+      await this.spaceMemberAccessor.findLatestByUserId(userId);
     if (membership) {
       return buildError(
         ErrorCode.CONFLICT,

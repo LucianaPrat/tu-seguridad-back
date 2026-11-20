@@ -1,14 +1,14 @@
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { DvrController } from './dvr.controller';
 
 describe('DvrController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'admin@example.com',
     spaceId: 'space-uuid',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   let dvrService: {
     findBySpace: jest.Mock;

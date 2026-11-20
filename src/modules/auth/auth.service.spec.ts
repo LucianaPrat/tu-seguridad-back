@@ -33,7 +33,7 @@ describe('AuthService', () => {
     completeProfile: jest.Mock;
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
-  let spaceMemberAccessor: { findByUserId: jest.Mock };
+  let spaceMemberAccessor: { findBySpaceAndUser: jest.Mock };
   let passwordHash: {
     hash: jest.Mock;
     verify: jest.Mock;
@@ -53,7 +53,9 @@ describe('AuthService', () => {
       createWithOwner: jest.fn(),
       findById: jest.fn().mockResolvedValue(space),
     };
-    spaceMemberAccessor = { findByUserId: jest.fn().mockResolvedValue(member) };
+    spaceMemberAccessor = {
+      findBySpaceAndUser: jest.fn().mockResolvedValue(member),
+    };
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
       verify: jest.fn().mockResolvedValue(true),
@@ -120,14 +122,17 @@ describe('AuthService', () => {
       });
     });
 
-    it('rejects an account with no accepted membership', async () => {
+    it('logs in an account that belongs to no space', async () => {
       userAccessor.findByEmail.mockResolvedValue(user);
-      spaceMemberAccessor.findByUserId.mockResolvedValue(null);
+      sessionService.loadActiveMembership.mockResolvedValue({
+        user,
+        member: null,
+      });
 
       const result = await service.login(user.email, 'correct', context);
 
-      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
-      expect(sessionService.issue).not.toHaveBeenCalled();
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+      expect(sessionService.issue).toHaveBeenCalledWith(user, null, context);
     });
 
     it('issues a session and stamps the login on success', async () => {
@@ -263,8 +268,28 @@ describe('AuthService', () => {
   });
 
   describe('me', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+
+    beforeEach(() => {
+      userAccessor.findById.mockResolvedValue(user);
+    });
+
+    it('returns null space fields for an account in no space', async () => {
+      const result = await service.me({ ...claims, spaceId: null });
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { spaceId: null, spaceName: null, role: null },
+      });
+    });
+
     it('returns the profile with its space context', async () => {
-      const result = await service.me(1);
+      const result = await service.me(claims);
 
       expect(result).toEqual({
         ok: true,
@@ -286,7 +311,7 @@ describe('AuthService', () => {
     });
 
     it('never returns the password hash', async () => {
-      const result = await service.me(1);
+      const result = await service.me(claims);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -294,10 +319,18 @@ describe('AuthService', () => {
       }
     });
 
-    it('returns UNAUTHORIZED for a deactivated or membership-less account', async () => {
-      sessionService.loadActiveMembership.mockResolvedValue(null);
+    it('returns UNAUTHORIZED for a deactivated account', async () => {
+      userAccessor.findById.mockResolvedValue({ ...user, isActive: false });
 
-      const result = await service.me(1);
+      const result = await service.me(claims);
+
+      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+
+    it('returns UNAUTHORIZED when the membership behind the token is gone', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      const result = await service.me(claims);
 
       expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
     });

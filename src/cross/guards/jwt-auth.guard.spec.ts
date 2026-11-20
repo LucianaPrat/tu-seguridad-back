@@ -57,7 +57,6 @@ describe('JwtAuthGuard', () => {
       sub: 1,
       email: 'admin@example.com',
       spaceId: 'space-1',
-      role: 'admin',
       profileCompleted: true,
       type: 'refresh',
     });
@@ -73,7 +72,6 @@ describe('JwtAuthGuard', () => {
     jwtService.verify.mockReturnValue({
       sub: 1,
       email: 'admin@example.com',
-      role: 'admin',
     });
 
     expect(() =>
@@ -81,7 +79,7 @@ describe('JwtAuthGuard', () => {
     ).toThrow(HttpException);
   });
 
-  it('allows a valid access token and attaches the space context to the request', () => {
+  it('allows a valid access token and attaches the claims to the request', () => {
     jwtService.verify.mockReturnValue({
       sub: 1,
       email: 'admin@example.com',
@@ -94,12 +92,29 @@ describe('JwtAuthGuard', () => {
     expect(guard.canActivate(context)).toBe(true);
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    expect(request.user).toEqual({
+    // `role` in a token is ignored: only the claims a token is meant to carry
+    // reach the request.
+    expect(request.claims).toEqual({
       sub: 1,
       email: 'admin@example.com',
       spaceId: 'space-1',
-      role: 'admin',
       profileCompleted: true,
     });
+    expect(request.user).toBeUndefined();
+  });
+
+  it('accepts a token that is in no space', () => {
+    jwtService.verify.mockReturnValue({
+      sub: 1,
+      email: 'admin@example.com',
+      spaceId: null,
+      profileCompleted: true,
+    });
+    const context = contextWithAuthHeader('Bearer valid-token');
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(
+      context.switchToHttp().getRequest<RequestWithUser>().claims?.spaceId,
+    ).toBeNull();
   });
 });

@@ -19,10 +19,11 @@ import {
 // TS1272 rejects value imports there under isolatedModules.
 import type { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import type { SessionContext } from '../../cross/common/session-context.type';
 import { AllowIncompleteProfile } from '../../cross/decorators/allow-incomplete-profile.decorator';
-import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { AllowNoSpace } from '../../cross/decorators/allow-no-space.decorator';
+import { CurrentClaims } from '../../cross/decorators/current-claims.decorator';
 import { CredentialThrottle } from '../../cross/decorators/route-throttle.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
@@ -182,11 +183,13 @@ export class AuthController {
   }
 
   @AllowIncompleteProfile()
+  @AllowNoSpace()
   @Get('me')
   @ApiOperation({
     summary: 'Read the current user',
     description:
-      'The account behind the bearer token, with its space and role — the context every ' +
+      'The account behind the bearer token, with its current space and role (both null when the ' +
+      'account is in no space yet) — the context every ' +
       'other route scopes to. Reachable with an incomplete profile, so a client can read ' +
       'it to decide whether to send the user to `POST /auth/complete-profile` first.',
   })
@@ -197,11 +200,12 @@ export class AuthController {
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
   })
-  me(@CurrentUser() user: JwtPayload): Promise<Either<MeDto>> {
-    return this.authService.me(user.sub);
+  me(@CurrentClaims() claims: AccessTokenClaims): Promise<Either<MeDto>> {
+    return this.authService.me(claims);
   }
 
   @AllowIncompleteProfile()
+  @AllowNoSpace()
   @HttpCode(HttpStatus.OK)
   @Post('complete-profile')
   @ApiOperation({
@@ -222,14 +226,14 @@ export class AuthController {
     [ErrorCode.CONFLICT]: 'The profile is already completed.',
   })
   async completeProfile(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClaims() claims: AccessTokenClaims,
     @Body() dto: CompleteProfileDto,
     @RequestSessionContext() context: SessionContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Either<AccessTokenDto>> {
     return this.refreshCookie.issueSession(
       res,
-      await this.authService.completeProfile(user.sub, dto, context),
+      await this.authService.completeProfile(claims.sub, dto, context),
     );
   }
 

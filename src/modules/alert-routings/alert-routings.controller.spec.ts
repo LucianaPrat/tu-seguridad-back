@@ -1,15 +1,15 @@
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { AlertRoutingsController } from './alert-routings.controller';
 import { AlertRoutingListDto } from './dto/alert-routing-list.dto';
 
 describe('AlertRoutingsController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'admin@example.com',
     spaceId: 'space-uuid',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   let alertRoutingsService: { findAll: jest.Mock; replace: jest.Mock };
   let controller: AlertRoutingsController;

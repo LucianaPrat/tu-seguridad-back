@@ -37,6 +37,13 @@ export class UserAccessorService {
     });
   }
 
+  setLastSpaceId(id: number, spaceId: string | null): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { lastSpaceId: spaceId },
+    });
+  }
+
   recordLogin(id: number, now = new Date()): Promise<User> {
     return this.prisma.user.update({
       where: { id },

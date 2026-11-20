@@ -1,18 +1,18 @@
 import { HttpException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { buildData, buildError } from '../../cross/errors/either';
 import { SnapshotsController } from './snapshots.controller';
 
 describe('SnapshotsController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'member@example.com',
     spaceId: 'space-uuid',
     role: 'collaborator',
     profileCompleted: true,
-  };
+  });
 
   let snapshotService: { read: jest.Mock };
   let request: { fresh: boolean };

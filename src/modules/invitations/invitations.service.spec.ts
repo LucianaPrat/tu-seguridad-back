@@ -38,7 +38,7 @@ describe('InvitationsService', () => {
     acceptWithExistingUser: jest.Mock;
   };
   let userAccessor: { findByEmail: jest.Mock; findById: jest.Mock };
-  let spaceMemberAccessor: { findByUserId: jest.Mock };
+  let spaceMemberAccessor: { findLatestByUserId: jest.Mock };
   let passwordHash: { hash: jest.Mock };
   let secretToken: { generate: jest.Mock };
   let sessionService: { issue: jest.Mock };
@@ -64,7 +64,9 @@ describe('InvitationsService', () => {
       findByEmail: jest.fn().mockResolvedValue(null),
       findById: jest.fn().mockResolvedValue(invitedUser),
     };
-    spaceMemberAccessor = { findByUserId: jest.fn().mockResolvedValue(null) };
+    spaceMemberAccessor = {
+      findLatestByUserId: jest.fn().mockResolvedValue(null),
+    };
     passwordHash = { hash: jest.fn().mockResolvedValue('placeholder-hash') };
     secretToken = { generate: jest.fn().mockReturnValue('raw-token') };
     sessionService = { issue: jest.fn().mockResolvedValue(TOKEN_PAIR) };
@@ -119,7 +121,7 @@ describe('InvitationsService', () => {
 
     it('rejects inviting somebody who already belongs to a space', async () => {
       userAccessor.findByEmail.mockResolvedValue(invitedUser);
-      spaceMemberAccessor.findByUserId.mockResolvedValue(member);
+      spaceMemberAccessor.findLatestByUserId.mockResolvedValue(member);
 
       const result = await service.create('space-1', 1, 'member@example.com');
 
@@ -248,7 +250,7 @@ describe('InvitationsService', () => {
 
     it('refuses to give an existing member a second space', async () => {
       userAccessor.findByEmail.mockResolvedValue(invitedUser);
-      spaceMemberAccessor.findByUserId.mockResolvedValue(member);
+      spaceMemberAccessor.findLatestByUserId.mockResolvedValue(member);
 
       const result = await service.accept('raw-token', CONTEXT);
 

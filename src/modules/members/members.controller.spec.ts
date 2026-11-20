@@ -1,14 +1,14 @@
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { MembersController } from './members.controller';
 
 describe('MembersController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'admin@example.com',
     spaceId: 'space-uuid',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   let membersService: { findAll: jest.Mock; setReceiveAlerts: jest.Mock };
   let controller: MembersController;

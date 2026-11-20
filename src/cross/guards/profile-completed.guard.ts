@@ -34,12 +34,12 @@ export class ProfileCompletedGuard implements CanActivate {
       return true;
     }
 
-    const user = context.switchToHttp().getRequest<RequestWithUser>().user;
-    if (!user) {
+    const claims = context.switchToHttp().getRequest<RequestWithUser>().claims;
+    if (!claims) {
       throw buildGuardException(ErrorCode.UNAUTHORIZED, 'Missing bearer token');
     }
 
-    if (!user.profileCompleted) {
+    if (!claims.profileCompleted) {
       throw buildGuardException(
         ErrorCode.FORBIDDEN,
         'Complete your profile before using this resource',

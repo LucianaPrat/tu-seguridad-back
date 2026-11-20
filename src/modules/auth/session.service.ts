@@ -6,7 +6,7 @@ import { SpaceMember, User } from '@prisma/client';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
 import {
   asExpiresIn,
-  JwtPayload,
+  AccessTokenClaims,
   RefreshJwtPayload,
 } from '../../cross/common/jwt-payload.type';
 import { SessionContext } from '../../cross/common/session-context.type';
@@ -20,13 +20,14 @@ export const INVALID_REFRESH_TOKEN_MESSAGE = 'Invalid or expired refresh token';
 
 export interface ActiveMembership {
   user: User;
-  member: SpaceMember;
+  member: SpaceMember | null;
 }
 
 /**
  * Owns everything about a session: which claims a token carries, the
  * `auth_tokens` row behind each refresh token, and the single definition of who
- * is allowed to hold one — an active account with an accepted membership.
+ * is allowed to hold one — an active account. A membership is optional: an
+ * account in no space still gets a session, scoped to nothing.
  *
  * Refresh tokens stay signed JWTs (distinct secret, `type` discriminator) *and*
  * are persisted as hashes, so a stolen cookie can be revoked instead of staying
@@ -44,30 +45,49 @@ export class SessionService {
 
   /**
    * The one gate every session-issuing flow shares: login, refresh, magic link,
-   * face login, invitation acceptance and profile completion. A deactivated
-   * account or an account with no membership has no space to act in.
+   * face login, invitation acceptance and profile completion. A deactivated or
+   * missing account has no session; an account with no membership does, and
+   * comes back with `member: null`.
+   *
+   * Which space the session lands in: the one the caller asked to stay in
+   * (refresh), then the last one it used, then the most recently joined. Each
+   * candidate only counts if the user is still a member there.
    */
-  async loadActiveMembership(userId: number): Promise<ActiveMembership | null> {
+  async loadActiveMembership(
+    userId: number,
+    preferredSpaceId?: string | null,
+  ): Promise<ActiveMembership | null> {
     const user = await this.userAccessor.findById(userId);
     if (!user?.isActive) {
       return null;
     }
-    const member = await this.spaceMemberAccessor.findByUserId(userId);
-    return member ? { user, member } : null;
+
+    for (const spaceId of [preferredSpaceId, user.lastSpaceId]) {
+      if (!spaceId) {
+        continue;
+      }
+      const member = await this.spaceMemberAccessor.findBySpaceAndUser(
+        spaceId,
+        userId,
+      );
+      if (member) {
+        return { user, member };
+      }
+    }
+
+    const member = await this.spaceMemberAccessor.findLatestByUserId(userId);
+    return { user, member };
   }
 
   async issue(
     user: User,
-    member: SpaceMember,
+    member: SpaceMember | null,
     context: SessionContext,
   ): Promise<TokenPairDto> {
-    const claims: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      spaceId: member.spaceId,
-      role: member.role,
-      profileCompleted: user.profileCompleted,
-    };
+    const claims = this.claimsOf(user, member);
+    if (member && user.lastSpaceId !== member.spaceId) {
+      await this.userAccessor.setLastSpaceId(user.id, member.spaceId);
+    }
     const refreshToken = this.signRefreshToken(claims);
     await this.authTokenAccessor.create({
       userId: user.id,
@@ -83,8 +103,9 @@ export class SessionService {
   /**
    * Rotation, not re-signing: the presented token is revoked and its successor
    * recorded as rotated from it, in one transaction. Claims are rebuilt from the
-   * database, so a role change or a profile completion reaches the client on the
-   * next refresh rather than at the next login.
+   * database, so a profile completion reaches the client on the next refresh
+   * rather than at the next login. The refresh stays in the space the old token
+   * was in, so it never silently lands the user in another one.
    */
   async rotate(
     refreshToken: string,
@@ -103,18 +124,15 @@ export class SessionService {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
     }
 
-    const session = await this.loadActiveMembership(payload.sub);
+    const session = await this.loadActiveMembership(
+      payload.sub,
+      payload.spaceId,
+    );
     if (!session) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
     }
 
-    const claims: JwtPayload = {
-      sub: session.user.id,
-      email: session.user.email,
-      spaceId: session.member.spaceId,
-      role: session.member.role,
-      profileCompleted: session.user.profileCompleted,
-    };
+    const claims = this.claimsOf(session.user, session.member);
     const successor = this.signRefreshToken(claims);
     const rotated = await this.authTokenAccessor.rotateRefresh(refreshToken, {
       token: successor,
@@ -160,7 +178,16 @@ export class SessionService {
     return Math.max(0, decoded.exp * 1000 - Date.now());
   }
 
-  private signAccessToken(claims: JwtPayload): string {
+  private claimsOf(user: User, member: SpaceMember | null): AccessTokenClaims {
+    return {
+      sub: user.id,
+      email: user.email,
+      spaceId: member?.spaceId ?? null,
+      profileCompleted: user.profileCompleted,
+    };
+  }
+
+  private signAccessToken(claims: AccessTokenClaims): string {
     return this.jwtService.sign(claims, {
       secret: this.configService.get<string>(EnvNames.JWT_SECRET),
       expiresIn: asExpiresIn(
@@ -169,7 +196,7 @@ export class SessionService {
     });
   }
 
-  private signRefreshToken(claims: JwtPayload): string {
+  private signRefreshToken(claims: AccessTokenClaims): string {
     const payload: RefreshJwtPayload = {
       ...claims,
       type: 'refresh',

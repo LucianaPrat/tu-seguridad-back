@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { buildData, Either } from '../../cross/errors/either';
 import { InvitationsController } from './invitations.controller';
 
@@ -16,13 +16,13 @@ describe('InvitationsController', () => {
   let res: Response;
   let controller: InvitationsController;
 
-  const admin: JwtPayload = {
+  const admin = buildPrincipal({
     sub: 1,
     email: 'owner@example.com',
     spaceId: 'space-1',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   beforeEach(() => {
     invitationsService = {

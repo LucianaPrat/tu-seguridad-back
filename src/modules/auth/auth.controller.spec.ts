@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import { buildData, Either } from '../../cross/errors/either';
 import { AuthController } from './auth.controller';
 import { REFRESH_COOKIE_NAME } from './refresh-cookie';
@@ -20,11 +20,10 @@ describe('AuthController', () => {
   let res: Response;
   let controller: AuthController;
 
-  const currentUser: JwtPayload = {
+  const claims: AccessTokenClaims = {
     sub: 1,
     email: 'owner@example.com',
     spaceId: 'space-1',
-    role: 'admin',
     profileCompleted: true,
   };
 
@@ -175,10 +174,10 @@ describe('AuthController', () => {
   });
 
   describe('me', () => {
-    it('delegates with the user id off the token payload', async () => {
-      await controller.me(currentUser);
+    it('delegates with the claims off the token', async () => {
+      await controller.me(claims);
 
-      expect(authService.me).toHaveBeenCalledWith(1);
+      expect(authService.me).toHaveBeenCalledWith(claims);
     });
   });
 
@@ -192,7 +191,7 @@ describe('AuthController', () => {
       };
 
       await controller.completeProfile(
-        { ...currentUser, profileCompleted: false },
+        { ...claims, profileCompleted: false },
         dto,
         CONTEXT,
         res,
