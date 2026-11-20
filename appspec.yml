@@ -1,0 +1,32 @@
+version: 0.0
+os: linux
+
+files:
+  - source: .
+    destination: /home/ec2-user/apps/tu-seguridad/app
+
+hooks:
+  ApplicationStop:
+    - location: deploy/codedeploy/application_stop.sh
+      timeout: 60
+      runas: ec2-user
+
+  BeforeInstall:
+    - location: deploy/codedeploy/before_install.sh
+      timeout: 60
+      runas: ec2-user
+
+  AfterInstall:
+    - location: deploy/codedeploy/after_install.sh
+      timeout: 300
+      runas: ec2-user
+
+  ApplicationStart:
+    - location: deploy/codedeploy/start.sh
+      timeout: 120
+      runas: ec2-user
+
+  ValidateService:
+    - location: deploy/codedeploy/validate_service.sh
+      timeout: 120
+      runas: ec2-user
