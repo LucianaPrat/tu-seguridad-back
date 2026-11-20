@@ -57,9 +57,9 @@ describe('retention sweeps (int)', () => {
     });
   }
 
-  async function seedSpace(ownerUserId: number) {
+  async function seedSpace(createdByUserId: number) {
     return prisma.space.create({
-      data: { name: 'My Secure Space', ownerUserId },
+      data: { name: 'My Secure Space', createdByUserId },
     });
   }
 

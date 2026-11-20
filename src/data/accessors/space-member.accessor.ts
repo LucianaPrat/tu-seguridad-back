@@ -46,7 +46,11 @@ export class SpaceMemberAccessorService {
   }
 
   findByUserId(userId: number): Promise<SpaceMember | null> {
-    return this.prisma.spaceMember.findUnique({ where: { userId } });
+    // T02 replaces this with lastSpaceId-aware resolution
+    return this.prisma.spaceMember.findFirst({
+      where: { userId },
+      orderBy: { joinedAt: 'desc' },
+    });
   }
 
   findBySpaceAndUser(

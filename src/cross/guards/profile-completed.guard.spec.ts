@@ -12,7 +12,7 @@ describe('ProfileCompletedGuard', () => {
     sub: 7,
     email: 'invited@example.com',
     spaceId: 'space-1',
-    role: 'member',
+    role: 'collaborator',
     profileCompleted: false,
   };
 

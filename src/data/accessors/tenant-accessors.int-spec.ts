@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnvNames } from '../../cross/common/constants';
+import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { FieldEncryptionService } from '../../cross/crypto/field-encryption.service';
 import { AlertEventAccessorService } from './alert-event.accessor';
@@ -69,10 +70,16 @@ describe('tenant-scoped accessors (int)', () => {
       },
     });
     const space = await prisma.space.create({
-      data: { name: `${name} space`, ownerUserId: user.id },
+      data: { name: `${name} space`, createdByUserId: user.id },
     });
     await prisma.spaceMember.create({
-      data: { spaceId: space.id, userId: user.id, role: 'admin' },
+      data: {
+        spaceId: space.id,
+        userId: user.id,
+        role: 'admin',
+        menuAccess: DEFAULT_MENU_ACCESS.admin,
+        cameraIds: [],
+      },
     });
     const dvr = await dvrAccessor.upsertConfiguration(space.id, {
       url: `http://${name}.local`,

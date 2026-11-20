@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, Space, SpaceMember, User } from '@prisma/client';
 import { ALERT_ROUTING_DEFAULTS } from '../../cross/common/constants';
+import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface CreateOwnedSpaceInput {
@@ -27,7 +28,10 @@ export class SpaceAccessorService {
   }
 
   findByOwnerUserId(userId: number): Promise<Space | null> {
-    return this.prisma.space.findUnique({ where: { ownerUserId: userId } });
+    return this.prisma.space.findFirst({
+      where: { createdByUserId: userId },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   /**
@@ -40,10 +44,16 @@ export class SpaceAccessorService {
     return this.prisma.$transaction(async (transaction) => {
       const user = await transaction.user.create({ data: input.user });
       const space = await transaction.space.create({
-        data: { name: input.spaceName, ownerUserId: user.id },
+        data: { name: input.spaceName, createdByUserId: user.id },
       });
       const member = await transaction.spaceMember.create({
-        data: { spaceId: space.id, userId: user.id, role: 'admin' },
+        data: {
+          spaceId: space.id,
+          userId: user.id,
+          role: 'admin',
+          menuAccess: DEFAULT_MENU_ACCESS.admin,
+          cameraIds: [],
+        },
       });
       await transaction.alertRouting.createMany({
         data: ALERT_ROUTING_DEFAULTS.map((routing) => ({

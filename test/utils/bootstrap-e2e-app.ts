@@ -12,6 +12,7 @@ import {
   ALERT_ROUTING_DEFAULTS,
   ErrorCode,
 } from '../../src/cross/common/constants';
+import { DEFAULT_MENU_ACCESS } from '../../src/cross/common/permissions';
 import { configureApp } from '../../src/cross/config/configure-app';
 import { setupSwagger } from '../../src/cross/config/swagger.config';
 import { buildData, buildError, Either } from '../../src/cross/errors/either';
@@ -320,18 +321,23 @@ export async function ensureAdminSeeded(
     update: profile,
     create: { email, ...profile },
   });
-  const space = await prisma.space.upsert({
-    where: { ownerUserId: user.id },
-    update: {},
-    create: { name: 'My Secure Space', ownerUserId: user.id },
-  });
+  const space =
+    (await prisma.space.findFirst({
+      where: { createdByUserId: user.id },
+      orderBy: { createdAt: 'asc' },
+    })) ??
+    (await prisma.space.create({
+      data: { name: 'My Secure Space', createdByUserId: user.id },
+    }));
   await prisma.spaceMember.upsert({
-    where: { userId: user.id },
+    where: { spaceId_userId: { spaceId: space.id, userId: user.id } },
     update: { role: 'admin', receiveAlerts: true },
     create: {
       spaceId: space.id,
       userId: user.id,
       role: 'admin',
+      menuAccess: DEFAULT_MENU_ACCESS.admin,
+      cameraIds: [],
       receiveAlerts: true,
     },
   });

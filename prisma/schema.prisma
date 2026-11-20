@@ -10,7 +10,8 @@ datasource db {
 
 enum SpaceMemberRole {
   admin
-  member
+  collaborator
+  guest
 }
 
 enum AuthTokenPurpose {
@@ -71,10 +72,11 @@ model User {
   lastLoginAt      DateTime? @map("last_login_at")
   profileCompleted Boolean   @default(false) @map("profile_completed")
   createdAt        DateTime  @default(now()) @map("created_at")
+  lastSpaceId      String?   @map("last_space_id")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  membership              SpaceMember?
-  ownedSpace              Space?             @relation("SpaceOwner")
+  memberships             SpaceMember[]
+  createdSpaces           Space[]            @relation("SpaceCreator")
   sentInvitations         Invitation[]       @relation("InvitationInvitedBy")
   acceptedInvitations     Invitation[]       @relation("InvitationCreatedUser")
   membershipInvitations   SpaceMember[]      @relation("MembershipInvitedBy")
@@ -87,27 +89,30 @@ model User {
 }
 
 model Space {
-  id          String   @id @default(uuid())
-  name        String
-  ownerUserId Int      @unique @map("owner_user_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  name            String
+  createdByUserId Int      @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  owner         User           @relation("SpaceOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdBy     User           @relation("SpaceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   members       SpaceMember[]
   invitations   Invitation[]
   dvr           Dvr?
   alertRoutings AlertRouting[]
   alertEvents   AlertEvent[]
 
+  @@index([createdByUserId])
   @@map("spaces")
 }
 
 model SpaceMember {
   id              String          @id @default(uuid())
   spaceId         String          @map("space_id")
-  userId          Int             @unique @map("user_id")
-  role            SpaceMemberRole @default(member)
+  userId          Int             @map("user_id")
+  role            SpaceMemberRole @default(collaborator)
+  menuAccess      Json            @map("menu_access")
+  cameraIds       Json            @map("camera_ids")
   receiveAlerts   Boolean         @default(true) @map("receive_alerts")
   invitedByUserId Int?            @map("invited_by_user_id")
   joinedAt        DateTime        @default(now()) @map("joined_at")
@@ -118,19 +123,25 @@ model SpaceMember {
 
   @@unique([spaceId, userId])
   @@index([spaceId])
+  @@index([userId])
   @@map("space_members")
 }
 
 model Invitation {
-  id              String    @id @default(uuid())
-  spaceId         String    @map("space_id")
+  id              String          @id @default(uuid())
+  spaceId         String          @map("space_id")
   email           String
-  tokenHash       String    @unique @map("token_hash")
-  invitedByUserId Int       @map("invited_by_user_id")
-  expiresAt       DateTime  @map("expires_at")
-  acceptedAt      DateTime? @map("accepted_at")
-  createdUserId   Int?      @map("created_user_id")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  tokenHash       String          @unique @map("token_hash")
+  invitedByUserId Int             @map("invited_by_user_id")
+  expiresAt       DateTime        @map("expires_at")
+  acceptedAt      DateTime?       @map("accepted_at")
+  createdUserId   Int?            @map("created_user_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  role            SpaceMemberRole @default(collaborator)
+  menuAccess      Json?           @map("menu_access")
+  cameraIds       Json?           @map("camera_ids")
+  declinedAt      DateTime?       @map("declined_at")
+  revokedAt       DateTime?       @map("revoked_at")
 
   space       Space @relation(fields: [spaceId], references: [id], onDelete: Restrict)
   invitedBy   User  @relation("InvitationInvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)

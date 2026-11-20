@@ -1,4 +1,5 @@
 import { SpaceMemberRole } from '@prisma/client';
+import { DEFAULT_MENU_ACCESS } from '../../src/cross/common/permissions';
 import * as bcrypt from 'bcrypt';
 import { ALERT_ROUTING_DEFAULTS } from '../../src/cross/common/constants';
 import { PrismaService } from '../../src/data/prisma/prisma.service';
@@ -37,10 +38,16 @@ export async function seedTenant(
     },
   });
   const space = await prisma.space.create({
-    data: { name: spaceName, ownerUserId: user.id },
+    data: { name: spaceName, createdByUserId: user.id },
   });
   await prisma.spaceMember.create({
-    data: { spaceId: space.id, userId: user.id, role: SpaceMemberRole.admin },
+    data: {
+      spaceId: space.id,
+      userId: user.id,
+      role: SpaceMemberRole.admin,
+      menuAccess: DEFAULT_MENU_ACCESS.admin,
+      cameraIds: [],
+    },
   });
   await prisma.alertRouting.createMany({
     data: ALERT_ROUTING_DEFAULTS.map((routing) => ({
@@ -77,7 +84,13 @@ export async function seedMember(
     },
   });
   await prisma.spaceMember.create({
-    data: { spaceId, userId: user.id, role: SpaceMemberRole.member },
+    data: {
+      spaceId,
+      userId: user.id,
+      role: SpaceMemberRole.collaborator,
+      menuAccess: DEFAULT_MENU_ACCESS.collaborator,
+      cameraIds: [],
+    },
   });
 
   return { userId: user.id, email, password: E2E_PASSWORD, spaceId };

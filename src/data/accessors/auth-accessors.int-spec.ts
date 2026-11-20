@@ -1,3 +1,4 @@
+import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { truncateAll } from '../../../test/utils/truncate-all';
@@ -58,7 +59,7 @@ describe('auth and membership accessors (int)', () => {
         ownerInput('owner@example.com'),
       );
 
-      expect(owned.space.ownerUserId).toBe(owned.user.id);
+      expect(owned.space.createdByUserId).toBe(owned.user.id);
       expect(owned.member.role).toBe('admin');
       await expect(
         prisma.alertRouting.count({ where: { spaceId: owned.space.id } }),
@@ -85,20 +86,19 @@ describe('auth and membership accessors (int)', () => {
     });
   });
 
-  describe('one space per user', () => {
+  describe('one membership per space and user', () => {
     it('is enforced by the database, not only by the service', async () => {
       const first = await spaceAccessor.createWithOwner(
         ownerInput('owner@example.com'),
       );
-      const second = await spaceAccessor.createWithOwner(
-        ownerInput('other@example.com'),
-      );
 
       await expect(
         spaceMemberAccessor.create({
-          spaceId: second.space.id,
+          spaceId: first.space.id,
           userId: first.user.id,
-          role: 'member',
+          role: 'collaborator',
+          menuAccess: DEFAULT_MENU_ACCESS.collaborator,
+          cameraIds: [],
         }),
       ).rejects.toThrow();
     });
@@ -129,7 +129,7 @@ describe('auth and membership accessors (int)', () => {
 
       expect(accepted).not.toBeNull();
       expect(accepted?.member.spaceId).toBe(owned.space.id);
-      expect(accepted?.member.role).toBe('member');
+      expect(accepted?.member.role).toBe('collaborator');
       expect(accepted?.member.invitedByUserId).toBe(owned.user.id);
       // Created without a name or phone of its own: `profileCompleted` is what
       // keeps that account off every other route.

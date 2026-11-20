@@ -142,7 +142,7 @@ describe('Invitations (e2e)', () => {
     expect(meBody).toMatchObject({
       email: 'new-member@example.com',
       spaceId: admin.spaceId,
-      role: 'member',
+      role: 'collaborator',
       profileCompleted: false,
     });
 

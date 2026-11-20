@@ -12,7 +12,7 @@ describe('RolesGuard', () => {
     sub: 1,
     email: 'member@example.com',
     spaceId: 'space-1',
-    role: 'member',
+    role: 'collaborator',
     profileCompleted: true,
   };
 
@@ -50,7 +50,7 @@ describe('RolesGuard', () => {
   });
 
   it('allows a member whose role is listed', () => {
-    metadata(false, ['member', 'admin']);
+    metadata(false, ['collaborator', 'admin']);
 
     expect(guard.canActivate(contextFor(member))).toBe(true);
   });

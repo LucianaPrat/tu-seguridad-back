@@ -209,7 +209,7 @@ describe('SessionService', () => {
       // promoted, and refresh is where the client finds out.
       spaceMemberAccessor.findByUserId.mockResolvedValue({
         ...member,
-        role: 'member',
+        role: 'collaborator',
       });
       authTokenAccessor.rotateRefresh.mockResolvedValue({ id: 'token-2' });
 
@@ -223,7 +223,7 @@ describe('SessionService', () => {
         },
       });
       expect(jwtService.sign).toHaveBeenCalledWith(
-        expect.objectContaining({ role: 'member' }),
+        expect.objectContaining({ role: 'collaborator' }),
         expect.objectContaining({ secret: 'access-secret' }),
       );
       expect(authTokenAccessor.rotateRefresh).toHaveBeenCalledWith(

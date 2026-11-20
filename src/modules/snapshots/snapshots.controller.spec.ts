@@ -10,7 +10,7 @@ describe('SnapshotsController', () => {
     sub: 1,
     email: 'member@example.com',
     spaceId: 'space-uuid',
-    role: 'member',
+    role: 'collaborator',
     profileCompleted: true,
   };
 

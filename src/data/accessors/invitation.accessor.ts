@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Invitation, SpaceMember, User } from '@prisma/client';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 
 /** Every column except the token hash, which never leaves the accessor. */
 const PUBLIC_FIELDS = {
@@ -13,6 +14,11 @@ const PUBLIC_FIELDS = {
   acceptedAt: true,
   createdUserId: true,
   createdAt: true,
+  role: true,
+  menuAccess: true,
+  cameraIds: true,
+  declinedAt: true,
+  revokedAt: true,
 } as const;
 
 export interface CreateInvitationInput {
@@ -163,7 +169,9 @@ export class InvitationAccessorService {
         data: {
           spaceId: invitation.spaceId,
           userId: user.id,
-          role: 'member',
+          role: 'collaborator',
+          menuAccess: DEFAULT_MENU_ACCESS.collaborator,
+          cameraIds: [],
           invitedByUserId: invitation.invitedByUserId,
         },
       });
@@ -209,7 +217,9 @@ export class InvitationAccessorService {
         data: {
           spaceId: invitation.spaceId,
           userId,
-          role: 'member',
+          role: 'collaborator',
+          menuAccess: DEFAULT_MENU_ACCESS.collaborator,
+          cameraIds: [],
           invitedByUserId: invitation.invitedByUserId,
         },
       });

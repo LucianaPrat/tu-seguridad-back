@@ -26,7 +26,7 @@ describe('InvitationsService', () => {
   const member = {
     spaceId: 'space-1',
     userId: 2,
-    role: 'member',
+    role: 'collaborator',
   } as SpaceMember;
 
   let invitationAccessor: {
