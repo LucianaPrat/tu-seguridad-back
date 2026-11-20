@@ -35,7 +35,8 @@ import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { LoginDto } from './dto/login.dto';
 import { MeDto } from './dto/me.dto';
 import { RegisterDto } from './dto/register.dto';
-import { REFRESH_COOKIE_NAME } from './refresh-cookie';
+import { SwitchSpaceDto } from './dto/switch-space.dto';
+import { readRefreshCookie } from './refresh-cookie';
 import { RefreshCookieService } from './refresh-cookie.service';
 import {
   INVALID_REFRESH_TOKEN_MESSAGE,
@@ -146,7 +147,7 @@ export class AuthController {
     @RequestSessionContext() context: SessionContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Either<AccessTokenDto>> {
-    const refreshToken = this.readRefreshCookie(req);
+    const refreshToken = readRefreshCookie(req);
     if (!refreshToken) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE);
     }
@@ -175,7 +176,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const refreshToken = this.readRefreshCookie(req);
+    const refreshToken = readRefreshCookie(req);
     if (refreshToken) {
       await this.sessionService.revoke(refreshToken);
     }
@@ -202,6 +203,36 @@ export class AuthController {
   })
   me(@CurrentClaims() claims: AccessTokenClaims): Promise<Either<MeDto>> {
     return this.authService.me(claims);
+  }
+
+  @AllowNoSpace()
+  @HttpCode(HttpStatus.OK)
+  @Post('switch-space')
+  @ApiOperation({
+    summary: 'Switch the session to another space',
+    description:
+      'The caller must be a member of the target space. Re-issues the session there: a ' +
+      'new access token in the body, the refresh cookie replaced and the old refresh ' +
+      'token revoked. The choice is remembered for later logins and refreshes.',
+  })
+  @ApiOkResponse({ type: AccessTokenDto, description: 'Session moved.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: 'Malformed body.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]: 'The caller is not a member of that space.',
+  })
+  async switchSpace(
+    @CurrentClaims() claims: AccessTokenClaims,
+    @Body() dto: SwitchSpaceDto,
+    @RequestSessionContext() context: SessionContext,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Either<AccessTokenDto>> {
+    return this.refreshCookie.replaceSession(
+      req,
+      res,
+      await this.authService.switchSpace(claims, dto.spaceId, context),
+    );
   }
 
   @AllowIncompleteProfile()
@@ -235,10 +266,5 @@ export class AuthController {
       res,
       await this.authService.completeProfile(claims.sub, dto, context),
     );
-  }
-
-  private readRefreshCookie(req: Request): string | undefined {
-    const cookies = req.cookies as Record<string, string | undefined>;
-    return cookies?.[REFRESH_COOKIE_NAME];
   }
 }

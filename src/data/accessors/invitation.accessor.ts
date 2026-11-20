@@ -109,6 +109,18 @@ export class InvitationAccessorService {
     });
   }
 
+  countPendingForEmail(email: string, now = new Date()): Promise<number> {
+    return this.prisma.invitation.count({
+      where: {
+        email: email.toLowerCase(),
+        acceptedAt: null,
+        declinedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
+  }
+
   /**
    * Pending invitations of a space: unaccepted and unexpired, newest first. Reuses
    * `PUBLIC_FIELDS` so the token hash never leaves the accessor.

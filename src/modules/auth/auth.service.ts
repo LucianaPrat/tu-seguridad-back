@@ -2,10 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Space, SpaceMember } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import { normalizeEmail } from '../../cross/common/normalize-email';
+import { toMemberPermissions } from '../../cross/common/permissions';
 import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import { SessionContext } from '../../cross/common/session-context.type';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { PasswordHashService } from '../../cross/crypto/password-hash.service';
+import { InvitationAccessorService } from '../../data/accessors/invitation.accessor';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { SpaceAccessorService } from '../../data/accessors/space.accessor';
 import { UserAccessorService } from '../../data/accessors/user.accessor';
@@ -26,6 +28,7 @@ export class AuthService {
     private readonly spaceMemberAccessor: SpaceMemberAccessorService,
     private readonly passwordHash: PasswordHashService,
     private readonly sessionService: SessionService,
+    private readonly invitationAccessor: InvitationAccessorService,
   ) {}
 
   /**
@@ -135,6 +138,32 @@ export class AuthService {
     );
   }
 
+  /**
+   * Moves the session into another space the caller belongs to. Membership is
+   * checked against the database, not the token: the target is a client choice.
+   */
+  async switchSpace(
+    claims: AccessTokenClaims,
+    spaceId: string,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
+    const member = await this.spaceMemberAccessor.findBySpaceAndUser(
+      spaceId,
+      claims.sub,
+    );
+    if (!member) {
+      return buildError(
+        ErrorCode.FORBIDDEN,
+        'You are not a member of this space',
+      );
+    }
+    const user = await this.userAccessor.findById(claims.sub);
+    if (!user?.isActive) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
+    return buildData(await this.sessionService.issue(user, member, context));
+  }
+
   async me(claims: AccessTokenClaims): Promise<Either<MeDto>> {
     const user = await this.userAccessor.findById(claims.sub);
     if (!user?.isActive) {
@@ -154,6 +183,11 @@ export class AuthService {
       }
     }
 
+    const [memberships, pendingInvitationsCount] = await Promise.all([
+      this.spaceMemberAccessor.findManyByUserIdWithSpace(user.id),
+      this.invitationAccessor.countPendingForEmail(user.email),
+    ]);
+
     return buildData({
       id: user.id,
       email: user.email,
@@ -167,6 +201,21 @@ export class AuthService {
       spaceName: space?.name ?? null,
       role: member?.role ?? null,
       receiveAlerts: member?.receiveAlerts ?? false,
+      spaces: memberships.map((entry) => ({
+        id: entry.space.id,
+        name: entry.space.name,
+        role: entry.role,
+      })),
+      currentSpace:
+        space && member
+          ? {
+              id: space.id,
+              name: space.name,
+              role: member.role,
+              ...toMemberPermissions(member),
+            }
+          : null,
+      pendingInvitationsCount,
     });
   }
 }

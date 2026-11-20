@@ -23,3 +23,21 @@ export function isMenuKey(value: unknown): value is MenuKey {
     (MENU_KEYS as readonly string[]).includes(value)
   );
 }
+
+/**
+ * `menuAccess` and `cameraIds` are Json columns: anything that is not a known
+ * key or a string id is dropped rather than trusted.
+ */
+export function toMemberPermissions(member: {
+  menuAccess: unknown;
+  cameraIds: unknown;
+}): { menuAccess: MenuKey[]; cameraIds: string[] } {
+  return {
+    menuAccess: Array.isArray(member.menuAccess)
+      ? member.menuAccess.filter(isMenuKey)
+      : [],
+    cameraIds: Array.isArray(member.cameraIds)
+      ? member.cameraIds.filter((id): id is string => typeof id === 'string')
+      : [],
+  };
+}

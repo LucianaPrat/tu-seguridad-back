@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ErrorCode } from '../common/constants';
-import { isMenuKey } from '../common/permissions';
+import { toMemberPermissions } from '../common/permissions';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { ALLOW_NO_SPACE_KEY } from '../decorators/allow-no-space.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
@@ -62,20 +62,11 @@ export class SpaceMemberGuard implements CanActivate {
       );
     }
 
-    // The columns are Json: anything that is not a known key or a string id is
-    // dropped rather than trusted.
-    const menuAccess = Array.isArray(member.menuAccess)
-      ? member.menuAccess.filter(isMenuKey)
-      : [];
-    const cameraIds = Array.isArray(member.cameraIds)
-      ? member.cameraIds.filter((id): id is string => typeof id === 'string')
-      : [];
     request.user = {
       ...claims,
       spaceId: claims.spaceId,
       role: member.role,
-      menuAccess,
-      cameraIds,
+      ...toMemberPermissions(member),
       receiveAlerts: member.receiveAlerts,
     };
     return true;

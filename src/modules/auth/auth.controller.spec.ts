@@ -14,9 +14,14 @@ describe('AuthController', () => {
     register: jest.Mock;
     completeProfile: jest.Mock;
     me: jest.Mock;
+    switchSpace: jest.Mock;
   };
   let sessionService: { rotate: jest.Mock; revoke: jest.Mock };
-  let refreshCookie: { issueSession: jest.Mock; clear: jest.Mock };
+  let refreshCookie: {
+    issueSession: jest.Mock;
+    replaceSession: jest.Mock;
+    clear: jest.Mock;
+  };
   let res: Response;
   let controller: AuthController;
 
@@ -37,6 +42,7 @@ describe('AuthController', () => {
       register: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
       completeProfile: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
       me: jest.fn().mockResolvedValue(buildData({})),
+      switchSpace: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
     };
     sessionService = {
       rotate: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
@@ -48,6 +54,14 @@ describe('AuthController', () => {
         .fn()
         .mockImplementation(
           (_res: Response, result: Either<typeof TOKEN_PAIR>) =>
+            result.ok
+              ? buildData({ accessToken: result.data.accessToken })
+              : result,
+        ),
+      replaceSession: jest
+        .fn()
+        .mockImplementation(
+          (_req: Request, _res: Response, result: Either<typeof TOKEN_PAIR>) =>
             result.ok
               ? buildData({ accessToken: result.data.accessToken })
               : result,
@@ -198,6 +212,32 @@ describe('AuthController', () => {
       );
 
       expect(authService.completeProfile).toHaveBeenCalledWith(1, dto, CONTEXT);
+    });
+  });
+
+  describe('switchSpace', () => {
+    it('delegates to AuthService and replaces the session', async () => {
+      const req = requestWithCookies({});
+
+      const result = await controller.switchSpace(
+        claims,
+        { spaceId: 'space-2' },
+        CONTEXT,
+        req,
+        res,
+      );
+
+      expect(authService.switchSpace).toHaveBeenCalledWith(
+        claims,
+        'space-2',
+        CONTEXT,
+      );
+      expect(refreshCookie.replaceSession).toHaveBeenCalledWith(
+        req,
+        res,
+        buildData(TOKEN_PAIR),
+      );
+      expect(result).toEqual(buildData({ accessToken: 'atoken' }));
     });
   });
 });

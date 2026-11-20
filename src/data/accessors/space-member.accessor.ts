@@ -37,6 +37,10 @@ export type AlertRecipientRecord = Prisma.SpaceMemberGetPayload<{
   select: typeof ALERT_RECIPIENT_SELECT;
 }>;
 
+export type MemberWithSpaceRecord = Prisma.SpaceMemberGetPayload<{
+  include: { space: { select: { id: true; name: true } } };
+}>;
+
 @Injectable()
 export class SpaceMemberAccessorService {
   constructor(private readonly prisma: PrismaService) {}
@@ -58,6 +62,14 @@ export class SpaceMemberAccessorService {
   ): Promise<SpaceMember | null> {
     return this.prisma.spaceMember.findUnique({
       where: { spaceId_userId: { spaceId, userId } },
+    });
+  }
+
+  findManyByUserIdWithSpace(userId: number): Promise<MemberWithSpaceRecord[]> {
+    return this.prisma.spaceMember.findMany({
+      where: { userId },
+      include: { space: { select: { id: true, name: true } } },
+      orderBy: { space: { name: 'asc' } },
     });
   }
 

@@ -1,5 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SpaceMemberRole } from '@prisma/client';
+import type { MenuKey } from '../../../cross/common/permissions';
+import { MENU_KEYS } from '../../../cross/common/permissions';
+import { SpaceSummaryDto } from '../../spaces/dto/space-summary.dto';
+
+export class CurrentSpaceDto extends SpaceSummaryDto {
+  @ApiProperty({ enum: MENU_KEYS, isArray: true })
+  menuAccess!: MenuKey[];
+
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    description: 'Cameras a guest may see; empty for other roles',
+  })
+  cameraIds!: string[];
+}
 
 /**
  * The space context every screen needs after login. Flat on purpose: the
@@ -34,19 +49,50 @@ export class MeDto {
   })
   profileCompleted!: boolean;
 
-  @ApiProperty({ format: 'uuid', nullable: true })
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    deprecated: true,
+    description: 'Deprecated: use `currentSpace`.',
+  })
   spaceId!: string | null;
 
-  @ApiProperty({ example: 'My Secure Space', nullable: true })
+  @ApiProperty({
+    example: 'My Secure Space',
+    nullable: true,
+    deprecated: true,
+    description: 'Deprecated: use `currentSpace`.',
+  })
   spaceName!: string | null;
 
   @ApiProperty({
     enum: SpaceMemberRole,
     example: SpaceMemberRole.admin,
     nullable: true,
+    deprecated: true,
+    description: 'Deprecated: use `currentSpace`.',
   })
   role!: SpaceMemberRole | null;
 
   @ApiProperty({ description: 'Whether this member receives alert deliveries' })
   receiveAlerts!: boolean;
+
+  @ApiProperty({
+    type: SpaceSummaryDto,
+    isArray: true,
+    description: 'Every space the account belongs to',
+  })
+  spaces!: SpaceSummaryDto[];
+
+  @ApiProperty({
+    type: CurrentSpaceDto,
+    nullable: true,
+    description: 'The space the session is in; null when the account has none',
+  })
+  currentSpace!: CurrentSpaceDto | null;
+
+  @ApiProperty({
+    description: 'Open invitations addressed to the account email',
+  })
+  pendingInvitationsCount!: number;
 }

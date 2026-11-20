@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { EnvNames } from '../../cross/common/constants';
 import { buildData, Either } from '../../cross/errors/either';
 import { AccessTokenDto } from './dto/access-token.dto';
@@ -8,6 +8,7 @@ import { TokenPairDto } from './dto/token-pair.dto';
 import {
   buildRefreshCookieOptions,
   REFRESH_COOKIE_NAME,
+  readRefreshCookie,
   REFRESH_COOKIE_PATH,
 } from './refresh-cookie';
 import { SessionService } from './session.service';
@@ -51,6 +52,25 @@ export class RefreshCookieService {
     }
     this.attach(res, result.data.refreshToken);
     return buildData({ accessToken: result.data.accessToken });
+  }
+
+  /**
+   * For routes that move a live session (switch, create or delete a space): the
+   * refresh token the caller presented belongs to the old session, so it is
+   * revoked on success before the new one is attached.
+   */
+  async replaceSession(
+    req: Request,
+    res: Response,
+    result: Either<TokenPairDto>,
+  ): Promise<Either<AccessTokenDto>> {
+    if (result.ok) {
+      const previous = readRefreshCookie(req);
+      if (previous) {
+        await this.sessionService.revoke(previous);
+      }
+    }
+    return this.issueSession(res, result);
   }
 
   clear(res: Response): void {

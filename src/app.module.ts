@@ -27,6 +27,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { MembersModule } from './modules/members/members.module';
 import { RetentionModule } from './modules/retention/retention.module';
 import { SnapshotsModule } from './modules/snapshots/snapshots.module';
+import { SpacesModule } from './modules/spaces/spaces.module';
 import { StreamingModule } from './modules/streaming/streaming.module';
 import { ZonesModule } from './modules/zones/zones.module';
 
@@ -52,6 +53,7 @@ import { ZonesModule } from './modules/zones/zones.module';
     AlertRoutingsModule,
     AuthModule,
     InvitationsModule,
+    SpacesModule,
     HealthModule,
     CameraStatusModule,
     DvrModule,

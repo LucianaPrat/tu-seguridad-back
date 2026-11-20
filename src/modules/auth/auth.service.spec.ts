@@ -33,7 +33,11 @@ describe('AuthService', () => {
     completeProfile: jest.Mock;
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
-  let spaceMemberAccessor: { findBySpaceAndUser: jest.Mock };
+  let spaceMemberAccessor: {
+    findBySpaceAndUser: jest.Mock;
+    findManyByUserIdWithSpace: jest.Mock;
+  };
+  let invitationAccessor: { countPendingForEmail: jest.Mock };
   let passwordHash: {
     hash: jest.Mock;
     verify: jest.Mock;
@@ -55,6 +59,12 @@ describe('AuthService', () => {
     };
     spaceMemberAccessor = {
       findBySpaceAndUser: jest.fn().mockResolvedValue(member),
+      findManyByUserIdWithSpace: jest
+        .fn()
+        .mockResolvedValue([{ ...member, space }]),
+    };
+    invitationAccessor = {
+      countPendingForEmail: jest.fn().mockResolvedValue(2),
     };
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
@@ -71,6 +81,7 @@ describe('AuthService', () => {
       spaceMemberAccessor as never,
       passwordHash,
       sessionService as never,
+      invitationAccessor as never,
     );
   });
 
@@ -306,7 +317,25 @@ describe('AuthService', () => {
           spaceName: 'My Secure Space',
           role: 'admin',
           receiveAlerts: true,
+          spaces: [{ id: 'space-1', name: 'My Secure Space', role: 'admin' }],
+          currentSpace: {
+            id: 'space-1',
+            name: 'My Secure Space',
+            role: 'admin',
+            menuAccess: [],
+            cameraIds: [],
+          },
+          pendingInvitationsCount: 2,
         },
+      });
+    });
+
+    it('returns a null currentSpace for an account in no space', async () => {
+      const result = await service.me({ ...claims, spaceId: null });
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { currentSpace: null, pendingInvitationsCount: 2 },
       });
     });
 
@@ -331,6 +360,49 @@ describe('AuthService', () => {
       spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
 
       const result = await service.me(claims);
+
+      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+  });
+
+  describe('switchSpace', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+
+    it('returns FORBIDDEN when the caller is not a member of the target', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      const result = await service.switchSpace(claims, 'space-9', context);
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.FORBIDDEN,
+        message: 'You are not a member of this space',
+      });
+      expect(sessionService.issue).not.toHaveBeenCalled();
+    });
+
+    it('issues a session in the target space', async () => {
+      userAccessor.findById.mockResolvedValue(user);
+
+      const result = await service.switchSpace(claims, 'space-1', context);
+
+      expect(spaceMemberAccessor.findBySpaceAndUser).toHaveBeenCalledWith(
+        'space-1',
+        1,
+      );
+      expect(sessionService.issue).toHaveBeenCalledWith(user, member, context);
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+    });
+
+    it('returns UNAUTHORIZED for a deactivated account', async () => {
+      userAccessor.findById.mockResolvedValue({ ...user, isActive: false });
+
+      const result = await service.switchSpace(claims, 'space-1', context);
 
       expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
     });
