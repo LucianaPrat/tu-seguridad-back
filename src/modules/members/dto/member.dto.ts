@@ -1,0 +1,65 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SpaceMemberRole } from '@prisma/client';
+import { MENU_KEYS, MenuKey } from '../../../cross/common/permissions';
+
+/**
+ * One row of the space roster the Members screen renders.
+ */
+export class MemberDto {
+  @ApiProperty()
+  id!: number;
+
+  @ApiProperty({ example: 'owner@example.com' })
+  email!: string;
+
+  @ApiProperty()
+  firstName!: string;
+
+  @ApiProperty()
+  lastName!: string;
+
+  @ApiProperty({ example: '+5491122334455' })
+  phone!: string;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  avatarUrl!: string | null;
+
+  @ApiProperty()
+  isActive!: boolean;
+
+  @ApiProperty({
+    description:
+      'False until an invited member completes name, phone and password. Its name and phone are empty strings until then.',
+  })
+  profileCompleted!: boolean;
+
+  @ApiPropertyOptional({
+    type: Date,
+    nullable: true,
+    description: "Null until the member's first login",
+  })
+  lastLoginAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'The per-member alert opt-in the channels screen toggles: false means the ' +
+      'member stays in the space but no alert delivery is planned for them.',
+  })
+  receiveAlerts!: boolean;
+
+  @ApiProperty({ enum: SpaceMemberRole })
+  role!: SpaceMemberRole;
+
+  @ApiPropertyOptional({
+    enum: MENU_KEYS,
+    isArray: true,
+    description: 'Only when the caller is an admin.',
+  })
+  menuAccess?: MenuKey[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Only when the caller is an admin.',
+  })
+  cameraIds?: string[];
+}

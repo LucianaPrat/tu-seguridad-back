@@ -1,0 +1,94 @@
+name: PR tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_ENV: test
+  DATABASE_URL: mysql://root:root@127.0.0.1:3306/tu-seguridad-test
+  DATABASE_URL_TEST: mysql://root:root@127.0.0.1:3306/tu-seguridad-test
+  JWT_SECRET: ci-access-secret
+  JWT_EXPIRES_IN: 15m
+  JWT_REFRESH_SECRET: ci-refresh-secret
+  JWT_REFRESH_EXPIRES_IN: 7d
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: ci-admin-password
+  FACE_AUTH_API_URL: https://api.face-auth.me
+  FACE_AUTH_DOMAIN: ci-dummy-domain
+  FACE_AUTH_CLIENT_TOKEN: ci-dummy-token
+  POLLING_ENABLED: 'false'
+  OTEL_ENABLED: 'false'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: tu-seguridad-test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+        # `.standards/` is a submodule and every central rule lives in it. A
+        # checkout without this leaves the directory empty, so any check that
+        # reads a central rule passes by finding nothing.
+        with:
+          submodules: true
+
+      # Before setup-node: its pnpm cache needs the binary. Version comes from
+      # package.json `packageManager`.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run format:check
+
+      - run: pnpm run lint
+
+      - run: pnpm run typecheck
+
+      - run: pnpm run build
+
+      - name: Check OpenAPI contract is up to date
+        run: |
+          pnpm run openapi:export
+          git diff --exit-code -- openapi.json \
+            || (echo "::error::OpenAPI contract changed. Run 'pnpm run openapi:export' and commit openapi.json." && exit 1)
+
+      - run: pnpm exec prisma migrate deploy
+
+      - run: pnpm run prisma:seed
+
+      - run: pnpm run test:all
+
+      # The coverage threshold in package.json (lines: 80) was configured but
+      # nothing ran it, so it could not fail a build. This is the step that
+      # makes it a gate.
+      - run: pnpm run test:cov
+
+      # Dependency audit + secret scan. Gate scope and why: see AGENTS.md "Checks".
+      - run: pnpm run security

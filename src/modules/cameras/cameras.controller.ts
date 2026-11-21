@@ -1,0 +1,347 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseFilePipeBuilder,
+  Post,
+  Put,
+  UploadedFile,
+  UseFilters,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
+import { SpaceMemberRole } from '@prisma/client';
+import { cameraScope } from '../../cross/common/permissions';
+import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { ErrorCode } from '../../cross/common/constants';
+import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
+import { Roles } from '../../cross/decorators/roles.decorator';
+import { ApiFailures } from '../../cross/errors/api-failures.decorator';
+import { Either } from '../../cross/errors/either';
+import { UploadTooLargeFilter } from '../../cross/errors/upload-too-large.filter';
+import { CameraAccessGuard } from '../../cross/guards/camera-access.guard';
+import { AnalysisResult } from '../pipeline/analysis-result';
+import { SnapshotDto } from '../snapshots/dto/snapshot.dto';
+import { LiveStreamDto } from '../streaming/dto/live-stream.dto';
+import { LiveStreamService } from '../streaming/live-stream.service';
+import { CameraPipelineStatus } from './camera-status.registry';
+import { CamerasService } from './cameras.service';
+import { CameraDto } from './dto/camera.dto';
+import { UpdateCameraDto } from './dto/update-camera.dto';
+
+@ApiTags('cameras')
+@Controller('cameras')
+export class CamerasController {
+  constructor(
+    private readonly camerasService: CamerasService,
+    private readonly liveStreamService: LiveStreamService,
+  ) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'List the cameras of the space',
+    description:
+      'Every camera discovered on the space recorder, soft-deleted ones excluded (a ' +
+      'guest sees only the cameras its membership lists). Each ' +
+      'carries its discovery fields, its monitor configuration and a derived ' +
+      '`latestSnapshotUrl`. A camera the recorder stopped reporting stays in the list ' +
+      'with `isConfigured: false` rather than disappearing.',
+  })
+  @ApiOkResponse({
+    type: [CameraDto],
+    description: 'Cameras of the caller space.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+  })
+  findAll(@CurrentUser() user: JwtPayload): Promise<Either<CameraDto[]>> {
+    return this.camerasService.findAll(user.spaceId, cameraScope(user));
+  }
+
+  @UseGuards(CameraAccessGuard)
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Read one camera',
+    description:
+      'Full detail for a single camera: discovery fields, monitor configuration and the ' +
+      'derived `latestSnapshotUrl`. No recorder URL or credential is on this shape — ' +
+      'the recorder is read from `GET /dvr`, and its password never leaves the process.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiOkResponse({ type: CameraDto, description: 'The camera.' })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+  })
+  findOne(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<CameraDto>> {
+    return this.camerasService.findById(user.spaceId, id);
+  }
+
+  /** Monitor behavior is space configuration: admins and collaborators with the dvr section. */
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
+  @Put(':id')
+  @ApiOperation({
+    summary: 'Update a camera',
+    description:
+      'Admin or collaborator with the dvr section. Operator-editable fields only — `externalId` and `status` come from ' +
+      'discovery and are rejected here. Switching a camera to full-frame monitoring ' +
+      'requires an `alertType`, since there are no zones to take the alert level from.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiOkResponse({ type: CameraDto, description: 'Camera after the update.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, a rejected discovery field, or full-frame monitoring without an alertType.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+  })
+  update(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCameraDto,
+  ): Promise<Either<CameraDto>> {
+    return this.camerasService.update(user.spaceId, id, dto);
+  }
+
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete a camera',
+    description:
+      'Admin or collaborator with the dvr section. Logical delete: the camera leaves every read and the DVR poll list, ' +
+      'its alert history is kept. A later discovery run can bring the same channel back.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiOkResponse({ description: 'Camera removed. Empty body.' })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+  })
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<null>> {
+    return this.camerasService.delete(user.spaceId, id);
+  }
+
+  @UseGuards(CameraAccessGuard)
+  @Get(':id/status')
+  @ApiOperation({
+    summary: 'Read the pipeline status of a camera',
+    description:
+      'Live view of the polling pipeline for one camera: last poll, last success, last ' +
+      'error and its code, upstream latency, and current occupancy per monitored area. ' +
+      'Held in memory, so it resets when the process restarts.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  // ponytail: `CameraPipelineStatus` is an interface, so OpenAPI gets no schema for it
+  // — response DTO class if the frontend needs the shape published.
+  @ApiOkResponse({
+    description:
+      'Pipeline status: `lastPollAt`, `lastSuccessAt`, `lastErrorCode`, latency and per-area occupancy.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+  })
+  status(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<CameraPipelineStatus>> {
+    return this.camerasService.getStatus(user.spaceId, id);
+  }
+
+  @UseGuards(CameraAccessGuard)
+  @Get(':id/live')
+  @ApiOperation({
+    summary: 'Get the live stream of a camera',
+    description:
+      'Registers the camera with the media server if it is not registered yet and ' +
+      'answers where to play it. The media server pulls RTSP from the recorder only ' +
+      'while somebody is watching, and repackages it as HLS without transcoding. ' +
+      'The recorder credentials never appear in the answer: the returned URL is not ' +
+      'a secret, and the media server asks this API to authorize the playlist and ' +
+      'every segment, so each request has to carry the caller bearer token. Play it ' +
+      'with `hls.js`, attaching the token through `xhrSetup`. Off by default: ' +
+      'without `MEDIAMTX_ENABLED` this answers `CONFLICT`.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiOkResponse({
+    type: LiveStreamDto,
+    description: 'Where and how to play the camera.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
+    [ErrorCode.NOT_FOUND]:
+      'No camera with that id in the caller space, or the space has no recorder.',
+    [ErrorCode.CONFLICT]:
+      'The camera is disabled, or live streaming is not configured on this deployment.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'The stored channel or recorder URL cannot be turned into a stream address.',
+    [ErrorCode.UPSTREAM_ERROR]: 'The media server refused the registration.',
+    [ErrorCode.UPSTREAM_TIMEOUT]: 'The media server did not answer in time.',
+  })
+  live(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<LiveStreamDto>> {
+    return this.liveStreamService.start(user.spaceId, id);
+  }
+
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(CameraAccessGuard)
+  @Post(':id/snapshots')
+  @ApiOperation({
+    summary: 'Capture a snapshot now',
+    description:
+      'Pulls a frame from the recorder immediately instead of waiting for the next ' +
+      'poll, stores it, and answers its metadata including the authenticated URL to ' +
+      'read the bytes from `GET /snapshots/{id}`. Runs no detection — use ' +
+      '`POST /cameras/{id}/analyze` for that.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @ApiCreatedResponse({
+    type: SnapshotDto,
+    description: 'Frame captured and stored.',
+  })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'The recorder returned a frame over the stored-size limit.',
+    [ErrorCode.UPSTREAM_ERROR]:
+      'The recorder refused the request or answered an error.',
+    [ErrorCode.UPSTREAM_TIMEOUT]: 'The recorder did not answer in time.',
+  })
+  capture(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<Either<SnapshotDto>> {
+    return this.camerasService.capture(user.spaceId, id);
+  }
+
+  /**
+   * Manual detection run. The size ceiling lives in the service, against the
+   * same `SNAPSHOT_MAX_BYTES` the stored frames use: an analyzed image that
+   * raises an alert is stored, so accepting one that could not be persisted
+   * would only fail later.
+   */
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @Post(':id/analyze')
+  @ApiOperation({
+    summary: 'Analyze an uploaded frame',
+    description:
+      'Admin or collaborator. Runs the detection pipeline synchronously against an image you upload, as the ' +
+      'manual path for when the recorder is unreachable. Answers the detected persons, ' +
+      'the per-zone results and any alerts raised; a frame that raises an alert is ' +
+      'stored, the rest are not. The upload must be a real image — the magic numbers ' +
+      'are checked, not just the declared type — and must fit `SNAPSHOT_MAX_BYTES`.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Camera id. Resolved inside the caller space only.',
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  @UseFilters(UploadTooLargeFilter)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  // ponytail: `AnalysisResult` is an interface, so OpenAPI gets no schema for it
+  // — response DTO class if the frontend needs the shape published.
+  @ApiOkResponse({
+    description:
+      'Detection result: `persons`, `zoneResults` and the `alerts` raised, if any.',
+  })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Missing file, a file that is not an image, or one over the size limit.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]: 'Caller is a guest, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
+    [ErrorCode.CONFLICT]:
+      'The camera is disabled or has no monitoring configured.',
+    [ErrorCode.UPSTREAM_ERROR]:
+      'The detection upstream failed, or its circuit is open.',
+    [ErrorCode.UPSTREAM_TIMEOUT]:
+      'The detection upstream did not answer in time.',
+  })
+  analyze(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        // Magic numbers first, declared type only as the fallback: the
+        // detector needs an actual image, and a client that labels a script
+        // `.jpg` must not get one through. The fallback keeps the route usable
+        // where `file-type`'s ESM entry point cannot be loaded.
+        .addFileTypeValidator({
+          fileType: /^image\//,
+          fallbackToMimetype: true,
+        })
+        .build({ errorHttpStatusCode: HttpStatus.BAD_REQUEST }),
+    )
+    file: Express.Multer.File,
+  ): Promise<Either<AnalysisResult>> {
+    return this.camerasService.analyze(
+      user.spaceId,
+      id,
+      file.buffer,
+      file.mimetype,
+    );
+  }
+}

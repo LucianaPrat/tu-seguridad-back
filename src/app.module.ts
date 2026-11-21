@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -9,6 +9,27 @@ import { envValidationSchema } from './cross/config/env-validation.schema';
 import { createPinoHttpOptions } from './cross/config/logger.options';
 import { createThrottlerOptions } from './cross/config/throttler.options';
 import { EitherInterceptor } from './cross/interceptors/either.interceptor';
+import { HitInterceptor } from './cross/interceptors/hit.interceptor';
+import { MailModule } from './cross/mail/mail.module';
+import { MetricsThrottlerGuard } from './cross/metrics/metrics-throttler.guard';
+import { MetricsModule } from './cross/metrics/metrics.module';
+import { DataModule } from './data/data.module';
+import { AlertRoutingsModule } from './modules/alert-routings/alert-routings.module';
+import { AssistantModule } from './modules/assistant/assistant.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { CameraStatusModule } from './modules/cameras/camera-status.module';
+import { CamerasModule } from './modules/cameras/cameras.module';
+import { DvrModule } from './modules/dvr/dvr.module';
+import { EventsModule } from './modules/events/events.module';
+import { FaceAuthClientModule } from './modules/face-auth-client/face-auth-client.module';
+import { HealthModule } from './modules/health/health.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { MembersModule } from './modules/members/members.module';
+import { RetentionModule } from './modules/retention/retention.module';
+import { SnapshotsModule } from './modules/snapshots/snapshots.module';
+import { SpacesModule } from './modules/spaces/spaces.module';
+import { StreamingModule } from './modules/streaming/streaming.module';
+import { ZonesModule } from './modules/zones/zones.module';
 
 @Module({
   imports: [
@@ -26,12 +47,32 @@ import { EitherInterceptor } from './cross/interceptors/either.interceptor';
       inject: [ConfigService],
       useFactory: createThrottlerOptions,
     }),
+    MetricsModule,
+    DataModule,
+    MailModule,
+    AlertRoutingsModule,
+    AuthModule,
+    InvitationsModule,
+    SpacesModule,
+    HealthModule,
+    CameraStatusModule,
+    DvrModule,
+    SnapshotsModule,
+    CamerasModule,
+    StreamingModule,
+    ZonesModule,
+    MembersModule,
+    EventsModule,
+    RetentionModule,
+    FaceAuthClientModule,
+    AssistantModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     { provide: APP_INTERCEPTOR, useClass: EitherInterceptor },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: HitInterceptor },
+    { provide: APP_GUARD, useClass: MetricsThrottlerGuard },
   ],
 })
 export class AppModule {}

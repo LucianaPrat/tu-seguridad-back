@@ -1,0 +1,48 @@
+file	persons	scores
+f_001.jpg	1	0.388
+f_002.jpg	1	0.634
+f_003.jpg	ERR UPSTREAM_ERROR: face-auth detect failed (status 500)	-
+f_004.jpg	1	0.809
+f_005.jpg	1	0.883
+f_006.jpg	1	0.847
+f_007.jpg	0	-
+f_008.jpg	0	-
+f_009.jpg	0	-
+f_010.jpg	0	-
+f_011.jpg	0	-
+f_012.jpg	0	-
+f_013.jpg	0	-
+f_014.jpg	0	-
+f_015.jpg	1	0.670
+f_016.jpg	0	-
+f_017.jpg	0	-
+f_018.jpg	0	-
+f_019.jpg	0	-
+f_020.jpg	0	-
+f_021.jpg	0	-
+f_022.jpg	0	-
+f_023.jpg	0	-
+f_024.jpg	0	-
+f_025.jpg	0	-
+f_026.jpg	0	-
+f_027.jpg	0	-
+f_028.jpg	0	-
+f_029.jpg	0	-
+f_030.jpg	0	-
+f_031.jpg	0	-
+f_032.jpg	0	-
+f_033.jpg	0	-
+f_034.jpg	0	-
+f_035.jpg	0	-
+f_036.jpg	0	-
+f_037.jpg	0	-
+f_038.jpg	0	-
+f_039.jpg	0	-
+f_040.jpg	0	-
+
+frames answered   39/40
+with a detection  6/39 (15%)
+detScore range    0.388 – 0.883
+upstream failures 1
+
+[exited with code 0]

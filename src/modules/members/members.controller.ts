@@ -1,0 +1,108 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Patch,
+} from '@nestjs/common';
+import {
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { SpaceMemberRole } from '@prisma/client';
+import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { ErrorCode } from '../../cross/common/constants';
+import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
+import { Roles } from '../../cross/decorators/roles.decorator';
+import { ApiFailures } from '../../cross/errors/api-failures.decorator';
+import { Either } from '../../cross/errors/either';
+import { MemberDto } from './dto/member.dto';
+import { MemberListDto } from './dto/member-list.dto';
+import { UpdateMemberDto } from './dto/update-member.dto';
+import { MembersService } from './members.service';
+
+@ApiTags('members')
+@Controller('members')
+export class MembersController {
+  constructor(private readonly membersService: MembersService) {}
+
+  @RequireMenu('members')
+  @Get()
+  @ApiOperation({
+    summary: 'List the members of the space',
+    description:
+      'Every member of the caller space, inactive ones included — the screen renders ' +
+      'the state as a badge. Each row carries `receiveAlerts`, the per-member alert ' +
+      'opt-in, and `role` always; `menuAccess`/`cameraIds` only for an admin caller.',
+  })
+  @ApiOkResponse({ type: MemberListDto })
+  @ApiFailures({
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the members section, or has an incomplete profile.',
+  })
+  findAll(@CurrentUser() user: JwtPayload): Promise<Either<MemberListDto>> {
+    return this.membersService.findAll(
+      user.spaceId,
+      user.role === SpaceMemberRole.admin,
+    );
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @Patch(':userId')
+  @ApiOperation({
+    summary: 'Update a member: role, menu, cameras, alert opt-in',
+    description:
+      'Admin only. The id is the user id the roster returns. Every field is optional. ' +
+      'An admin cannot change their own role (409); the same role is a no-op.',
+  })
+  @ApiOkResponse({ type: MemberDto, description: 'Member after the update.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, a non-numeric id, or cameraIds outside this space.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'No such member in the caller space.',
+    [ErrorCode.CONFLICT]: 'An admin tried to change their own role.',
+  })
+  update(
+    @CurrentUser() user: JwtPayload,
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() dto: UpdateMemberDto,
+  ): Promise<Either<MemberDto>> {
+    return this.membersService.update(user.spaceId, user.sub, userId, dto);
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @Delete(':userId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Remove a member from the space',
+    description:
+      "Admin only. Clears the user's last space if it pointed here; their next " +
+      'request in this space answers 403.',
+  })
+  @ApiNoContentResponse({ description: 'Member removed. Empty body.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: 'Non-numeric id.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.NOT_FOUND]: 'No such member in the caller space.',
+    [ErrorCode.CONFLICT]: 'An admin tried to remove themselves.',
+  })
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('userId', ParseIntPipe) userId: number,
+  ): Promise<Either<null>> {
+    return this.membersService.remove(user.spaceId, user.sub, userId);
+  }
+}

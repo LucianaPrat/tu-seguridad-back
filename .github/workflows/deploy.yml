@@ -1,0 +1,140 @@
+name: Deploy to EC2 via CodeDeploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'plans/**'
+      - '**.md'
+  workflow_dispatch:
+
+# One deployment at a time against the shared instance; never cancel one mid-flight.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: face-auth-deploy-artifacts
+  DEPLOY_PREFIX: tu-seguridad-prod/
+  CODEDEPLOY_APP: tu-seguridad-prod-deploy
+  CODEDEPLOY_GROUP: tu-seguridad-prod-group
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: main
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      # The schema engine (prisma migrate deploy runs on the EC2) is downloaded at
+      # install time for the listed platforms only, so name the EC2's too.
+      - name: Install dependencies
+        env:
+          PRISMA_CLI_BINARY_TARGETS: debian-openssl-3.0.x,rhel-openssl-3.0.x
+        run: npm ci
+
+      - name: Build
+        run: |
+          npx prisma generate
+          npm run build
+
+      - name: Write version.txt
+        run: echo "v$(jq -r .version package.json)-${GITHUB_RUN_NUMBER}" > version.txt
+
+      # Values come in through env, never interpolated into the script. Unset ones
+      # are skipped: the schema rejects an empty string for optional keys.
+      - name: Write file.env
+        env:
+          NODE_ENV: production
+          # secrets
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          DVR_PASSWORD_ENCRYPTION_KEY: ${{ secrets.DVR_PASSWORD_ENCRYPTION_KEY }}
+          FACE_AUTH_DOMAIN: ${{ secrets.FACE_AUTH_DOMAIN }}
+          FACE_AUTH_CLIENT_TOKEN: ${{ secrets.FACE_AUTH_CLIENT_TOKEN }}
+          METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ASSISTANT_API_TOKEN: ${{ secrets.ASSISTANT_API_TOKEN }}
+          # vars
+          PORT: ${{ vars.PORT }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+          FACE_AUTH_API_URL: ${{ vars.FACE_AUTH_API_URL }}
+          POLLING_ENABLED: ${{ vars.POLLING_ENABLED }}
+          DVR_EVENTS_ENABLED: ${{ vars.DVR_EVENTS_ENABLED }}
+          RETENTION_ENABLED: ${{ vars.RETENTION_ENABLED }}
+          DELIVERY_RETRY_ENABLED: ${{ vars.DELIVERY_RETRY_ENABLED }}
+          MAIL_ENABLED: ${{ vars.MAIL_ENABLED }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USER: ${{ vars.SMTP_USER }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          ASSISTANT_ENABLED: ${{ vars.ASSISTANT_ENABLED }}
+          OTEL_ENABLED: ${{ vars.OTEL_ENABLED }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          OTEL_SERVICE_NAME: ${{ vars.OTEL_SERVICE_NAME }}
+        run: |
+          keys=(NODE_ENV DATABASE_URL JWT_SECRET JWT_REFRESH_SECRET ADMIN_PASSWORD
+            DVR_PASSWORD_ENCRYPTION_KEY FACE_AUTH_DOMAIN FACE_AUTH_CLIENT_TOKEN METRICS_TOKEN
+            SENTRY_DSN SMTP_PASSWORD ASSISTANT_API_TOKEN PORT CORS_ORIGINS APP_BASE_URL
+            LOG_LEVEL ADMIN_EMAIL FACE_AUTH_API_URL POLLING_ENABLED DVR_EVENTS_ENABLED
+            RETENTION_ENABLED DELIVERY_RETRY_ENABLED MAIL_ENABLED SMTP_HOST SMTP_PORT
+            SMTP_USER MAIL_FROM ASSISTANT_ENABLED OTEL_ENABLED OTEL_EXPORTER_OTLP_ENDPOINT
+            OTEL_SERVICE_NAME)
+          for k in "${keys[@]}"; do
+            if [ -n "${!k}" ]; then printf '%s=%s\n' "$k" "${!k}" >> file.env; fi
+          done
+          cut -d= -f1 file.env
+
+      - name: Zip bundle
+        run: |
+          ARTIFACT_NAME="deployment-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID}.zip"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> "$GITHUB_ENV"
+          zip -qr "$ARTIFACT_NAME" . -x '.git/*' '.github/*' 'coverage/*' 'test/*' '.standards/*'
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        run: aws s3 cp "$ARTIFACT_NAME" "s3://${S3_BUCKET}/${DEPLOY_PREFIX}${ARTIFACT_NAME}"
+
+      - name: Deploy and wait
+        run: |
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name "$CODEDEPLOY_APP" \
+            --deployment-group-name "$CODEDEPLOY_GROUP" \
+            --s3-location "bucket=${S3_BUCKET},bundleType=zip,key=${DEPLOY_PREFIX}${ARTIFACT_NAME}" \
+            --query deploymentId --output text)
+          echo "Deployment ID: $DEPLOYMENT_ID"
+          aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID" || {
+            aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+              --query 'deploymentInfo.errorInformation' --output json
+            # The failing hook's own output, so the run log says what broke.
+            for target in $(aws deploy list-deployment-targets --deployment-id "$DEPLOYMENT_ID" \
+              --query 'targetIds' --output text); do
+              aws deploy get-deployment-target --deployment-id "$DEPLOYMENT_ID" --target-id "$target" \
+                --query "deploymentTarget.instanceTarget.lifecycleEvents[?status=='Failed'].[lifecycleEventName,diagnostics.errorCode,diagnostics.scriptName,diagnostics.message,diagnostics.logTail]" \
+                --output text
+            done
+            exit 1
+          }

@@ -1,0 +1,393 @@
+generator client {
+  provider      = "prisma-client-js"
+  // CI builds on Ubuntu (native); the EC2 runs Amazon Linux 2023.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum SpaceMemberRole {
+  admin
+  collaborator
+  guest
+}
+
+enum AuthTokenPurpose {
+  refresh
+  magic_link
+  password_reset
+}
+
+enum CameraStatus {
+  online
+  offline
+}
+
+enum MonitorMode {
+  full
+  partial
+}
+
+enum AlertType {
+  intruder
+  suspicious
+}
+
+enum AlertChannel {
+  call
+  whatsapp
+  email
+}
+
+/// Why a snapshot row exists, when it is not the evidence behind an alert.
+/// Evidence rows and live thumbnails leave it null, so the column is the only
+/// thing that tells an audit copy apart from the frame an operator was shown.
+enum SnapshotReason {
+  /// The recorder reported motion and the detector reported nobody: a labelled
+  /// miss, kept so the upstream's recall can be re-measured on it.
+  ledger_miss
+  /// The untouched capture stored beside an annotated evidence frame when
+  /// `SNAPSHOT_KEEP_RAW` is on.
+  raw_copy
+}
+
+enum EventDeliveryStatus {
+  pending
+  sent
+  failed
+  delivered
+}
+
+/// UI and mail language.
+enum Locale {
+  es
+  en
+}
+
+model User {
+  id               Int       @id @default(autoincrement())
+  email            String    @unique
+  passwordHash     String    @map("password_hash")
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
+  phone            String
+  avatarUrl        String?   @map("avatar_url")
+  isActive         Boolean   @default(true) @map("is_active")
+  lastLoginAt      DateTime? @map("last_login_at")
+  profileCompleted Boolean   @default(false) @map("profile_completed")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  lastSpaceId      String?   @map("last_space_id")
+  locale           Locale    @default(es)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  memberships             SpaceMember[]
+  createdSpaces           Space[]            @relation("SpaceCreator")
+  sentInvitations         Invitation[]       @relation("InvitationInvitedBy")
+  acceptedInvitations     Invitation[]       @relation("InvitationCreatedUser")
+  membershipInvitations   SpaceMember[]      @relation("MembershipInvitedBy")
+  authTokens              AuthToken[]
+  faceIdentities          UserFaceIdentity[]
+  acknowledgedAlertEvents AlertEvent[]       @relation("AlertEventAcknowledgedBy")
+  eventDeliveries         EventDelivery[]    @relation("EventDeliveryRecipient")
+
+  @@map("users")
+}
+
+model Space {
+  id              String   @id @default(uuid())
+  name            String
+  createdByUserId Int      @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  createdBy     User           @relation("SpaceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members       SpaceMember[]
+  invitations   Invitation[]
+  dvr           Dvr?
+  alertRoutings AlertRouting[]
+  alertEvents   AlertEvent[]
+
+  @@index([createdByUserId])
+  @@map("spaces")
+}
+
+model SpaceMember {
+  id              String          @id @default(uuid())
+  spaceId         String          @map("space_id")
+  userId          Int             @map("user_id")
+  role            SpaceMemberRole @default(collaborator)
+  menuAccess      Json            @map("menu_access")
+  cameraIds       Json            @map("camera_ids")
+  receiveAlerts   Boolean         @default(true) @map("receive_alerts")
+  invitedByUserId Int?            @map("invited_by_user_id")
+  joinedAt        DateTime        @default(now()) @map("joined_at")
+
+  space     Space @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  user      User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  invitedBy User? @relation("MembershipInvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([spaceId, userId])
+  @@index([spaceId])
+  @@index([userId])
+  @@map("space_members")
+}
+
+model Invitation {
+  id              String          @id @default(uuid())
+  spaceId         String          @map("space_id")
+  email           String
+  tokenHash       String          @unique @map("token_hash")
+  invitedByUserId Int             @map("invited_by_user_id")
+  expiresAt       DateTime        @map("expires_at")
+  acceptedAt      DateTime?       @map("accepted_at")
+  createdUserId   Int?            @map("created_user_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  role            SpaceMemberRole @default(collaborator)
+  menuAccess      Json?           @map("menu_access")
+  cameraIds       Json?           @map("camera_ids")
+  declinedAt      DateTime?       @map("declined_at")
+  revokedAt       DateTime?       @map("revoked_at")
+  locale          Locale          @default(es)
+
+  space       Space @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  invitedBy   User  @relation("InvitationInvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  createdUser User? @relation("InvitationCreatedUser", fields: [createdUserId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, email])
+  @@map("invitations")
+}
+
+model AuthToken {
+  id            String           @id @default(uuid())
+  userId        Int              @map("user_id")
+  purpose       AuthTokenPurpose
+  tokenHash     String           @unique @map("token_hash")
+  expiresAt     DateTime         @map("expires_at")
+  usedAt        DateTime?        @map("used_at")
+  revokedAt     DateTime?        @map("revoked_at")
+  rotatedFromId String?          @map("rotated_from_id")
+  userAgent     String?          @map("user_agent")
+  ip            String?
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  rotatedFrom   AuthToken?  @relation("AuthTokenRotation", fields: [rotatedFromId], references: [id], onDelete: SetNull)
+  rotatedTokens AuthToken[] @relation("AuthTokenRotation")
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+model UserFaceIdentity {
+  id         String    @id @default(uuid())
+  userId     Int       @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  isActive   Boolean   @default(true) @map("is_active")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, isActive])
+  @@map("user_face_identities")
+}
+
+model Dvr {
+  id                String    @id @default(uuid())
+  spaceId           String    @unique @map("space_id")
+  url               String
+  username          String
+  passwordEncrypted String    @map("password_encrypted") @db.VarChar(512)
+  timezone          String
+  lastTestAt        DateTime? @map("last_test_at")
+  lastTestOk        Boolean?  @map("last_test_ok")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  space   Space    @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  cameras Camera[]
+
+  @@map("dvrs")
+}
+
+model Camera {
+  id                  String       @id @default(uuid())
+  dvrId               String       @map("dvr_id")
+  externalId          String       @map("external_id")
+  name                String
+  location            String?
+  status              CameraStatus @default(offline)
+  isConfigured        Boolean      @default(false) @map("is_configured")
+  isEnabled           Boolean      @default(true) @map("is_enabled")
+  monitorMode         MonitorMode  @default(full) @map("monitor_mode")
+  alertType           AlertType?   @map("alert_type")
+  /// Detection score a person must reach on this camera's frames. Null means
+  /// the global default: a camera pointed at a street and one pointed at a
+  /// hallway need different numbers, and tuning one used to detune the other.
+  confidenceThreshold Decimal?     @map("confidence_threshold") @db.Decimal(4, 3)
+  /// Floor on how often this camera is polled, in seconds. Null means the
+  /// cadence ladder's own rungs decide. Raises the floor only — it can never
+  /// make a camera poll faster than the ladder would.
+  minPollSeconds      Int?         @map("min_poll_seconds")
+  lastSnapshotAt      DateTime?    @map("last_snapshot_at")
+  deletedAt           DateTime?    @map("deleted_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  dvr          Dvr           @relation(fields: [dvrId], references: [id], onDelete: Restrict)
+  monitorZones MonitorZone[]
+  snapshots    Snapshot[]
+  alertEvents  AlertEvent[]
+
+  @@unique([dvrId, externalId])
+  @@index([dvrId, deletedAt])
+  @@map("cameras")
+}
+
+model MonitorZone {
+  id        String    @id @default(uuid())
+  cameraId  String    @map("camera_id")
+  x         Decimal   @db.Decimal(5, 2)
+  y         Decimal   @db.Decimal(5, 2)
+  width     Decimal   @db.Decimal(5, 2)
+  height    Decimal   @db.Decimal(5, 2)
+  /// Free-hand outline as `[{ "x": 12.5, "y": 20 }, ...]`, percent of frame.
+  /// The rectangle columns above are its bounding box. Null on a zone drawn
+  /// before outlines existed, and then the rectangle itself is the shape.
+  points    Json?
+  alertType AlertType @map("alert_type")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  camera      Camera       @relation(fields: [cameraId], references: [id], onDelete: Restrict)
+  alertEvents AlertEvent[]
+
+  @@index([cameraId, deletedAt])
+  @@map("monitor_zones")
+}
+
+model Snapshot {
+  id         String   @id @default(uuid())
+  cameraId   String   @map("camera_id")
+  data       Bytes    @db.MediumBlob
+  mimeType   String   @map("mime_type")
+  byteSize   Int      @map("byte_size")
+  sha256     String
+  capturedAt DateTime @map("captured_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  /// The camera's current frame, overwritten by every successful poll. At most
+  /// one per camera, and never referenced by an alert event: evidence rows are
+  /// immutable, so the live frame cannot be one of them.
+  isLive Boolean @default(false) @map("is_live")
+
+  /// Null on alert evidence and on the live frame. Set on rows kept for audit,
+  /// which are otherwise indistinguishable from evidence: the retention sweep
+  /// filters on age alone, so without this the recall ledger could not be
+  /// listed, exported or given a lifetime of its own.
+  reason SnapshotReason?
+
+  camera      Camera       @relation(fields: [cameraId], references: [id], onDelete: Restrict)
+  alertEvents AlertEvent[]
+
+  @@index([cameraId, capturedAt])
+  @@index([cameraId, isLive])
+  /// The ledger export reads a date range of one reason. Without this it is a
+  /// full scan of the largest table in the schema.
+  @@index([reason, capturedAt])
+  @@map("snapshots")
+}
+
+model AlertRouting {
+  id        String       @id @default(uuid())
+  spaceId   String       @map("space_id")
+  alertType AlertType    @map("alert_type")
+  channel   AlertChannel
+  enabled   Boolean      @default(false)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+
+  @@unique([spaceId, alertType, channel])
+  @@map("alert_routings")
+}
+
+model AlertEvent {
+  id                   String    @id @default(uuid())
+  spaceId              String    @map("space_id")
+  cameraId             String?   @map("camera_id")
+  zoneId               String?   @map("zone_id")
+  cameraLabelSnapshot  String    @map("camera_label_snapshot")
+  alertType            AlertType @map("alert_type")
+  detectedAt           DateTime  @map("detected_at")
+  snapshotId           String?   @map("snapshot_id")
+  /// Anchors inside the area on the frame that raised the alert, and the
+  /// highest detection score among them. Nullable because an alert written
+  /// before these columns existed knows neither: a zero would read as an alert
+  /// that saw nobody, which cannot happen.
+  personsDetected      Int?      @map("persons_detected")
+  confidence           Decimal?  @db.Decimal(4, 3)
+  acknowledgedAt       DateTime? @map("acknowledged_at")
+  acknowledgedByUserId Int?      @map("acknowledged_by_user_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  space          Space           @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  camera         Camera?         @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+  zone           MonitorZone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  snapshot       Snapshot?       @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  acknowledgedBy User?           @relation("AlertEventAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  deliveries     EventDelivery[]
+
+  @@index([spaceId, detectedAt(sort: Desc)])
+  @@index([spaceId, alertType, detectedAt(sort: Desc)])
+  @@map("alert_events")
+}
+
+model EventDelivery {
+  id                String              @id @default(uuid())
+  eventId           String              @map("event_id")
+  channel           AlertChannel
+  recipientUserId   Int                 @map("recipient_user_id")
+  status            EventDeliveryStatus @default(pending)
+  /// Send attempts recorded against this row, incremented by every terminal
+  /// mark. The retry sweep stops looking at a row once it reaches the cap, so
+  /// a relay that will never accept the message costs a bounded number of
+  /// tries rather than one per sweep forever.
+  attempts          Int                 @default(0)
+  correlationId     String              @unique @map("correlation_id")
+  sentAt            DateTime?           @map("sent_at")
+  deliveredAt       DateTime?           @map("delivered_at")
+  providerMessageId String?             @unique @map("provider_message_id")
+  error             String?             @db.Text
+  inboundReceivedAt DateTime?           @map("inbound_received_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  event     AlertEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  recipient User       @relation("EventDeliveryRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+
+  @@index([eventId])
+  @@map("event_deliveries")
+}
+
+model Hit {
+  id         Int      @id @default(autoincrement())
+  method     String
+  route      String
+  statusCode Int      @map("status_code")
+  durationMs Int      @map("duration_ms")
+  userId     Int?     @map("user_id")
+  isError    Boolean  @map("is_error")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("hits")
+}

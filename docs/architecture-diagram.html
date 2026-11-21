@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tu-seguridad-back — Architecture Diagram</title>
+  <!-- Self-contained rendering: system monospace stack, no web-font fetch.
+       The two scripts below are OPTIONAL and power only the PNG/PDF export
+       buttons; the diagram renders fully offline without them. -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header { margin-bottom: 2rem; }
+
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .pulse-dot {
+      width: 12px; height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+
+    .section-title {
+      color: #e2e8f0;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin: 2rem 0 0.75rem 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .section-title span { color: #475569; font-weight: 400; }
+
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    svg { width: 100%; min-width: 900px; display: block; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .card b { color: #cbd5e1; font-weight: 600; }
+
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .toolbar-toggle {
+      background: transparent;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.25rem;
+      line-height: 1;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.375rem;
+      transition: color 0.2s, background 0.2s;
+    }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions { display: none; gap: 0.5rem; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 0.375rem 0.75rem;
+      border-radius: 0.375rem;
+      font-family: inherit;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .toolbar-actions button:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: white;
+      border-color: #475569;
+    }
+
+    @media print {
+      body { background: #020617; padding: 1rem; }
+      .toolbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>tu-seguridad-back — Architecture</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">NestJS 11 · single-tenant video-alert API · Prisma 6 / MySQL 8 · Hikvision ISAPI + face detection upstream</p>
+    </div>
+
+    <div class="section-title">1 · Runtime topology <span>— one process, its actors and its dependencies</span></div>
+
+    <!-- ==================== VIEW 1: RUNTIME TOPOLOGY ==================== -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1000 800">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <marker id="arrow-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" />
+          </marker>
+          <marker id="arrow-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <marker id="arrow-slate" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ===== arrows first, so they sit behind the boxes ===== -->
+
+        <!-- 1 client -> HTTP edge -->
+        <line x1="222" y1="122" x2="296" y2="126" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <text x="259" y="112" fill="#94a3b8" font-size="8" text-anchor="middle">① REST + JWT</text>
+
+        <!-- 5 WS push -> client -->
+        <line x1="298" y1="158" x2="224" y2="155" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrow-cyan)"/>
+        <text x="259" y="175" fill="#94a3b8" font-size="8" text-anchor="middle">⑤ WS push</text>
+
+        <!-- 2 pipeline -> DVR capture -->
+        <path d="M 520 416 L 520 402 L 236 402 L 236 345 L 224 345" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <text x="380" y="396" fill="#94a3b8" font-size="8" text-anchor="middle">② ISAPI capture (digest)</text>
+
+        <!-- 3 pipeline -> face-api -->
+        <path d="M 680 440 L 736 440 L 736 256 L 776 256" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <text x="714" y="434" fill="#94a3b8" font-size="8">③ /detect</text>
+
+        <!-- 4 features -> SMTP -->
+        <path d="M 680 320 L 722 320 L 722 132 L 776 132" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <text x="728" y="205" fill="#94a3b8" font-size="8">④ alert / creds mail</text>
+
+        <!-- 6 accessors -> MySQL -->
+        <path d="M 680 562 L 750 562 L 750 382 L 776 382" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <text x="756" y="470" fill="#94a3b8" font-size="8">⑥ Prisma</text>
+
+        <!-- 7 streaming -> MediaMTX path config -->
+        <path d="M 298 360 L 250 360 L 250 500 L 224 500" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <text x="196" y="462" fill="#94a3b8" font-size="8">⑦ path cfg</text>
+
+        <!-- 8 MediaMTX -> DVR (RTSP pull) -->
+        <line x1="140" y1="468" x2="140" y2="394" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <text x="148" y="434" fill="#94a3b8" font-size="8">⑧ RTSP</text>
+
+        <!-- 9 MediaMTX -> client (HLS) -->
+        <path d="M 100 468 L 30 468 L 30 152 L 56 152" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+        <text x="34" y="300" fill="#94a3b8" font-size="8">⑨ HLS</text>
+
+        <!-- observability egress -->
+        <line x1="340" y1="618" x2="340" y2="670" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrow-rose)"/>
+        <text x="346" y="634" fill="#94a3b8" font-size="8">500s</text>
+        <line x1="500" y1="670" x2="500" y2="620" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrow-amber)"/>
+        <text x="506" y="634" fill="#94a3b8" font-size="8">scrape</text>
+        <line x1="665" y1="618" x2="665" y2="670" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrow-amber)"/>
+        <text x="671" y="634" fill="#94a3b8" font-size="8">OTLP</text>
+        <line x1="736" y1="704" x2="761" y2="704" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+        <!-- ===== boundaries ===== -->
+        <rect x="270" y="60" width="440" height="556" rx="12" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="284" y="80" fill="#fbbf24" font-size="10" font-weight="600">Node process · NestJS 11 · pm2 · :3000</text>
+
+        <rect x="250" y="640" width="690" height="110" rx="12" fill="transparent" stroke="#64748b" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="262" y="660" fill="#94a3b8" font-size="9" font-weight="600">observability</text>
+        <text x="250" y="768" fill="#475569" font-size="8">each one is a clean no-op while its env var is unset — local dev depends on none of them</text>
+
+        <!-- ===== boxes (opaque mask + styled fill) ===== -->
+
+        <!-- A1 client -->
+        <rect x="60" y="95" width="160" height="90" rx="6" fill="#0f172a"/>
+        <rect x="60" y="95" width="160" height="90" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="140" y="120" fill="white" font-size="11" font-weight="600" text-anchor="middle">Web / Mobile app</text>
+        <text x="140" y="140" fill="#94a3b8" font-size="9" text-anchor="middle">REST + Socket.IO</text>
+        <text x="140" y="155" fill="#94a3b8" font-size="9" text-anchor="middle">HLS player</text>
+        <text x="140" y="173" fill="#22d3ee" font-size="7" text-anchor="middle">separate repo (front)</text>
+
+        <!-- A2 DVR -->
+        <rect x="60" y="300" width="160" height="90" rx="6" fill="#0f172a"/>
+        <rect x="60" y="300" width="160" height="90" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="140" y="325" fill="white" font-size="11" font-weight="600" text-anchor="middle">Hikvision DVR</text>
+        <text x="140" y="344" fill="#94a3b8" font-size="9" text-anchor="middle">DVR-208G-M1</text>
+        <text x="140" y="359" fill="#94a3b8" font-size="9" text-anchor="middle">ISAPI :80 · RTSP :554</text>
+        <text x="140" y="377" fill="#94a3b8" font-size="7" text-anchor="middle">1 per space · 8 BNC channels</text>
+
+        <!-- A3 MediaMTX -->
+        <rect x="60" y="470" width="160" height="76" rx="6" fill="#0f172a"/>
+        <rect x="60" y="470" width="160" height="76" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="140" y="494" fill="white" font-size="11" font-weight="600" text-anchor="middle">MediaMTX</text>
+        <text x="140" y="512" fill="#94a3b8" font-size="9" text-anchor="middle">HLS :8888 · API :9997</text>
+        <text x="140" y="530" fill="#fbbf24" font-size="7" text-anchor="middle">pulls only while watched</text>
+
+        <!-- B1 HTTP + WS edge -->
+        <rect x="300" y="100" width="380" height="76" rx="6" fill="#0f172a"/>
+        <rect x="300" y="100" width="380" height="76" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="490" y="123" fill="white" font-size="11" font-weight="600" text-anchor="middle">HTTP + WS edge</text>
+        <text x="490" y="141" fill="#94a3b8" font-size="9" text-anchor="middle">REST /api/v1 (36 routes) · Swagger · helmet · CORS</text>
+        <text x="490" y="157" fill="#94a3b8" font-size="9" text-anchor="middle">Socket.IO gateway /events · throttler</text>
+
+        <!-- B2 guards + interceptors -->
+        <rect x="300" y="200" width="380" height="60" rx="6" fill="#0f172a"/>
+        <rect x="300" y="200" width="380" height="60" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="490" y="223" fill="white" font-size="11" font-weight="600" text-anchor="middle">Guards + interceptors (cross/)</text>
+        <text x="490" y="243" fill="#94a3b8" font-size="9" text-anchor="middle">JwtAuth · Roles · ProfileCompleted · Either · Hit</text>
+
+        <!-- B3 feature modules -->
+        <rect x="300" y="300" width="380" height="76" rx="6" fill="#0f172a"/>
+        <rect x="300" y="300" width="380" height="76" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="490" y="323" fill="white" font-size="11" font-weight="600" text-anchor="middle">Feature modules (14)</text>
+        <text x="490" y="341" fill="#94a3b8" font-size="9" text-anchor="middle">auth · members · invitations · dvr · cameras · zones</text>
+        <text x="490" y="357" fill="#94a3b8" font-size="9" text-anchor="middle">snapshots · streaming · events · alert-routings · health</text>
+
+        <!-- B4 cron -->
+        <rect x="300" y="416" width="185" height="76" rx="6" fill="#0f172a"/>
+        <rect x="300" y="416" width="185" height="76" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="392" y="439" fill="white" font-size="11" font-weight="600" text-anchor="middle">Cron jobs</text>
+        <text x="392" y="457" fill="#94a3b8" font-size="9" text-anchor="middle">retention (nightly)</text>
+        <text x="392" y="472" fill="#94a3b8" font-size="9" text-anchor="middle">delivery retry</text>
+
+        <!-- B5 pipeline -->
+        <rect x="495" y="416" width="185" height="76" rx="6" fill="#0f172a"/>
+        <rect x="495" y="416" width="185" height="76" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="587" y="439" fill="white" font-size="11" font-weight="600" text-anchor="middle">Pipeline (poll loop)</text>
+        <text x="587" y="457" fill="#94a3b8" font-size="9" text-anchor="middle">scheduler · cadence</text>
+        <text x="587" y="472" fill="#94a3b8" font-size="9" text-anchor="middle">occupancy · cooldown</text>
+
+        <!-- B6 accessors -->
+        <rect x="300" y="532" width="380" height="60" rx="6" fill="#0f172a"/>
+        <rect x="300" y="532" width="380" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="490" y="555" fill="white" font-size="11" font-weight="600" text-anchor="middle">Data accessors (15) — the only code that sees Prisma</text>
+        <text x="490" y="575" fill="#94a3b8" font-size="9" text-anchor="middle">every lookup takes spaceId · deletedAt: null written out</text>
+
+        <!-- inner vertical arrows -->
+        <line x1="490" y1="178" x2="490" y2="196" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="490" y1="262" x2="490" y2="296" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="392" y1="378" x2="392" y2="412" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="587" y1="378" x2="587" y2="412" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="392" y1="494" x2="392" y2="528" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+        <line x1="587" y1="494" x2="587" y2="528" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-violet)"/>
+
+        <!-- C1 SMTP -->
+        <rect x="780" y="100" width="180" height="70" rx="6" fill="#0f172a"/>
+        <rect x="780" y="100" width="180" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="870" y="124" fill="white" font-size="11" font-weight="600" text-anchor="middle">SMTP relay</text>
+        <text x="870" y="142" fill="#94a3b8" font-size="9" text-anchor="middle">nodemailer · Gmail</text>
+        <text x="870" y="158" fill="#94a3b8" font-size="7" text-anchor="middle">Mailpit :1025 in dev · frame as cid:</text>
+
+        <!-- C2 face-api -->
+        <rect x="780" y="210" width="180" height="80" rx="6" fill="#0f172a"/>
+        <rect x="780" y="210" width="180" height="80" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="870" y="234" fill="white" font-size="11" font-weight="600" text-anchor="middle">face-api upstream</text>
+        <text x="870" y="252" fill="#94a3b8" font-size="9" text-anchor="middle">POST /detect (multipart)</text>
+        <text x="870" y="267" fill="#94a3b8" font-size="9" text-anchor="middle">session token /authorize</text>
+        <text x="870" y="282" fill="#fb7185" font-size="7" text-anchor="middle">opossum breaker · 1 per process</text>
+
+        <!-- C3 MySQL -->
+        <rect x="780" y="330" width="180" height="90" rx="6" fill="#0f172a"/>
+        <rect x="780" y="330" width="180" height="90" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="870" y="354" fill="white" font-size="11" font-weight="600" text-anchor="middle">MySQL 8</text>
+        <text x="870" y="372" fill="#94a3b8" font-size="9" text-anchor="middle">14 models · 7 enums</text>
+        <text x="870" y="387" fill="#94a3b8" font-size="9" text-anchor="middle">snapshots = MEDIUMBLOB</text>
+        <text x="870" y="405" fill="#a78bfa" font-size="7" text-anchor="middle">docker mysql-local :3306 (dev)</text>
+
+        <!-- E1..E4 observability -->
+        <rect x="270" y="672" width="140" height="64" rx="6" fill="#0f172a"/>
+        <rect x="270" y="672" width="140" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="340" y="696" fill="white" font-size="11" font-weight="600" text-anchor="middle">Sentry</text>
+        <text x="340" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">unexpected 500s only</text>
+        <text x="340" y="728" fill="#94a3b8" font-size="7" text-anchor="middle">SENTRY_DSN</text>
+
+        <rect x="430" y="672" width="140" height="64" rx="6" fill="#0f172a"/>
+        <rect x="430" y="672" width="140" height="64" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="500" y="696" fill="white" font-size="11" font-weight="600" text-anchor="middle">Prometheus</text>
+        <text x="500" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">GET /metrics</text>
+        <text x="500" y="728" fill="#94a3b8" font-size="7" text-anchor="middle">token-guarded</text>
+
+        <rect x="590" y="672" width="145" height="64" rx="6" fill="#0f172a"/>
+        <rect x="590" y="672" width="145" height="64" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="662" y="696" fill="white" font-size="11" font-weight="600" text-anchor="middle">otel-collector</text>
+        <text x="662" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">loopback sidecar</text>
+        <text x="662" y="728" fill="#94a3b8" font-size="7" text-anchor="middle">ops/otel-collector</text>
+
+        <rect x="765" y="672" width="155" height="64" rx="6" fill="#0f172a"/>
+        <rect x="765" y="672" width="155" height="64" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="842" y="696" fill="white" font-size="11" font-weight="600" text-anchor="middle">Grafana Cloud</text>
+        <text x="842" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">Tempo · traces</text>
+        <text x="842" y="728" fill="#94a3b8" font-size="7" text-anchor="middle">only the collector talks to it</text>
+
+        <!-- legend (outside every boundary) -->
+        <text x="40" y="656" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="40" y="668" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="62" y="676" fill="#94a3b8" font-size="8">client</text>
+        <rect x="40" y="684" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="62" y="692" fill="#94a3b8" font-size="8">app code</text>
+        <rect x="40" y="700" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="62" y="708" fill="#94a3b8" font-size="8">data</text>
+        <rect x="40" y="716" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="62" y="724" fill="#94a3b8" font-size="8">infra</text>
+        <rect x="40" y="732" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="62" y="740" fill="#94a3b8" font-size="8">external</text>
+        <line x1="40" y1="754" x2="56" y2="754" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <text x="62" y="757" fill="#94a3b8" font-size="8">async / opt-in</text>
+      </svg>
+    </div>
+
+    <div class="section-title">2 · Module dependency graph <span>— Nest imports only; arrow means "imports". Size = lines of non-test code.</span></div>
+
+    <!-- ==================== VIEW 2: MODULE GRAPH ==================== -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1000 800">
+        <defs>
+          <marker id="dep-arrow" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 9 3, 0 6" fill="#34d399" />
+          </marker>
+          <marker id="dep-arrow-slate" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 9 3, 0 6" fill="#94a3b8" />
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ===== dependency edges first ===== -->
+        <g stroke="#34d399" stroke-width="1.2" fill="none" opacity="0.85" marker-end="url(#dep-arrow)">
+          <!-- cameras -> streaming -->
+          <line x1="75" y1="134" x2="75" y2="206"/>
+          <!-- cameras -> pipeline -->
+          <line x1="185" y1="132" x2="272" y2="206"/>
+          <!-- cameras -> snapshots (skips row 2 on the left gutter) -->
+          <path d="M 55 134 L 55 155 L 20 155 L 20 330 L 85 330 L 85 346"/>
+          <!-- zones -> pipeline -->
+          <line x1="345" y1="134" x2="345" y2="206"/>
+          <!-- retention -> events -->
+          <line x1="530" y1="134" x2="530" y2="346"/>
+          <!-- pipeline -> face-auth-client -->
+          <line x1="290" y1="274" x2="290" y2="346"/>
+          <!-- pipeline -> snapshots -->
+          <line x1="250" y1="274" x2="152" y2="346"/>
+          <!-- pipeline -> events -->
+          <line x1="360" y1="274" x2="462" y2="346"/>
+          <!-- snapshots -> dvr -->
+          <line x1="85" y1="414" x2="85" y2="486"/>
+          <!-- streaming -> dvr -->
+          <path d="M 190 235 L 205 235 L 205 462 L 120 462 L 120 486"/>
+          <!-- streaming -> auth -->
+          <path d="M 190 255 L 220 255 L 220 472 L 480 472 L 480 486"/>
+          <!-- events -> auth -->
+          <line x1="495" y1="414" x2="495" y2="486"/>
+          <!-- invitations -> auth -->
+          <path d="M 685 134 L 685 465 L 540 465 L 540 486"/>
+        </g>
+
+        <!-- ===== row 1 : nothing imports these ===== -->
+        <text x="40" y="56" fill="#475569" font-size="8">imported by AppModule only</text>
+
+        <rect x="40" y="70" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="40" y="70" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="115" y="92" fill="white" font-size="11" font-weight="600" text-anchor="middle">cameras</text>
+        <text x="115" y="110" fill="#94a3b8" font-size="9" text-anchor="middle">929 loc · 9 files</text>
+        <text x="115" y="125" fill="#94a3b8" font-size="8" text-anchor="middle">CRUD + live thumbnails</text>
+
+        <rect x="230" y="70" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="230" y="70" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="305" y="92" fill="white" font-size="11" font-weight="600" text-anchor="middle">zones</text>
+        <text x="305" y="110" fill="#94a3b8" font-size="9" text-anchor="middle">840 loc · 10 files</text>
+        <text x="305" y="125" fill="#94a3b8" font-size="8" text-anchor="middle">% rectangles + bounds</text>
+
+        <rect x="420" y="70" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="420" y="70" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="495" y="92" fill="white" font-size="11" font-weight="600" text-anchor="middle">retention</text>
+        <text x="495" y="110" fill="#94a3b8" font-size="9" text-anchor="middle">243 loc · 3 files</text>
+        <text x="495" y="125" fill="#94a3b8" font-size="8" text-anchor="middle">nightly sweeps + retry</text>
+
+        <rect x="610" y="70" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="610" y="70" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="685" y="92" fill="white" font-size="11" font-weight="600" text-anchor="middle">invitations</text>
+        <text x="685" y="110" fill="#94a3b8" font-size="9" text-anchor="middle">405 loc · 7 files</text>
+        <text x="685" y="125" fill="#94a3b8" font-size="8" text-anchor="middle">one-time token flow</text>
+
+        <!-- leaf cluster: no module imports at all -->
+        <rect x="790" y="70" width="170" height="120" rx="6" fill="#0f172a"/>
+        <rect x="790" y="70" width="170" height="120" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="875" y="92" fill="white" font-size="11" font-weight="600" text-anchor="middle">leaf modules</text>
+        <text x="875" y="108" fill="#94a3b8" font-size="8" text-anchor="middle">no module deps at all</text>
+        <text x="875" y="128" fill="#94a3b8" font-size="9" text-anchor="middle">members · 202 loc</text>
+        <text x="875" y="144" fill="#94a3b8" font-size="9" text-anchor="middle">alert-routings · 160 loc</text>
+        <text x="875" y="160" fill="#94a3b8" font-size="9" text-anchor="middle">health · 164 loc</text>
+        <text x="875" y="178" fill="#94a3b8" font-size="7" text-anchor="middle">health pulls Terminus + Http</text>
+
+        <!-- ===== row 2 ===== -->
+        <rect x="40" y="210" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="40" y="210" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="115" y="232" fill="white" font-size="11" font-weight="600" text-anchor="middle">streaming</text>
+        <text x="115" y="250" fill="#94a3b8" font-size="9" text-anchor="middle">583 loc · 7 files</text>
+        <text x="115" y="265" fill="#94a3b8" font-size="8" text-anchor="middle">MediaMTX publisher port</text>
+
+        <rect x="230" y="210" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="230" y="210" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="305" y="232" fill="white" font-size="11" font-weight="600" text-anchor="middle">pipeline</text>
+        <text x="305" y="250" fill="#94a3b8" font-size="9" text-anchor="middle">1213 loc · 9 files</text>
+        <text x="305" y="265" fill="#94a3b8" font-size="8" text-anchor="middle">poll · occupancy · cadence</text>
+
+        <!-- ===== row 3 ===== -->
+        <rect x="40" y="350" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="40" y="350" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="115" y="372" fill="white" font-size="11" font-weight="600" text-anchor="middle">snapshots</text>
+        <text x="115" y="390" fill="#94a3b8" font-size="9" text-anchor="middle">329 loc · 5 files</text>
+        <text x="115" y="405" fill="#94a3b8" font-size="8" text-anchor="middle">live + evidence frames</text>
+
+        <rect x="230" y="350" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="230" y="350" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="305" y="372" fill="white" font-size="11" font-weight="600" text-anchor="middle">face-auth-client</text>
+        <text x="305" y="390" fill="#94a3b8" font-size="9" text-anchor="middle">291 loc · 3 files</text>
+        <text x="305" y="405" fill="#94a3b8" font-size="8" text-anchor="middle">breaker + session token</text>
+
+        <rect x="420" y="350" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="420" y="350" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="495" y="372" fill="white" font-size="11" font-weight="600" text-anchor="middle">events</text>
+        <text x="495" y="390" fill="#94a3b8" font-size="9" text-anchor="middle">1455 loc · 13 files</text>
+        <text x="495" y="405" fill="#94a3b8" font-size="8" text-anchor="middle">gateway · mail · ack HMAC</text>
+
+        <!-- ===== row 4 ===== -->
+        <rect x="40" y="490" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="40" y="490" width="150" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="115" y="512" fill="white" font-size="11" font-weight="600" text-anchor="middle">dvr</text>
+        <text x="115" y="530" fill="#94a3b8" font-size="9" text-anchor="middle">1063 loc · 10 files</text>
+        <text x="115" y="545" fill="#94a3b8" font-size="8" text-anchor="middle">Hikvision ISAPI client</text>
+
+        <rect x="420" y="490" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="420" y="490" width="150" height="64" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="495" y="512" fill="white" font-size="11" font-weight="600" text-anchor="middle">auth</text>
+        <text x="495" y="530" fill="#94a3b8" font-size="9" text-anchor="middle">1663 loc · 25 files</text>
+        <text x="495" y="545" fill="#94a3b8" font-size="8" text-anchor="middle">JWT · guards · recovery</text>
+
+        <text x="610" y="516" fill="#475569" font-size="8">biggest module, and the one</text>
+        <text x="610" y="528" fill="#475569" font-size="8">three others import for its guards</text>
+
+        <!-- ===== globals band ===== -->
+        <rect x="25" y="600" width="935" height="130" rx="12" fill="rgba(167, 139, 250, 0.04)" stroke="#a78bfa" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="40" y="622" fill="#a78bfa" font-size="10" font-weight="600">@Global — reachable from every module above with no import line</text>
+
+        <rect x="45" y="636" width="220" height="80" rx="6" fill="#0f172a"/>
+        <rect x="45" y="636" width="220" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="155" y="659" fill="white" font-size="11" font-weight="600" text-anchor="middle">DataModule</text>
+        <text x="155" y="677" fill="#94a3b8" font-size="9" text-anchor="middle">1746 loc · 15 accessors</text>
+        <text x="155" y="692" fill="#94a3b8" font-size="9" text-anchor="middle">+ PrismaService + crypto</text>
+        <text x="155" y="708" fill="#a78bfa" font-size="7" text-anchor="middle">grep PrismaService in modules/ = empty</text>
+
+        <rect x="290" y="636" width="150" height="80" rx="6" fill="#0f172a"/>
+        <rect x="290" y="636" width="150" height="80" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="365" y="659" fill="white" font-size="11" font-weight="600" text-anchor="middle">MailModule</text>
+        <text x="365" y="677" fill="#94a3b8" font-size="9" text-anchor="middle">83 loc · 1 transport</text>
+        <text x="365" y="694" fill="#94a3b8" font-size="8" text-anchor="middle">auth + events send</text>
+
+        <rect x="465" y="636" width="150" height="80" rx="6" fill="#0f172a"/>
+        <rect x="465" y="636" width="150" height="80" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="540" y="659" fill="white" font-size="11" font-weight="600" text-anchor="middle">MetricsModule</text>
+        <text x="540" y="677" fill="#94a3b8" font-size="9" text-anchor="middle">215 loc · prom-client</text>
+        <text x="540" y="694" fill="#94a3b8" font-size="8" text-anchor="middle">counters + histograms</text>
+
+        <rect x="640" y="636" width="200" height="80" rx="6" fill="#0f172a"/>
+        <rect x="640" y="636" width="200" height="80" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="740" y="659" fill="white" font-size="11" font-weight="600" text-anchor="middle">CameraStatusModule</text>
+        <text x="740" y="677" fill="#94a3b8" font-size="9" text-anchor="middle">in-memory registry</text>
+        <text x="740" y="694" fill="#94a3b8" font-size="8" text-anchor="middle">last poll result per camera</text>
+
+        <!-- legend -->
+        <text x="40" y="758" fill="white" font-size="10" font-weight="600">Legend</text>
+        <line x1="100" y1="754" x2="130" y2="754" stroke="#34d399" stroke-width="1.2" marker-end="url(#dep-arrow)"/>
+        <text x="140" y="757" fill="#94a3b8" font-size="8">imports (compile-time Nest dep)</text>
+        <rect x="360" y="748" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="382" y="757" fill="#94a3b8" font-size="8">security</text>
+        <rect x="450" y="748" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="472" y="757" fill="#94a3b8" font-size="8">data</text>
+        <text x="530" y="757" fill="#475569" font-size="8">rows are dependency layers: everything above depends downward, never up (the graph is acyclic)</text>
+      </svg>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Módulos por tamaño</h3>
+        </div>
+        <ul>
+          <li>• <b>auth</b> 1663 loc / 25 files</li>
+          <li>• <b>events</b> 1455 / 13 — gateway + mail + ack</li>
+          <li>• <b>pipeline</b> 1213 / 9 — el poll loop</li>
+          <li>• <b>dvr</b> 1063 / 10 — ISAPI</li>
+          <li>• <b>cameras</b> 929 · <b>zones</b> 840</li>
+          <li>• <b>data/</b> 1746 / 15 accessors + Prisma</li>
+          <li>• total src sin tests: ~13.4k loc</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>Dependencias externas</h3>
+        </div>
+        <ul>
+          <li>• 41 prod / 35 dev en package.json</li>
+          <li>• <b>@nestjs/*</b> 11 — core, jwt, swagger, terminus, throttler, schedule, websockets, axios</li>
+          <li>• <b>prisma</b> 6 + <b>@prisma/client</b> — MySQL</li>
+          <li>• <b>socket.io</b> 4 · <b>sharp</b> (bboxes quemados en el frame)</li>
+          <li>• <b>opossum</b> breaker · <b>axios</b> · <b>form-data</b></li>
+          <li>• <b>nodemailer</b> · <b>bcrypt</b> · <b>joi</b> · <b>helmet</b></li>
+          <li>• <b>otel sdk-node</b> + <b>@sentry/node</b> + <b>prom-client</b></li>
+          <li>• logs: <b>nestjs-pino</b> / pino-http</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>Reglas de capa (invariantes)</h3>
+        </div>
+        <ul>
+          <li>• services nunca tocan Prisma: solo accessors</li>
+          <li>• todo lookup lleva <b>spaceId</b>; fila de otro space = 404, no 403</li>
+          <li>• borrado lógico: <b>deletedAt: null</b> escrito en cada read</li>
+          <li>• errores como <b>Either&lt;T&gt;</b> + EitherInterceptor; Sentry solo en la rama 500</li>
+          <li>• solo 2 archivos leen process.env</li>
+          <li>• cada integración externa detrás de un port (DvrClientPort, StreamPublisherPort, CredentialDeliveryPort)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Números del repo</h3>
+        </div>
+        <ul>
+          <li>• 14 feature modules + 4 globals</li>
+          <li>• 15 controllers · 36 rutas <b>/api/v1</b></li>
+          <li>• 14 models Prisma · 7 enums</li>
+          <li>• 74 spec files en 3 capas: unit / int (DB real) / e2e</li>
+          <li>• <b>openapi.json</b> commiteado; CI falla si driftea</li>
+          <li>• arranque: tracing → Sentry → Nest → shutdown hooks ordenados</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">
+      tu-seguridad-back · branch develop @ f81380d · dibujado con la skill architecture-diagram · 2026-09-02
+    </p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'tu-seguridad-back-architecture.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('tu-seguridad-back-architecture.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>
