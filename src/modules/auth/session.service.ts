@@ -159,6 +159,11 @@ export class SessionService {
     });
   }
 
+  /** Ends every session the account holds, on every device. */
+  async revokeAll(userId: number): Promise<void> {
+    await this.authTokenAccessor.revokeAllByUserAndPurpose(userId, 'refresh');
+  }
+
   /** Logout. Unknown or already-revoked tokens are a no-op, never an error. */
   async revoke(refreshToken: string): Promise<void> {
     await this.authTokenAccessor.revoke('refresh', refreshToken);

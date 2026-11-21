@@ -12,6 +12,7 @@ import { InvitationAccessorService } from '../../data/accessors/invitation.acces
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { SpaceAccessorService } from '../../data/accessors/space.accessor';
 import { UserAccessorService } from '../../data/accessors/user.accessor';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { MeDto } from './dto/me.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -207,8 +208,58 @@ export class AuthService {
     if (!user?.isActive) {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
-    await this.userAccessor.setLocale(user.id, dto.locale);
+    const { locale, firstName, lastName, phone } = dto;
+    if ([locale, firstName, lastName, phone].some((v) => v !== undefined)) {
+      await this.userAccessor.updateProfile(user.id, {
+        locale,
+        firstName,
+        lastName,
+        phone,
+      });
+    }
     return this.me(claims);
+  }
+
+  /**
+   * A wrong current password is VALIDATION_ERROR, not UNAUTHORIZED: clients treat
+   * 401 as an expired session. Every refresh token is revoked and a fresh session
+   * is issued, so the calling device stays signed in and all others die.
+   */
+  async changePassword(
+    claims: AccessTokenClaims,
+    dto: ChangePasswordDto,
+    context: SessionContext,
+  ): Promise<Either<TokenPairDto>> {
+    const user = await this.userAccessor.findById(claims.sub);
+    if (!user?.isActive) {
+      return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
+    }
+    if (
+      !(await this.passwordHash.verify(dto.currentPassword, user.passwordHash))
+    ) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'Current password is incorrect',
+      );
+    }
+    if (dto.newPassword === dto.currentPassword) {
+      return buildError(
+        ErrorCode.VALIDATION_ERROR,
+        'New password must differ from the current one',
+      );
+    }
+    const updated = await this.userAccessor.updatePassword(
+      user.id,
+      await this.passwordHash.hash(dto.newPassword),
+    );
+    await this.sessionService.revokeAll(user.id);
+    const member = claims.spaceId
+      ? await this.spaceMemberAccessor.findBySpaceAndUser(
+          claims.spaceId,
+          user.id,
+        )
+      : null;
+    return buildData(await this.sessionService.issue(updated, member, context));
   }
 
   async me(claims: AccessTokenClaims): Promise<Either<MeDto>> {

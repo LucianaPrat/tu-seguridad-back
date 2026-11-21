@@ -550,7 +550,7 @@
         ]
       },
       "patch": {
-        "description": "Only the language (`locale`) can be changed for now. Returns the same body as `GET /auth/me`.",
+        "description": "Partial update: send any of `locale`, `firstName`, `lastName`, `phone` (E.164). Omitted fields are left untouched and an empty body is a no-op. Email cannot be changed. Returns the same body as `GET /auth/me`.",
         "operationId": "AuthController_updateMe_v1",
         "parameters": [],
         "requestBody": {
@@ -575,7 +575,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_ERROR` — Unknown locale.",
+            "description": "`VALIDATION_ERROR` — Unknown locale, empty name or malformed phone.",
             "content": {
               "application/json": {
                 "schema": {
@@ -729,6 +729,87 @@
           }
         },
         "summary": "Switch the session to another space",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "description": "Requires the current password. Revokes every refresh token the account holds and re-issues the session for this device: a new access token in the body and the refresh cookie replaced, so every other device is signed out. A wrong current password answers 400 (not 401), so clients do not mistake it for an expired session.",
+        "operationId": "AuthController_changePassword_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, wrong current password, or new password equal to the current one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Change the password",
         "tags": [
           "auth"
         ]
@@ -7385,11 +7466,21 @@
               "es",
               "en"
             ]
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164"
           }
-        },
-        "required": [
-          "locale"
-        ]
+        }
       },
       "SwitchSpaceDto": {
         "type": "object",
@@ -7401,6 +7492,22 @@
         },
         "required": [
           "spaceId"
+        ]
+      },
+      "ChangePasswordDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 12
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
         ]
       },
       "CompleteProfileDto": {

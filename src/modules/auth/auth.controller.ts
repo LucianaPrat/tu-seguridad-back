@@ -32,6 +32,7 @@ import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { buildError, Either } from '../../cross/errors/either';
 import { AuthService } from './auth.service';
 import { AccessTokenDto } from './dto/access-token.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { LoginDto } from './dto/login.dto';
 import { MeDto } from './dto/me.dto';
@@ -217,11 +218,14 @@ export class AuthController {
   @ApiOperation({
     summary: 'Update the current user',
     description:
-      'Only the language (`locale`) can be changed for now. Returns the same body as `GET /auth/me`.',
+      'Partial update: send any of `locale`, `firstName`, `lastName`, `phone` (E.164). Omitted ' +
+      'fields are left untouched and an empty body is a no-op. Email cannot be changed. ' +
+      'Returns the same body as `GET /auth/me`.',
   })
   @ApiOkResponse({ type: MeDto, description: 'Updated account.' })
   @ApiFailures({
-    [ErrorCode.VALIDATION_ERROR]: 'Unknown locale.',
+    [ErrorCode.VALIDATION_ERROR]:
+      'Unknown locale, empty name or malformed phone.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
   })
   updateMe(
@@ -258,6 +262,38 @@ export class AuthController {
       req,
       res,
       await this.authService.switchSpace(claims, dto.spaceId, context),
+    );
+  }
+
+  @AllowNoSpace()
+  @CredentialThrottle()
+  @HttpCode(HttpStatus.OK)
+  @Post('password')
+  @ApiOperation({
+    summary: 'Change the password',
+    description:
+      'Requires the current password. Revokes every refresh token the account holds and ' +
+      're-issues the session for this device: a new access token in the body and the refresh ' +
+      'cookie replaced, so every other device is signed out. A wrong current password answers ' +
+      '400 (not 401), so clients do not mistake it for an expired session.',
+  })
+  @ApiOkResponse({ type: AccessTokenDto, description: 'Password changed.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, wrong current password, or new password equal to the current one.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+  })
+  async changePassword(
+    @CurrentClaims() claims: AccessTokenClaims,
+    @Body() dto: ChangePasswordDto,
+    @RequestSessionContext() context: SessionContext,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Either<AccessTokenDto>> {
+    return this.refreshCookie.replaceSession(
+      req,
+      res,
+      await this.authService.changePassword(claims, dto, context),
     );
   }
 

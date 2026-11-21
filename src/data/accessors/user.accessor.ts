@@ -10,6 +10,13 @@ export interface ProfileCompletionFields {
   passwordHash: string;
 }
 
+export interface EditableProfileFields {
+  locale?: Locale;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}
+
 @Injectable()
 export class UserAccessorService {
   constructor(private readonly prisma: PrismaService) {}
@@ -30,8 +37,9 @@ export class UserAccessorService {
     return this.prisma.user.update({ where: { id }, data: { passwordHash } });
   }
 
-  setLocale(id: number, locale: Locale): Promise<User> {
-    return this.prisma.user.update({ where: { id }, data: { locale } });
+  /** Only the keys present are written; `undefined` leaves a column alone. */
+  updateProfile(id: number, fields: EditableProfileFields): Promise<User> {
+    return this.prisma.user.update({ where: { id }, data: fields });
   }
 
   completeProfile(id: number, fields: ProfileCompletionFields): Promise<User> {
