@@ -3,9 +3,9 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     target-branch: develop
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     groups:
       minor-and-patch:
         update-types:
