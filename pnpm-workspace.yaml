@@ -1,0 +1,9 @@
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@scarf/scarf'
+  - bcrypt
+  - prisma
+  - protobufjs
+  - unrs-resolver
