@@ -33,22 +33,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Before setup-node: its pnpm cache needs the binary. Version comes from
+      # package.json `packageManager`.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
+          cache: 'pnpm'
 
       # The schema engine (prisma migrate deploy runs on the EC2) is downloaded at
       # install time for the listed platforms only, so name the EC2's too.
       - name: Install dependencies
         env:
           PRISMA_CLI_BINARY_TARGETS: debian-openssl-3.0.x,rhel-openssl-3.0.x
-        run: npm ci
+        # Hoisted: a flat node_modules like npm's, so the zipped bundle carries no
+        # .pnpm store symlinks and after_install.sh finds node_modules/prisma.
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted
 
       - name: Build
         run: |
-          npx prisma generate
-          npm run build
+          pnpm exec prisma generate
+          pnpm run build
 
       - name: Write version.txt
         run: echo "v$(jq -r .version package.json)-${GITHUB_RUN_NUMBER}" > version.txt
