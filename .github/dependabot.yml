@@ -3,9 +3,14 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     target-branch: develop
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    # Majors break APIs (Prisma 7, @nestjs/config 12) and get migrated by hand.
+    # Security updates still arrive whatever the version jump.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types:
