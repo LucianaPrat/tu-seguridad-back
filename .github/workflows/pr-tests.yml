@@ -65,6 +65,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Explicit: with a warm pnpm store @prisma/client's postinstall does not run,
+      # and lint/typecheck then see an ungenerated client.
+      - run: pnpm exec prisma generate
+
       - run: pnpm run format:check
 
       - run: pnpm run lint
