@@ -103,7 +103,11 @@ describe('SmtpCredentialDeliveryService', () => {
       expect(message.subject).toBe(subject);
       const link = `http://localhost:5173${path}?token=${TOKEN}`;
       expect(message.text).toContain(link);
-      expect(message.html).toContain(`<a href="${link}">${button}</a>`);
+      expect(message.html).toMatch(
+        new RegExp(
+          `<a href="${link.replace(/[?]/g, '\\?')}"[^>]*>${button}</a>`,
+        ),
+      );
       expect(message.text).toContain('2026-08-25T00:00:00.000Z');
     },
   );
@@ -128,7 +132,11 @@ describe('SmtpCredentialDeliveryService', () => {
       expect(message.text).toContain('Rol: Colaborador');
       expect(message.text).toContain(`Ver invitación: ${link}`);
       expect(message.text).toContain('vence el 25/08/2026');
-      expect(message.html).toContain(`<a href="${link}">Ver invitación</a>`);
+      expect(message.html).toMatch(
+        new RegExp(
+          `<a href="${link.replace(/[?]/g, '\\?')}"[^>]*>Ver invitación</a>`,
+        ),
+      );
       expect(message.html).toContain('vence el 25/08/2026');
     });
 
@@ -149,7 +157,11 @@ describe('SmtpCredentialDeliveryService', () => {
       expect(message.text).toContain('Role: Administrator');
       expect(message.text).toContain(`View invitation: ${link}`);
       expect(message.text).toContain('Expires on 08/25/2026');
-      expect(message.html).toContain(`<a href="${link}">View invitation</a>`);
+      expect(message.html).toMatch(
+        new RegExp(
+          `<a href="${link.replace(/[?]/g, '\\?')}"[^>]*>View invitation</a>`,
+        ),
+      );
     });
 
     it('escapes the names in the HTML body', async () => {

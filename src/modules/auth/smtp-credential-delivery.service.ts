@@ -105,6 +105,47 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+/**
+ * Branded shell shared by every credential mail, using the frontend's tokens
+ * (`tu-seguridad-front/src/index.css`). Table layout + inline styles because
+ * mail clients ignore `<style>` blocks and flexbox; no SVG logo (Gmail strips it).
+ */
+function emailLayout(parts: {
+  locale: Locale;
+  heading: string;
+  body: string;
+  button: string;
+  href: string;
+  footnote: string;
+}): string {
+  const font =
+    "Inter,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  return `<!doctype html><html lang="${parts.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f7f6;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f6;font-family:${font};">
+<tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+<tr><td style="padding:0 0 16px 4px;">
+<span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:7px;background:#1a6b61;color:#ffffff;font-size:15px;font-weight:700;text-align:center;vertical-align:middle;">&#9673;</span>
+<span style="font-size:17px;font-weight:700;color:#0d4f47;vertical-align:middle;padding-left:8px;">Tu Seguridad</span>
+</td></tr>
+<tr><td style="background:#ffffff;border:1px solid #e8eeed;border-radius:12px;padding:32px;">
+<h1 style="margin:0 0 16px;font-size:20px;line-height:28px;font-weight:600;color:#111827;">${parts.heading}</h1>
+${parts.body}
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:#1a6b61;">
+<a href="${parts.href}" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${parts.button}</a>
+</td></tr></table>
+<p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">${parts.footnote}</p>
+</td></tr>
+<tr><td style="padding:16px 4px 0;font-size:12px;line-height:18px;color:#9ca3af;word-break:break-all;">${parts.href}</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+}
+
+const P = 'margin:0 0 12px;font-size:15px;line-height:24px;color:#374151;';
+
 // UTC on purpose: the mail is rendered once for a recipient whose timezone is unknown.
 function formatDate(date: Date, locale: Locale): string {
   const [year, month, day] = date.toISOString().slice(0, 10).split('-');
@@ -194,7 +235,14 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
     return {
       subject: copy.subject,
       text: `${copy.subject}\n\n${href}\n\n${expiry}`,
-      html: `<p>${copy.subject}</p><p><a href="${href}">${copy.button}</a></p><p>${expiry}</p>`,
+      html: emailLayout({
+        locale: delivery.locale,
+        heading: copy.subject,
+        body: '',
+        button: copy.button,
+        href,
+        footnote: expiry,
+      }),
     };
   }
 
@@ -214,7 +262,15 @@ export class SmtpCredentialDeliveryService implements CredentialDeliveryPort {
     return {
       subject: copy.subject(inviterName, spaceName),
       text: `${copy.intro(inviterName, spaceName)}\n\n${copy.role}: ${role}\n\n${copy.button}: ${href}\n\n${expiry}`,
-      html: `<p>${copy.intro(`<strong>${safeInviter}</strong>`, `<strong>${safeSpace}</strong>`)}</p><p>${copy.role}: ${role}</p><p><a href="${href}">${copy.button}</a></p><p>${expiry}</p>`,
+      html: emailLayout({
+        locale,
+        heading: safeSpace,
+        body: `<p style="${P}">${copy.intro(`<strong style="color:#111827;">${safeInviter}</strong>`, `<strong style="color:#111827;">${safeSpace}</strong>`)}</p>
+<p style="${P}">${copy.role}: <span style="display:inline-block;padding:2px 10px;border-radius:999px;background:#e6f4f2;color:#0d4f47;font-size:13px;font-weight:600;">${role}</span></p>`,
+        button: copy.button,
+        href,
+        footnote: expiry,
+      }),
     };
   }
 }
