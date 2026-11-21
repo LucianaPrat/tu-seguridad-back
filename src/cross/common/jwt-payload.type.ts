@@ -1,9 +1,12 @@
 import type { SpaceMemberRole } from '@prisma/client';
+import type { MenuKey } from './permissions';
 
 /**
- * Access-token claims. `spaceId` and `role` come from the caller's single
- * `space_members` row, resolved once at sign time, so a request never has to
- * derive its tenant from a resource id.
+ * What a token carries. `spaceId` is the space the session is currently in, or
+ * `null` for an account that belongs to none yet. Role and permissions are
+ * deliberately absent: they are read from `space_members` on every request by
+ * `SpaceMemberGuard`, so a role change or a removal applies immediately instead
+ * of at the next token.
  *
  * `profileCompleted` is a claim rather than a per-request database read: it
  * gates every route except profile completion itself, and completing the
@@ -11,12 +14,27 @@ import type { SpaceMemberRole } from '@prisma/client';
  * `JWT_EXPIRES_IN`, which is also true of `isActive` — deactivation takes
  * effect at the next login or refresh.
  */
+export interface AccessTokenClaims {
+  sub: number;
+  email: string;
+  spaceId: string | null;
+  profileCompleted: boolean;
+}
+
+/**
+ * The request principal for a space-scoped route: the token's claims plus the
+ * caller's membership as it is in the database right now. Built by
+ * `SpaceMemberGuard`, never signed into a token.
+ */
 export interface JwtPayload {
   sub: number;
   email: string;
   spaceId: string;
   role: SpaceMemberRole;
   profileCompleted: boolean;
+  menuAccess: MenuKey[];
+  cameraIds: string[];
+  receiveAlerts: boolean;
 }
 
 /**
@@ -25,7 +43,7 @@ export interface JwtPayload {
  * identical payload — same string, same hash — and the rotation write dies on
  * the `auth_tokens.token_hash` unique constraint.
  */
-export interface RefreshJwtPayload extends JwtPayload {
+export interface RefreshJwtPayload extends AccessTokenClaims {
   type: 'refresh';
   jti: string;
 }

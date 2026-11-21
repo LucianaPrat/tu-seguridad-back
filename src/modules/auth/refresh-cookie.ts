@@ -1,4 +1,4 @@
-import { CookieOptions } from 'express';
+import { CookieOptions, Request } from 'express';
 
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
@@ -29,4 +29,9 @@ export function buildRefreshCookieOptions(
     path: REFRESH_COOKIE_PATH,
     maxAge: maxAgeMs,
   };
+}
+
+export function readRefreshCookie(req: Request): string | undefined {
+  const cookies = req.cookies as Record<string, string | undefined> | undefined;
+  return cookies?.[REFRESH_COOKIE_NAME];
 }

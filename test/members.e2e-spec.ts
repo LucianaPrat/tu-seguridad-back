@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { DEFAULT_MENU_ACCESS } from '../src/cross/common/permissions';
 import { authAs, loginAs } from './utils/auth-as';
 import {
   bootstrapE2eApp,
@@ -21,6 +22,7 @@ interface MemberBody {
   profileCompleted: boolean;
   lastLoginAt: string | null;
   receiveAlerts: boolean;
+  role: string;
 }
 
 interface MemberListBody {
@@ -116,11 +118,12 @@ describe('Members (e2e)', () => {
     expect(body.items.map((row) => row.id)).not.toContain(other.userId);
   });
 
-  it('answers a plain member too — the roster is not admin-only', async () => {
+  it('answers a member holding the members section, without permissions', async () => {
     const member = await seedMember(
       ctx.prisma,
       admin.spaceId,
       'plain@example.com',
+      { menuAccess: [...DEFAULT_MENU_ACCESS.collaborator, 'members'] },
     );
     const memberToken = await loginAs(
       ctx.httpServer,
@@ -131,14 +134,16 @@ describe('Members (e2e)', () => {
     const res = await listMembers(memberToken);
 
     expect(res.status).toBe(200);
-    expect(typedBody<MemberListBody>(res).total).toBe(2);
+    const body = typedBody<MemberListBody>(res);
+    expect(body.total).toBe(2);
+    expect(body.items[0]).not.toHaveProperty('menuAccess');
   });
 
   it('lists pending invitations for an admin, without the token', async () => {
     await request(ctx.httpServer)
       .post('/api/v1/invitations')
       .set(auth())
-      .send({ email: 'invited@example.com' })
+      .send({ email: 'invited@example.com', role: 'collaborator' })
       .expect(201);
 
     const res = await request(ctx.httpServer)
@@ -149,7 +154,10 @@ describe('Members (e2e)', () => {
     expect(res.status).toBe(200);
     const body = typedBody<InvitationListBody>(res);
     expect(body.total).toBe(1);
-    expect(body.items[0]).toMatchObject({ email: 'invited@example.com' });
+    expect(body.items[0]).toMatchObject({
+      email: 'invited@example.com',
+      role: 'collaborator',
+    });
     expect(JSON.stringify(body)).not.toContain('token');
   });
 

@@ -4,9 +4,15 @@ import { JwtService } from '@nestjs/jwt';
 import { Camera } from '@prisma/client';
 import { verifyAccessToken } from '../../cross/common/access-token';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
+import {
+  CAMERA_FORBIDDEN_MESSAGE,
+  canSeeCamera,
+  toMemberPermissions,
+} from '../../cross/common/permissions';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
+import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { DvrClientPort } from '../dvr/dvr-client.port';
 import { LiveStreamDto } from './dto/live-stream.dto';
 import {
@@ -50,6 +56,7 @@ export class LiveStreamService {
     private readonly publisher: StreamPublisherPort,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly spaceMemberAccessor: SpaceMemberAccessorService,
   ) {}
 
   /** `(space, path)` to the moment the pair was last authorized. */
@@ -155,15 +162,41 @@ export class LiveStreamService {
       );
     }
 
-    const memoKey = `${verified.data.spaceId}\u0000${request.path}`;
+    const { spaceId, sub } = verified.data;
+    if (!spaceId) {
+      return buildError(
+        ErrorCode.UNAUTHORIZED,
+        'Token carries no space membership',
+      );
+    }
+    // The token only names a space; a removed member must lose the feed too.
+    // Checked before the memo, which is keyed by space and path, not by caller.
+    const member = await this.spaceMemberAccessor.findBySpaceAndUser(
+      spaceId,
+      sub,
+    );
+    if (!member) {
+      return buildError(
+        ErrorCode.FORBIDDEN,
+        'You are no longer a member of this space',
+      );
+    }
+
+    if (
+      !canSeeCamera(
+        { role: member.role, ...toMemberPermissions(member) },
+        request.path,
+      )
+    ) {
+      return buildError(ErrorCode.FORBIDDEN, CAMERA_FORBIDDEN_MESSAGE);
+    }
+
+    const memoKey = `${spaceId}\u0000${request.path}`;
     if (this.wasRecentlyAuthorized(memoKey)) {
       return buildData({ authorized: true });
     }
 
-    const camera = await this.cameraAccessor.findById(
-      verified.data.spaceId,
-      request.path,
-    );
+    const camera = await this.cameraAccessor.findById(spaceId, request.path);
     if (!camera) {
       return buildError(ErrorCode.NOT_FOUND, 'No such camera in this space');
     }

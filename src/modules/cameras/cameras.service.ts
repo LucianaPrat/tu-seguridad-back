@@ -33,8 +33,11 @@ export class CamerasService {
     private readonly dvrEventListener: DvrEventListener,
   ) {}
 
-  async findAll(spaceId: string): Promise<Either<CameraDto[]>> {
-    const cameras = await this.cameraAccessor.findAll(spaceId);
+  async findAll(
+    spaceId: string,
+    cameraIds?: string[],
+  ): Promise<Either<CameraDto[]>> {
+    const cameras = await this.cameraAccessor.findAll(spaceId, cameraIds);
     const latestSnapshotIds = await this.snapshotService.findLatestIds(
       spaceId,
       cameras.map((camera) => camera.id),

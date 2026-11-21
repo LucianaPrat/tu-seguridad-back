@@ -16,9 +16,10 @@ import {
 // TS1272 rejects value imports there under isolatedModules.
 import type { Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import type { SessionContext } from '../../cross/common/session-context.type';
-import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { AllowNoSpace } from '../../cross/decorators/allow-no-space.decorator';
+import { CurrentClaims } from '../../cross/decorators/current-claims.decorator';
 import { Public } from '../../cross/decorators/public.decorator';
 import { RequestSessionContext } from '../../cross/decorators/session-context.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
@@ -39,6 +40,7 @@ export class FaceIdentityController {
   ) {}
 
   /** Enrollment replaces the caller's previous active identity, keeping history. */
+  @AllowNoSpace()
   @HttpCode(HttpStatus.CREATED)
   @Post('identities')
   @ApiOperation({
@@ -59,10 +61,10 @@ export class FaceIdentityController {
     [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
   })
   register(
-    @CurrentUser() user: JwtPayload,
+    @CurrentClaims() claims: AccessTokenClaims,
     @Body() dto: FaceTokenDto,
   ): Promise<Either<FaceIdentityDto>> {
-    return this.faceIdentityService.register(user.sub, dto.faceToken);
+    return this.faceIdentityService.register(claims.sub, dto.faceToken);
   }
 
   @Public()

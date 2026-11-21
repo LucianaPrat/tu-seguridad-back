@@ -1,3 +1,4 @@
+import { buildPrincipal } from '../common/jwt-payload.fixture';
 import { ExecutionContext } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import { of } from 'rxjs';
@@ -45,13 +46,7 @@ describe('HitInterceptor', () => {
     const request: Partial<RequestWithUser> = {
       method: 'GET',
       path: '/api/v1/cameras',
-      user: {
-        sub: 42,
-        email: 'a@a.com',
-        spaceId: 'space-1',
-        role: 'admin',
-        profileCompleted: true,
-      },
+      user: buildPrincipal({ sub: 42, email: 'a@a.com', spaceId: 'space-1' }),
     };
     const response = fakeResponse(200);
     const handler = { handle: () => of('ok') };

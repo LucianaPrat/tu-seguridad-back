@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import type { AccessTokenClaims } from '../../cross/common/jwt-payload.type';
 import { buildData, Either } from '../../cross/errors/either';
 import { AuthController } from './auth.controller';
 import { REFRESH_COOKIE_NAME } from './refresh-cookie';
@@ -14,17 +14,21 @@ describe('AuthController', () => {
     register: jest.Mock;
     completeProfile: jest.Mock;
     me: jest.Mock;
+    switchSpace: jest.Mock;
   };
   let sessionService: { rotate: jest.Mock; revoke: jest.Mock };
-  let refreshCookie: { issueSession: jest.Mock; clear: jest.Mock };
+  let refreshCookie: {
+    issueSession: jest.Mock;
+    replaceSession: jest.Mock;
+    clear: jest.Mock;
+  };
   let res: Response;
   let controller: AuthController;
 
-  const currentUser: JwtPayload = {
+  const claims: AccessTokenClaims = {
     sub: 1,
     email: 'owner@example.com',
     spaceId: 'space-1',
-    role: 'admin',
     profileCompleted: true,
   };
 
@@ -38,6 +42,7 @@ describe('AuthController', () => {
       register: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
       completeProfile: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
       me: jest.fn().mockResolvedValue(buildData({})),
+      switchSpace: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
     };
     sessionService = {
       rotate: jest.fn().mockResolvedValue(buildData(TOKEN_PAIR)),
@@ -49,6 +54,14 @@ describe('AuthController', () => {
         .fn()
         .mockImplementation(
           (_res: Response, result: Either<typeof TOKEN_PAIR>) =>
+            result.ok
+              ? buildData({ accessToken: result.data.accessToken })
+              : result,
+        ),
+      replaceSession: jest
+        .fn()
+        .mockImplementation(
+          (_req: Request, _res: Response, result: Either<typeof TOKEN_PAIR>) =>
             result.ok
               ? buildData({ accessToken: result.data.accessToken })
               : result,
@@ -175,10 +188,10 @@ describe('AuthController', () => {
   });
 
   describe('me', () => {
-    it('delegates with the user id off the token payload', async () => {
-      await controller.me(currentUser);
+    it('delegates with the claims off the token', async () => {
+      await controller.me(claims);
 
-      expect(authService.me).toHaveBeenCalledWith(1);
+      expect(authService.me).toHaveBeenCalledWith(claims);
     });
   });
 
@@ -192,13 +205,39 @@ describe('AuthController', () => {
       };
 
       await controller.completeProfile(
-        { ...currentUser, profileCompleted: false },
+        { ...claims, profileCompleted: false },
         dto,
         CONTEXT,
         res,
       );
 
       expect(authService.completeProfile).toHaveBeenCalledWith(1, dto, CONTEXT);
+    });
+  });
+
+  describe('switchSpace', () => {
+    it('delegates to AuthService and replaces the session', async () => {
+      const req = requestWithCookies({});
+
+      const result = await controller.switchSpace(
+        claims,
+        { spaceId: 'space-2' },
+        CONTEXT,
+        req,
+        res,
+      );
+
+      expect(authService.switchSpace).toHaveBeenCalledWith(
+        claims,
+        'space-2',
+        CONTEXT,
+      );
+      expect(refreshCookie.replaceSession).toHaveBeenCalledWith(
+        req,
+        res,
+        buildData(TOKEN_PAIR),
+      );
+      expect(result).toEqual(buildData({ accessToken: 'atoken' }));
     });
   });
 });

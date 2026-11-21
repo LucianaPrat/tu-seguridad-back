@@ -169,6 +169,13 @@ export const CredentialTtl = {
   INVITATION_DAYS: 7,
 } as const;
 
+/** Answers shared by the invitation routes and registration with an invite token. */
+export const InvitationMessage = {
+  NOT_FOUND: 'Invitation not found or no longer valid',
+  NO_LONGER_VALID: 'This invitation is no longer valid',
+  EMAIL_MISMATCH: 'This invitation was sent to a different email address',
+} as const;
+
 /**
  * Password and credential rules the DTOs validate against. One place, because the
  * registration, invitation-completion and password-reset bodies must agree: a

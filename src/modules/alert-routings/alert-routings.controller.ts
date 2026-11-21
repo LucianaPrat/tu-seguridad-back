@@ -4,6 +4,7 @@ import { SpaceMemberRole } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
@@ -15,6 +16,7 @@ import { AlertRoutingListDto } from './dto/alert-routing-list.dto';
 export class AlertRoutingsController {
   constructor(private readonly alertRoutingsService: AlertRoutingsService) {}
 
+  @RequireMenu('channels')
   @Get()
   @ApiOperation({
     summary: 'Read the alert routing matrix',
@@ -25,7 +27,8 @@ export class AlertRoutingsController {
   @ApiOkResponse({ type: AlertRoutingListDto })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the channels section, or has an incomplete profile.',
   })
   findAll(
     @CurrentUser() user: JwtPayload,
@@ -33,12 +36,13 @@ export class AlertRoutingsController {
     return this.alertRoutingsService.findAll(user.spaceId);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('channels')
   @Put()
   @ApiOperation({
     summary: 'Replace the alert routing matrix',
     description:
-      'Admin only. Partial saves are allowed — only the cells sent are written, the ' +
+      'Admin or collaborator with the channels section. Partial saves are allowed — only the cells sent are written, the ' +
       'rest keep their stored value — and the response is always the full matrix.',
   })
   @ApiOkResponse({ type: AlertRoutingListDto })
@@ -46,7 +50,7 @@ export class AlertRoutingsController {
     [ErrorCode.VALIDATION_ERROR]: 'Malformed body.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the channels section, or has an incomplete profile.',
   })
   replace(
     @CurrentUser() user: JwtPayload,

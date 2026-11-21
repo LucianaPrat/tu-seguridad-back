@@ -7,17 +7,22 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { SpaceMemberRole } from '@prisma/client';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Gauge } from 'prom-client';
 import { Server, Socket } from 'socket.io';
-import { EnvNames } from '../../cross/common/constants';
-import type { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { verifyAccessToken } from '../../cross/common/access-token';
+import { toMemberPermissions } from '../../cross/common/permissions';
+import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { MetricNames } from '../../cross/metrics/metric-names';
 
 /** The one message the namespace emits. Clients subscribe to it by name. */
 export const ALERT_EVENT_MESSAGE = 'alert-event';
 
 const spaceRoom = (spaceId: string) => `space:${spaceId}`;
+// Guests never join the space room: one room per camera they may see.
+const cameraRoom = (spaceId: string, cameraId: string) =>
+  `space:${spaceId}:camera:${cameraId}`;
 
 @Injectable()
 @WebSocketGateway({ namespace: 'events' })
@@ -36,6 +41,7 @@ export class EventsGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly spaceMemberAccessor: SpaceMemberAccessorService,
     @InjectMetric(MetricNames.WEBSOCKET_CONNECTIONS_ACTIVE)
     private readonly wsConnections: Gauge<string>,
   ) {}
@@ -48,16 +54,17 @@ export class EventsGateway
       return;
     }
 
-    let payload: JwtPayload;
-    try {
-      payload = this.jwtService.verify<JwtPayload>(token, {
-        secret: this.configService.get<string>(EnvNames.JWT_SECRET),
-      });
-    } catch {
+    const verified = verifyAccessToken(
+      this.jwtService,
+      this.configService,
+      token,
+    );
+    if (!verified.ok) {
       this.logger.warn(`Client ${client.id} rejected: invalid token`);
       client.disconnect(true);
       return;
     }
+    const payload = verified.data;
 
     // A socket is subscribed to its own space and nothing else. Without the
     // room, `server.emit` would fan every space's alerts out to every connected
@@ -68,9 +75,29 @@ export class EventsGateway
       client.disconnect(true);
       return;
     }
+    // The token only names a space; whether the caller still belongs to it is a
+    // database fact, so a removed member cannot keep receiving alerts.
+    const member = await this.spaceMemberAccessor.findBySpaceAndUser(
+      payload.spaceId,
+      payload.sub,
+    );
+    if (!member) {
+      this.logger.warn(`Client ${client.id} rejected: not a member`);
+      client.disconnect(true);
+      return;
+    }
     // `join` is synchronous on the in-memory adapter and a promise on a
     // clustered one; awaiting covers both.
-    await client.join(spaceRoom(payload.spaceId));
+    const spaceId = payload.spaceId;
+    // ponytail: rooms are fixed at connect; a role/camera change applies on reconnect.
+    // Re-join on member PATCH if live revocation matters.
+    const rooms =
+      member.role === SpaceMemberRole.guest
+        ? toMemberPermissions(member).cameraIds.map((cameraId) =>
+            cameraRoom(spaceId, cameraId),
+          )
+        : [spaceRoom(spaceId)];
+    await client.join(rooms);
 
     // Counted here, past every rejection: a socket that carried no token, an
     // invalid one, or a token with no space is gone by now, and counting it
@@ -99,7 +126,14 @@ export class EventsGateway
    * to one space. What an alert looks like on the wire belongs to the
    * alert-event domain, which calls this with its own DTO.
    */
-  broadcast(spaceId: string, event: string, payload: unknown): void {
-    this.server.to(spaceRoom(spaceId)).emit(event, payload);
+  broadcast(
+    spaceId: string,
+    cameraId: string | null,
+    event: string,
+    payload: unknown,
+  ): void {
+    const rooms = [spaceRoom(spaceId)];
+    if (cameraId) rooms.push(cameraRoom(spaceId, cameraId));
+    this.server.to(rooms).emit(event, payload);
   }
 }

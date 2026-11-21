@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 // Shared with registration, which provisions a space the same way: two copies of
 // the default routing matrix would let a seeded space and a registered one differ.
 import { ALERT_ROUTING_DEFAULTS } from '../src/cross/common/constants';
+import { DEFAULT_MENU_ACCESS } from '../src/cross/common/permissions';
 
 const BCRYPT_COST = 10;
 
@@ -34,19 +35,24 @@ async function main() {
       create: { email, ...profile },
     });
 
-    const space = await tx.space.upsert({
-      where: { ownerUserId: user.id },
-      update: {},
-      create: { name: 'My Secure Space', ownerUserId: user.id },
-    });
+    const space =
+      (await tx.space.findFirst({
+        where: { createdByUserId: user.id },
+        orderBy: { createdAt: 'asc' },
+      })) ??
+      (await tx.space.create({
+        data: { name: 'My Secure Space', createdByUserId: user.id },
+      }));
 
     await tx.spaceMember.upsert({
-      where: { userId: user.id },
+      where: { spaceId_userId: { spaceId: space.id, userId: user.id } },
       update: { role: 'admin', receiveAlerts: true },
       create: {
         spaceId: space.id,
         userId: user.id,
         role: 'admin',
+        menuAccess: DEFAULT_MENU_ACCESS.admin,
+        cameraIds: [],
         receiveAlerts: true,
       },
     });

@@ -12,7 +12,7 @@ function delivery(id: string, eventId: string, spaceId = 'space-1') {
     channel: 'email',
     status: 'failed',
     attempts: 1,
-    event: { id: eventId, spaceId },
+    event: { id: eventId, spaceId, cameraId: `camera-of-${eventId}` },
   };
 }
 
@@ -99,6 +99,10 @@ describe('DeliveryRetryService', () => {
 
     expect(alertEmail.resend).toHaveBeenCalledTimes(2);
     expect(spaceMemberAccessor.findActiveRecipients).toHaveBeenCalledTimes(2);
+    expect(spaceMemberAccessor.findActiveRecipients).toHaveBeenCalledWith(
+      'space-1',
+      'camera-of-event-1',
+    );
     const firstCall = alertEmail.resend.mock.calls[0] as [
       { id: string },
       unknown[],

@@ -148,6 +148,7 @@ export class CredentialRecoveryService {
       email: user.email,
       token,
       expiresAt,
+      locale: user.locale,
     });
   }
 }

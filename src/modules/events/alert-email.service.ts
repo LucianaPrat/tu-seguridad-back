@@ -189,6 +189,7 @@ export class AlertEmailService {
         // the plain 0..1 number it formats as a percent.
         confidence: event.confidence === null ? null : Number(event.confidence),
         recipientFirstName: recipient.user.firstName,
+        locale: recipient.user.locale,
         eventUrl: `${this.appBaseUrl}${EVENT_PATH}/${event.id}`,
         acknowledgeUrl: this.acknowledgeUrl(event.id, delivery.id),
         snapshotCid: frame?.cid ?? null,

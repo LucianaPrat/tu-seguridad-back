@@ -12,6 +12,7 @@ import { SpaceMemberRole } from '@prisma/client';
 import { ErrorCode } from '../../cross/common/constants';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
@@ -27,7 +28,8 @@ import { DvrService } from './dvr.service';
 export class DvrController {
   constructor(private readonly dvrService: DvrService) {}
 
-  /** Any member may see which recorder the space watches; only an admin may change it. */
+  /** Reading the recorder needs the dvr section; changing it also needs admin or collaborator. `/auth/me` carries `hasDvr` for everyone. */
+  @RequireMenu('dvr')
   @Get()
   @ApiOperation({
     summary: 'Read the space recorder',
@@ -42,19 +44,21 @@ export class DvrController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'The space has no recorder configured yet.',
   })
   findOne(@CurrentUser() user: JwtPayload): Promise<Either<DvrDto>> {
     return this.dvrService.findBySpace(user.spaceId);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Put()
   @ApiOperation({
     summary: 'Initialize or re-point the recorder',
     description:
-      'Admin only. Stores the recorder the space watches and immediately discovers its ' +
+      'Admin or collaborator with the dvr section. Stores the recorder the space watches and immediately discovers its ' +
       'channels. Connectivity is tested first and a configuration that cannot be ' +
       'reached is not stored, so a 502 or 504 leaves the previous recorder in place. ' +
       'Discovered channels are reconciled by external id: a channel that comes back ' +
@@ -70,7 +74,7 @@ export class DvrController {
       'Malformed body, or a recorder URL that is not usable.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.UPSTREAM_ERROR]:
       'The recorder refused the credentials or answered an error. Nothing was stored.',
     [ErrorCode.UPSTREAM_TIMEOUT]:
@@ -83,13 +87,14 @@ export class DvrController {
     return this.dvrService.configure(user.spaceId, dto);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @HttpCode(HttpStatus.OK)
   @Post('connection-test')
   @ApiOperation({
     summary: 'Test recorder credentials without storing them',
     description:
-      'Admin only. Answers whether the recorder carried in the body is reachable and ' +
+      'Admin or collaborator with the dvr section. Answers whether the recorder carried in the body is reachable and ' +
       'accepts the credentials, and writes nothing at all: no configuration, no ' +
       'cameras, not even `lastTestAt`, so a failed probe cannot make the recorder the ' +
       'space already polls look broken. This is the "test connection" button that ' +
@@ -105,7 +110,7 @@ export class DvrController {
       'Malformed body, or a recorder URL that is not usable.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.UPSTREAM_ERROR]:
       'The recorder refused the credentials or answered an error.',
     [ErrorCode.UPSTREAM_TIMEOUT]: 'The recorder did not answer in time.',
@@ -116,13 +121,14 @@ export class DvrController {
     return this.dvrService.testConnection(dto);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @HttpCode(HttpStatus.OK)
   @Post('discovery')
   @ApiOperation({
     summary: 'Re-run channel discovery',
     description:
-      'Admin only. Re-runs discovery against the already-stored credentials, so it ' +
+      'Admin or collaborator with the dvr section. Re-runs discovery against the already-stored credentials, so it ' +
       'takes no body. Use it after adding or moving channels on the recorder. Same ' +
       'reconciliation as `PUT /dvr`: matching channels keep their configuration, ' +
       'channels that stopped answering become `isConfigured: false`.',
@@ -134,7 +140,7 @@ export class DvrController {
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'The space has no recorder configured yet.',
     [ErrorCode.UPSTREAM_ERROR]:
       'The recorder refused the stored credentials or answered an error.',
@@ -144,13 +150,14 @@ export class DvrController {
     return this.dvrService.rediscover(user.spaceId);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @HttpCode(HttpStatus.OK)
   @Post('event-linkage')
   @ApiOperation({
     summary: 'Wire recorder motion triggers to publish an event',
     description:
-      'Admin only. Writes configuration into the recorder itself, which is why this is ' +
+      'Admin or collaborator with the dvr section. Writes configuration into the recorder itself, which is why this is ' +
       'not a side effect of `PUT /dvr`: it changes what the appliance does on its own, ' +
       'not what this product stores. Existing notifications are preserved — the document ' +
       'written back to each channel motion trigger is the listing already returned by the ' +
@@ -171,7 +178,7 @@ export class DvrController {
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'The space has no recorder configured yet.',
     [ErrorCode.VALIDATION_ERROR]:
       'The recorder rejected the stored credentials. They were accepted when ' +

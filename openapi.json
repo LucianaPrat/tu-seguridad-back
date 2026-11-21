@@ -85,7 +85,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the channels section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -115,7 +115,7 @@
         ]
       },
       "put": {
-        "description": "Admin only. Partial saves are allowed — only the cells sent are written, the rest keep their stored value — and the response is always the full matrix.",
+        "description": "Admin or collaborator with the channels section. Partial saves are allowed — only the cells sent are written, the rest keep their stored value — and the response is always the full matrix.",
         "operationId": "AlertRoutingsController_replace_v1",
         "parameters": [],
         "requestBody": {
@@ -188,7 +188,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the channels section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -304,7 +304,7 @@
     },
     "/api/v1/auth/register": {
       "post": {
-        "description": "Public. Creates the account and opens a session in one call. The access token comes back in the body; the refresh token is set only as an `httpOnly`, path-scoped cookie. The account may still need `POST /auth/complete-profile` before the rest of the API opens up — read `GET /auth/me` to find out.",
+        "description": "Public. Creates the account and opens a session in one call. The access token comes back in the body; the refresh token is set only as an `httpOnly`, path-scoped cookie. The account may still need `POST /auth/complete-profile` before the rest of the API opens up — read `GET /auth/me` to find out. With an `inviteToken` the account is created in no space; accept the invitation afterwards.",
         "operationId": "AuthController_register_v1",
         "parameters": [],
         "requestBody": {
@@ -343,6 +343,54 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — The inviteToken belongs to an invitation sent to a different email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — The inviteToken is unknown or no longer pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
                           ]
                         }
                       }
@@ -457,7 +505,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "The account behind the bearer token, with its space and role — the context every other route scopes to. Reachable with an incomplete profile, so a client can read it to decide whether to send the user to `POST /auth/complete-profile` first.",
+        "description": "The account behind the bearer token, with its current space and role (both null when the account is in no space yet) — the context every other route scopes to. Reachable with an incomplete profile, so a client can read it to decide whether to send the user to `POST /auth/complete-profile` first.",
         "operationId": "AuthController_me_v1",
         "parameters": [],
         "responses": {
@@ -497,6 +545,271 @@
           }
         },
         "summary": "Read the current user",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "description": "Partial update: send any of `locale`, `firstName`, `lastName`, `phone` (E.164). Omitted fields are left untouched and an empty body is a no-op. Email cannot be changed. Returns the same body as `GET /auth/me`.",
+        "operationId": "AuthController_updateMe_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Unknown locale, empty name or malformed phone.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update the current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/switch-space": {
+      "post": {
+        "description": "The caller must be a member of the target space. Re-issues the session there: a new access token in the body, the refresh cookie replaced and the old refresh token revoked. The choice is remembered for later logins and refreshes.",
+        "operationId": "AuthController_switchSpace_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchSpaceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session moved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — The caller is not a member of that space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Switch the session to another space",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "description": "Requires the current password. Revokes every refresh token the account holds and re-issues the session for this device: a new access token in the body and the refresh cookie replaced, so every other device is signed out. A wrong current password answers 400 (not 401), so clients do not mistake it for an expired session.",
+        "operationId": "AuthController_changePassword_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, wrong current password, or new password equal to the current one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Change the password",
         "tags": [
           "auth"
         ]
@@ -1086,7 +1399,7 @@
     },
     "/api/v1/invitations": {
       "post": {
-        "description": "Admin only. Creates a pending invitation for an email address and hands the invitee a single-use token, delivered out of band. The token is the whole credential — the invitee needs no account first.",
+        "description": "Admin only. Creates a pending invitation with the role, menu access and cameras the invitee will get, and mails a single-use link. The invitee may already have an account, in this or other spaces.",
         "operationId": "InvitationsController_create_v1",
         "parameters": [],
         "requestBody": {
@@ -1111,7 +1424,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_ERROR` — Malformed body, or an email that is not an address.",
+            "description": "`VALIDATION_ERROR` — Malformed body, or cameraIds that are not cameras of this space.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1183,7 +1496,7 @@
             }
           },
           "409": {
-            "description": "`CONFLICT` — That email already belongs to the space, or already has a pending invitation.",
+            "description": "`CONFLICT` — That email is already a member of the space, or already has a pending invitation here.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1213,7 +1526,7 @@
         ]
       },
       "get": {
-        "description": "Admin only. Invitations that are neither accepted nor expired, newest first, never carrying the token.",
+        "description": "Members section. Pending means not accepted, declined, revoked or expired. Newest first, never carrying the token.",
         "operationId": "InvitationsController_findPending_v1",
         "parameters": [],
         "responses": {
@@ -1252,7 +1565,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller lacks the members section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1282,24 +1595,610 @@
         ]
       }
     },
-    "/api/v1/invitations/accept": {
+    "/api/v1/invitations/preview": {
+      "get": {
+        "description": "Public. Tells the invitee who invited them, to what and whether the address already has an account, so the client can choose sign-in or registration.",
+        "operationId": "InvitationsController_preview_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "query",
+            "description": "Opaque token from the delivered link",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Missing token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — Unknown, expired or no longer pending invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "summary": "Preview an invitation from its link",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/mine": {
+      "get": {
+        "operationId": "InvitationsController_mine_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MyInvitationDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the pending invitations addressed to the caller",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}": {
+      "delete": {
+        "description": "Admin only. The link stops working immediately.",
+        "operationId": "InvitationsController_revoke_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Invitation id, in the caller space.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Invitation revoked. Empty body."
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No pending invitation with that id in this space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Revoke a pending invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}/resend": {
       "post": {
-        "description": "Public — the invitee has no session yet, so the invitation token is the credential. Consumes the token, joins the space and opens a session: the access token comes back in the body, the refresh token only as an `httpOnly` path-scoped cookie. A token is single-use; replaying it answers 401.",
+        "description": "Admin only. Issues a new link and expiry and mails it; the previous link stops working.",
+        "operationId": "InvitationsController_resend_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Invitation id, in the caller space.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No pending invitation with that id in this space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Resend a pending invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}/accept": {
+      "post": {
+        "description": "The caller must be signed in as the invited address. Creates the membership and moves the session into that space: a new access token in the body, the refresh cookie replaced.",
         "operationId": "InvitationsController_accept_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Invitation id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Joined and session moved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — The invitation was sent to a different address, or the profile is incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The invitation is no longer pending (accepted, declined, revoked or expired).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Accept an invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}/decline": {
+      "post": {
+        "operationId": "InvitationsController_decline_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Invitation id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Invitation declined. Empty body."
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — The invitation was sent to a different address, or the profile is incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — The invitation is no longer pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Decline an invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/spaces": {
+      "get": {
+        "description": "Ordered by name, each with the caller role in it.",
+        "operationId": "SpacesController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpaceSummaryDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the spaces the caller belongs to",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "post": {
+        "description": "The caller becomes its admin and the session moves into it: the new access token comes back in the body and the refresh cookie is replaced.",
+        "operationId": "SpacesController_create_v1",
         "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialTokenDto"
+                "$ref": "#/components/schemas/SpaceNameDto"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Invitation consumed. Refresh token set as a cookie, never in the body.",
+          "201": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -1333,7 +2232,88 @@
             }
           },
           "401": {
-            "description": "`UNAUTHORIZED` — Unknown, expired or already-used invitation token.",
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create a space",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/api/v1/spaces/current": {
+      "patch": {
+        "description": "Admin only.",
+        "operationId": "SpacesController_rename_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpaceNameDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceSummaryDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1356,8 +2336,101 @@
               }
             }
           },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not an admin of the current space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Rename the current space",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "delete": {
+        "description": "Admin only. Refused while the space still has a DVR. Removes its memberships, invitations and alert routings, then re-issues the session in another space of the caller, or in none.",
+        "operationId": "SpacesController_remove_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not an admin of the current space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "409": {
-            "description": "`CONFLICT` — The invited account is already a member of the space.",
+            "description": "`CONFLICT` — The space still has a DVR.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1381,12 +2454,9 @@
             }
           }
         },
-        "security": [
-          {}
-        ],
-        "summary": "Accept an invitation",
+        "summary": "Delete the current space",
         "tags": [
-          "invitations"
+          "spaces"
         ]
       }
     },
@@ -2045,7 +3115,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2099,7 +3169,7 @@
         ]
       },
       "put": {
-        "description": "Admin only. Stores the recorder the space watches and immediately discovers its channels. Connectivity is tested first and a configuration that cannot be reached is not stored, so a 502 or 504 leaves the previous recorder in place. Discovered channels are reconciled by external id: a channel that comes back keeps its monitor configuration, one that stopped answering becomes `isConfigured: false` rather than being deleted.",
+        "description": "Admin or collaborator with the dvr section. Stores the recorder the space watches and immediately discovers its channels. Connectivity is tested first and a configuration that cannot be reached is not stored, so a 502 or 504 leaves the previous recorder in place. Discovered channels are reconciled by external id: a channel that comes back keeps its monitor configuration, one that stopped answering becomes `isConfigured: false` rather than being deleted.",
         "operationId": "DvrController_configure_v1",
         "parameters": [],
         "requestBody": {
@@ -2172,7 +3242,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2252,7 +3322,7 @@
     },
     "/api/v1/dvr/connection-test": {
       "post": {
-        "description": "Admin only. Answers whether the recorder carried in the body is reachable and accepts the credentials, and writes nothing at all: no configuration, no cameras, not even `lastTestAt`, so a failed probe cannot make the recorder the space already polls look broken. This is the \"test connection\" button that precedes `PUT /dvr`. The body carries credentials only — a time zone is not part of a connectivity probe and is rejected.",
+        "description": "Admin or collaborator with the dvr section. Answers whether the recorder carried in the body is reachable and accepts the credentials, and writes nothing at all: no configuration, no cameras, not even `lastTestAt`, so a failed probe cannot make the recorder the space already polls look broken. This is the \"test connection\" button that precedes `PUT /dvr`. The body carries credentials only — a time zone is not part of a connectivity probe and is rejected.",
         "operationId": "DvrController_testConnection_v1",
         "parameters": [],
         "requestBody": {
@@ -2325,7 +3395,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2405,7 +3475,7 @@
     },
     "/api/v1/dvr/discovery": {
       "post": {
-        "description": "Admin only. Re-runs discovery against the already-stored credentials, so it takes no body. Use it after adding or moving channels on the recorder. Same reconciliation as `PUT /dvr`: matching channels keep their configuration, channels that stopped answering become `isConfigured: false`.",
+        "description": "Admin or collaborator with the dvr section. Re-runs discovery against the already-stored credentials, so it takes no body. Use it after adding or moving channels on the recorder. Same reconciliation as `PUT /dvr`: matching channels keep their configuration, channels that stopped answering become `isConfigured: false`.",
         "operationId": "DvrController_rediscover_v1",
         "parameters": [],
         "responses": {
@@ -2444,7 +3514,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2548,7 +3618,7 @@
     },
     "/api/v1/dvr/event-linkage": {
       "post": {
-        "description": "Admin only. Writes configuration into the recorder itself, which is why this is not a side effect of `PUT /dvr`: it changes what the appliance does on its own, not what this product stores. Existing notifications are preserved — the document written back to each channel motion trigger is the listing already returned by the recorder, plus one `center` entry, never a document composed from scratch, so entries such as `record-N` (record on motion) and `whiteLightOut-N` (light on motion) survive. Idempotent: a channel already publishing `center` is reported `alreadyLinked` and left untouched. Best effort, with one row per channel in the report rather than a single verdict, since these are independent writes with no transaction between them. Most important: this does not enable motion detection — a channel whose VMD grid is off is reported `linked` and stays silent, because this route only wires the notification the recorder fires once its own motion detector decides to trigger.",
+        "description": "Admin or collaborator with the dvr section. Writes configuration into the recorder itself, which is why this is not a side effect of `PUT /dvr`: it changes what the appliance does on its own, not what this product stores. Existing notifications are preserved — the document written back to each channel motion trigger is the listing already returned by the recorder, plus one `center` entry, never a document composed from scratch, so entries such as `record-N` (record on motion) and `whiteLightOut-N` (light on motion) survive. Idempotent: a channel already publishing `center` is reported `alreadyLinked` and left untouched. Best effort, with one row per channel in the report rather than a single verdict, since these are independent writes with no transaction between them. Most important: this does not enable motion detection — a channel whose VMD grid is off is reported `linked` and stays silent, because this route only wires the notification the recorder fires once its own motion detector decides to trigger.",
         "operationId": "DvrController_linkEvents_v1",
         "parameters": [],
         "responses": {
@@ -2611,7 +3681,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2768,7 +3838,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without the snapshot's camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2824,7 +3894,7 @@
     },
     "/api/v1/events": {
       "get": {
-        "description": "Alerts raised inside the caller space, newest first. Paging is keyset, not offset: send back the `nextCursor` of the previous page, and stop when it comes back `null`. The cursor is opaque — one detection frame writes an event per entered area with the same `detectedAt`, so it carries the event id too and a timestamp of your own will not work in its place. Each item keeps the camera label copied at detection time, so a deleted camera still renders.",
+        "description": "Alerts raised inside the caller space, newest first (a guest sees only its cameras). Paging is keyset, not offset: send back the `nextCursor` of the previous page, and stop when it comes back `null`. The cursor is opaque — one detection frame writes an event per entered area with the same `detectedAt`, so it carries the event id too and a timestamp of your own will not work in its place. Each item keeps the camera label copied at detection time, so a deleted camera still renders.",
         "operationId": "AlertEventsController_query_v1",
         "parameters": [
           {
@@ -2930,7 +4000,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the events section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3071,7 +4141,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the events section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3179,7 +4249,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the events section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3235,7 +4305,7 @@
     },
     "/api/v1/cameras": {
       "get": {
-        "description": "Every camera discovered on the space recorder, soft-deleted ones excluded. Each carries its discovery fields, its monitor configuration and a derived `latestSnapshotUrl`. A camera the recorder stopped reporting stays in the list with `isConfigured: false` rather than disappearing.",
+        "description": "Every camera discovered on the space recorder, soft-deleted ones excluded (a guest sees only the cameras its membership lists). Each carries its discovery fields, its monitor configuration and a derived `latestSnapshotUrl`. A camera the recorder stopped reporting stays in the list with `isConfigured: false` rather than disappearing.",
         "operationId": "CamerasController_findAll_v1",
         "parameters": [],
         "responses": {
@@ -3358,7 +4428,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3412,7 +4482,7 @@
         ]
       },
       "put": {
-        "description": "Admin only. Operator-editable fields only — `externalId` and `status` come from discovery and are rejected here. Switching a camera to full-frame monitoring requires an `alertType`, since there are no zones to take the alert level from.",
+        "description": "Admin or collaborator with the dvr section. Operator-editable fields only — `externalId` and `status` come from discovery and are rejected here. Switching a camera to full-frame monitoring requires an `alertType`, since there are no zones to take the alert level from.",
         "operationId": "CamerasController_update_v1",
         "parameters": [
           {
@@ -3495,7 +4565,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3549,7 +4619,7 @@
         ]
       },
       "delete": {
-        "description": "Admin only. Logical delete: the camera leaves every read and the DVR poll list, its alert history is kept. A later discovery run can bring the same channel back.",
+        "description": "Admin or collaborator with the dvr section. Logical delete: the camera leaves every read and the DVR poll list, its alert history is kept. A later discovery run can bring the same channel back.",
         "operationId": "CamerasController_remove_v1",
         "parameters": [
           {
@@ -3591,7 +4661,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3689,7 +4759,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3818,7 +4888,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4019,7 +5089,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4123,7 +5193,7 @@
     },
     "/api/v1/cameras/{id}/analyze": {
       "post": {
-        "description": "Runs the detection pipeline synchronously against an image you upload, as the manual path for when the recorder is unreachable. Answers the detected persons, the per-zone results and any alerts raised; a frame that raises an alert is stored, the rest are not. The upload must be a real image — the magic numbers are checked, not just the declared type — and must fit `SNAPSHOT_MAX_BYTES`.",
+        "description": "Admin or collaborator. Runs the detection pipeline synchronously against an image you upload, as the manual path for when the recorder is unreachable. Answers the detected persons, the per-zone results and any alerts raised; a frame that raises an alert is stored, the rest are not. The upload must be a real image — the magic numbers are checked, not just the declared type — and must fit `SNAPSHOT_MAX_BYTES`.",
         "operationId": "CamerasController_analyze_v1",
         "parameters": [
           {
@@ -4205,7 +5275,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4406,7 +5476,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — A action other than `read`, a protocol other than `hls`, or an incomplete profile.",
+            "description": "`FORBIDDEN` — A action other than `read`, a protocol other than `hls`, an incomplete profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4541,7 +5611,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller has not completed their profile, or a guest without this camera.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4595,7 +5665,7 @@
         ]
       },
       "post": {
-        "description": "Admin only. Adds one percentage rectangle to a camera. Coordinates are percent of frame, not pixels, so the zone keeps its meaning if the recorder changes resolution. The rectangle must stay inside the frame and have a positive area; a rectangle that does not answers `INVALID_ZONE`.",
+        "description": "Admin or collaborator with the dvr section. Adds one percentage rectangle to a camera. Coordinates are percent of frame, not pixels, so the zone keeps its meaning if the recorder changes resolution. The rectangle must stay inside the frame and have a positive area; a rectangle that does not answers `INVALID_ZONE`.",
         "operationId": "ZonesController_create_v1",
         "parameters": [
           {
@@ -4679,7 +5749,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4838,7 +5908,7 @@
         ]
       },
       "put": {
-        "description": "Admin only. Partial update — the sent fields are merged onto the stored zone and the merged rectangle is what gets validated, so moving one edge cannot push the zone out of the frame.",
+        "description": "Admin or collaborator with the dvr section. Partial update — the sent fields are merged onto the stored zone and the merged rectangle is what gets validated, so moving one edge cannot push the zone out of the frame.",
         "operationId": "ZonesController_update_v1",
         "parameters": [
           {
@@ -4922,7 +5992,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4976,7 +6046,7 @@
         ]
       },
       "delete": {
-        "description": "Admin only. Logical delete: the zone leaves every read and stops raising alerts, the alerts it already raised stay in the history.",
+        "description": "Admin or collaborator with the dvr section. Logical delete: the zone leaves every read and stops raising alerts, the alerts it already raised stay in the history.",
         "operationId": "ZonesController_remove_v1",
         "parameters": [
           {
@@ -5018,7 +6088,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is a guest, lacks the dvr section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5074,7 +6144,7 @@
     },
     "/api/v1/members": {
       "get": {
-        "description": "Every member of the caller space, inactive ones included — the screen renders the state as a badge. Each row carries `receiveAlerts`, the per-member alert opt-in the channels screen toggles.",
+        "description": "Every member of the caller space, inactive ones included — the screen renders the state as a badge. Each row carries `receiveAlerts`, the per-member alert opt-in, and `role` always; `menuAccess`/`cameraIds` only for an admin caller.",
         "operationId": "MembersController_findAll_v1",
         "parameters": [],
         "responses": {
@@ -5113,7 +6183,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller has not completed their profile.",
+            "description": "`FORBIDDEN` — Caller lacks the members section, or has an incomplete profile.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5145,8 +6215,8 @@
     },
     "/api/v1/members/{userId}": {
       "patch": {
-        "description": "Admin only. The id is the user id the roster returns; the member itself is untouched otherwise.",
-        "operationId": "MembersController_setReceiveAlerts_v1",
+        "description": "Admin only. The id is the user id the roster returns. Every field is optional. An admin cannot change their own role (409); the same role is a no-op.",
+        "operationId": "MembersController_update_v1",
         "parameters": [
           {
             "name": "userId",
@@ -5162,7 +6232,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateMemberAlertsDto"
+                "$ref": "#/components/schemas/UpdateMemberDto"
               }
             }
           }
@@ -5179,7 +6249,7 @@
             }
           },
           "400": {
-            "description": "`VALIDATION_ERROR` — Malformed body, or a non-numeric id.",
+            "description": "`VALIDATION_ERROR` — Malformed body, a non-numeric id, or cameraIds outside this space.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5273,9 +6343,176 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`CONFLICT` — An admin tried to change their own role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
-        "summary": "Set whether a member receives the space alerts",
+        "summary": "Update a member: role, menu, cameras, alert opt-in",
+        "tags": [
+          "members"
+        ]
+      },
+      "delete": {
+        "description": "Admin only. Clears the user's last space if it pointed here; their next request in this space answers 403.",
+        "operationId": "MembersController_remove_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Member removed. Empty body."
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Non-numeric id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — No such member in the caller space.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — An admin tried to remove themselves.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Remove a member from the space",
         "tags": [
           "members"
         ]
@@ -6005,7 +7242,20 @@
           },
           "spaceName": {
             "type": "string",
-            "example": "My Secure Space"
+            "example": "My Secure Space",
+            "description": "Required unless registering with an inviteToken."
+          },
+          "inviteToken": {
+            "type": "string",
+            "description": "Invitation token from the mailed link. The account is created with no space; accept the invitation afterwards."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "description": "UI and mail language. Defaults to es."
           }
         },
         "required": [
@@ -6013,8 +7263,89 @@
           "password",
           "firstName",
           "lastName",
-          "phone",
-          "spaceName"
+          "phone"
+        ]
+      },
+      "SpaceSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "My Secure Space"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ],
+            "description": "The caller's role in this space"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ]
+      },
+      "CurrentSpaceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "My Secure Space"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ],
+            "description": "The caller's role in this space"
+          },
+          "hasDvr": {
+            "type": "boolean",
+            "description": "Whether the space has a recorder configured; replaces probing `GET /dvr`, which needs the dvr section."
+          },
+          "menuAccess": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "description": "Cameras a guest may see; empty for other roles",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "hasDvr",
+          "menuAccess",
+          "cameraIds"
         ]
       },
       "MeDto": {
@@ -6044,29 +7375,68 @@
           "isActive": {
             "type": "boolean"
           },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "description": "UI and mail language"
+          },
           "profileCompleted": {
             "type": "boolean",
             "description": "False until an invited member completes name, phone and password"
           },
           "spaceId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "deprecated": true,
+            "description": "Deprecated: use `currentSpace`."
           },
           "spaceName": {
-            "type": "string",
-            "example": "My Secure Space"
+            "type": "object",
+            "example": "My Secure Space",
+            "nullable": true,
+            "deprecated": true,
+            "description": "Deprecated: use `currentSpace`."
           },
           "role": {
             "type": "string",
             "enum": [
               "admin",
-              "member"
+              "collaborator",
+              "guest"
             ],
-            "example": "admin"
+            "example": "admin",
+            "nullable": true,
+            "deprecated": true,
+            "description": "Deprecated: use `currentSpace`."
           },
           "receiveAlerts": {
             "type": "boolean",
             "description": "Whether this member receives alert deliveries"
+          },
+          "spaces": {
+            "description": "Every space the account belongs to",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpaceSummaryDto"
+            }
+          },
+          "currentSpace": {
+            "nullable": true,
+            "description": "The space the session is in; null when the account has none",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CurrentSpaceDto"
+              }
+            ]
+          },
+          "pendingInvitationsCount": {
+            "type": "number",
+            "description": "Open invitations addressed to the account email"
           }
         },
         "required": [
@@ -6076,11 +7446,68 @@
           "lastName",
           "phone",
           "isActive",
+          "locale",
           "profileCompleted",
           "spaceId",
           "spaceName",
           "role",
-          "receiveAlerts"
+          "receiveAlerts",
+          "spaces",
+          "currentSpace",
+          "pendingInvitationsCount"
+        ]
+      },
+      "UpdateMeDto": {
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ]
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164"
+          }
+        }
+      },
+      "SwitchSpaceDto": {
+        "type": "object",
+        "properties": {
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "spaceId"
+        ]
+      },
+      "ChangePasswordDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 12
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
         ]
       },
       "CompleteProfileDto": {
@@ -6202,10 +7629,49 @@
           "email": {
             "type": "string",
             "example": "member@example.com"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "menuAccess": {
+            "type": "array",
+            "description": "Defaults to the role defaults.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "description": "Cameras of this space the invitee may see. Defaults to none.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "description": "Mail language. Defaults to the inviter's own locale."
           }
         },
         "required": [
-          "email"
+          "email",
+          "role"
         ]
       },
       "InvitationDto": {
@@ -6219,6 +7685,34 @@
             "type": "string",
             "example": "member@example.com"
           },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "menuAccess": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "expiresAt": {
             "format": "date-time",
             "type": "string"
@@ -6231,6 +7725,9 @@
         "required": [
           "id",
           "email",
+          "role",
+          "menuAccess",
+          "cameraIds",
           "expiresAt",
           "createdAt"
         ]
@@ -6251,6 +7748,104 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "InvitationPreviewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "invitedByName": {
+            "type": "string",
+            "example": "Ada Lovelace"
+          },
+          "email": {
+            "type": "string",
+            "example": "member@example.com"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "userExists": {
+            "type": "boolean",
+            "description": "Whether the address already has an account (sign in vs register)."
+          }
+        },
+        "required": [
+          "id",
+          "spaceName",
+          "invitedByName",
+          "email",
+          "role",
+          "expiresAt",
+          "userExists"
+        ]
+      },
+      "MyInvitationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "invitedByName": {
+            "type": "string",
+            "example": "Ada Lovelace"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "spaceId",
+          "spaceName",
+          "invitedByName",
+          "role",
+          "expiresAt"
+        ]
+      },
+      "SpaceNameDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Warehouse",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "DvrEventStatusDto": {
@@ -7053,6 +8648,36 @@
           "receiveAlerts": {
             "type": "boolean",
             "description": "The per-member alert opt-in the channels screen toggles: false means the member stays in the space but no alert delivery is planned for them."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "menuAccess": {
+            "type": "array",
+            "description": "Only when the caller is an admin.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "description": "Only when the caller is an admin.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -7063,7 +8688,8 @@
           "phone",
           "isActive",
           "profileCompleted",
-          "receiveAlerts"
+          "receiveAlerts",
+          "role"
         ]
       },
       "MemberListDto": {
@@ -7085,16 +8711,43 @@
           "total"
         ]
       },
-      "UpdateMemberAlertsDto": {
+      "UpdateMemberDto": {
         "type": "object",
         "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "menuAccess": {
+            "type": "array",
+            "description": "Replaces the list. When only `role` changes, reset to that role defaults.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "description": "Replaces the list. Cameras of this space; only read for guests.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "receiveAlerts": {
             "type": "boolean"
           }
-        },
-        "required": [
-          "receiveAlerts"
-        ]
+        }
       },
       "AssistantMessageDto": {
         "type": "object",

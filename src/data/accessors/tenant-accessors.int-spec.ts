@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnvNames } from '../../cross/common/constants';
+import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { CredentialHashService } from '../../cross/crypto/credential-hash.service';
 import { FieldEncryptionService } from '../../cross/crypto/field-encryption.service';
 import { AlertEventAccessorService } from './alert-event.accessor';
@@ -10,6 +11,7 @@ import { DvrAccessorService } from './dvr.accessor';
 import { EventDeliveryAccessorService } from './event-delivery.accessor';
 import { InvitationAccessorService } from './invitation.accessor';
 import { SnapshotAccessorService } from './snapshot.accessor';
+import { SpaceMemberAccessorService } from './space-member.accessor';
 import { UserFaceIdentityAccessorService } from './user-face-identity.accessor';
 import { MonitorZoneAccessorService } from './zone.accessor';
 import { truncateAll } from '../../../test/utils/truncate-all';
@@ -45,6 +47,7 @@ describe('tenant-scoped accessors (int)', () => {
   );
   const alertEventAccessor = new AlertEventAccessorService(prisma);
   const deliveryAccessor = new EventDeliveryAccessorService(prisma);
+  const spaceMemberAccessor = new SpaceMemberAccessorService(prisma);
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -69,10 +72,16 @@ describe('tenant-scoped accessors (int)', () => {
       },
     });
     const space = await prisma.space.create({
-      data: { name: `${name} space`, ownerUserId: user.id },
+      data: { name: `${name} space`, createdByUserId: user.id },
     });
     await prisma.spaceMember.create({
-      data: { spaceId: space.id, userId: user.id, role: 'admin' },
+      data: {
+        spaceId: space.id,
+        userId: user.id,
+        role: 'admin',
+        menuAccess: DEFAULT_MENU_ACCESS.admin,
+        cameraIds: [],
+      },
     });
     const dvr = await dvrAccessor.upsertConfiguration(space.id, {
       url: `http://${name}.local`,
@@ -374,17 +383,18 @@ describe('tenant-scoped accessors (int)', () => {
       token: invitationToken,
       invitedByUserId: tenant.user.id,
       expiresAt: new Date(Date.now() + 60_000),
+      role: 'collaborator',
+      menuAccess: ['home'],
+      cameraIds: [],
     });
     expect(
-      await invitationAccessor.findUsableByToken(invitationToken),
+      await invitationAccessor.findPendingByToken(invitationToken),
     ).toMatchObject({
       id: invitation.id,
     });
+    expect(await invitationAccessor.revoke(invitation.id)).toBe(true);
     expect(
-      await invitationAccessor.consume(invitationToken, tenant.user.id),
-    ).toBe(true);
-    expect(
-      await invitationAccessor.findUsableByToken(invitationToken),
+      await invitationAccessor.findPendingByToken(invitationToken),
     ).toBeNull();
 
     const consumableToken = 'raw-password-reset-token';
@@ -804,5 +814,147 @@ describe('tenant-scoped accessors (int)', () => {
       where: { id: delivery.id },
     });
     expect(updated).toMatchObject({ status: 'delivered', error: null });
+  });
+
+  async function addMember(
+    spaceId: string,
+    email: string,
+    role: 'admin' | 'collaborator' | 'guest',
+    cameraIds: string[],
+    receiveAlerts = true,
+  ) {
+    const user = await prisma.user.create({
+      data: {
+        email,
+        passwordHash: 'bcrypt-hash',
+        firstName: 'M',
+        lastName: 'User',
+        phone: '+10000000000',
+      },
+    });
+    await prisma.spaceMember.create({
+      data: {
+        spaceId,
+        userId: user.id,
+        role,
+        menuAccess: DEFAULT_MENU_ACCESS[role],
+        cameraIds,
+        receiveAlerts,
+      },
+    });
+    return user;
+  }
+
+  it('sends an alert only to non-guests and to guests that hold the camera', async () => {
+    const tenant = await createTenant('recipients');
+    const withCamera = await addMember(
+      tenant.space.id,
+      'guest-with@example.com',
+      'guest',
+      [tenant.camera.id],
+    );
+    await addMember(tenant.space.id, 'guest-without@example.com', 'guest', []);
+    await addMember(
+      tenant.space.id,
+      'guest-muted@example.com',
+      'guest',
+      [tenant.camera.id],
+      false,
+    );
+
+    const forCamera = await spaceMemberAccessor.findActiveRecipients(
+      tenant.space.id,
+      tenant.camera.id,
+    );
+    expect(forCamera.map((r) => r.userId).sort()).toEqual(
+      [tenant.user.id, withCamera.id].sort(),
+    );
+
+    const noCamera = await spaceMemberAccessor.findActiveRecipients(
+      tenant.space.id,
+      null,
+    );
+    expect(noCamera.map((r) => r.userId)).toEqual([tenant.user.id]);
+  });
+
+  it('removes a membership and clears last_space_id only when it pointed at that space', async () => {
+    const tenant = await createTenant('removal');
+    const other = await createTenant('removal-other');
+    const pointing = await addMember(
+      tenant.space.id,
+      'pointing@example.com',
+      'collaborator',
+      [],
+    );
+    const elsewhere = await addMember(
+      tenant.space.id,
+      'elsewhere@example.com',
+      'collaborator',
+      [],
+    );
+    await prisma.user.update({
+      where: { id: pointing.id },
+      data: { lastSpaceId: tenant.space.id },
+    });
+    await prisma.user.update({
+      where: { id: elsewhere.id },
+      data: { lastSpaceId: other.space.id },
+    });
+
+    await spaceMemberAccessor.remove(tenant.space.id, pointing.id);
+    await spaceMemberAccessor.remove(tenant.space.id, elsewhere.id);
+
+    await expect(
+      spaceMemberAccessor.findBySpaceAndUser(tenant.space.id, pointing.id),
+    ).resolves.toBeNull();
+    const [a, b] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: pointing.id } }),
+      prisma.user.findUniqueOrThrow({ where: { id: elsewhere.id } }),
+    ]);
+    expect(a.lastSpaceId).toBeNull();
+    expect(b.lastSpaceId).toBe(other.space.id);
+  });
+
+  it('narrows the camera list to the given ids, and to nothing for an empty list', async () => {
+    const tenant = await createTenant('camera-scope');
+
+    await expect(
+      cameraAccessor.findAll(tenant.space.id, [tenant.camera.id]),
+    ).resolves.toHaveLength(1);
+    await expect(
+      cameraAccessor.findAll(tenant.space.id, []),
+    ).resolves.toHaveLength(0);
+    await expect(cameraAccessor.findAll(tenant.space.id)).resolves.toHaveLength(
+      1,
+    );
+  });
+
+  it('scopes event history and lookup to the given cameras', async () => {
+    const tenant = await createTenant('event-scope');
+    const event = await alertEventAccessor.create(tenant.space.id, {
+      cameraId: tenant.camera.id,
+      cameraLabelSnapshot: 'scoped',
+      alertType: 'intruder',
+      detectedAt: new Date(),
+    });
+    if (!event) throw new Error('fixture event creation unexpectedly failed');
+
+    await expect(
+      alertEventAccessor.query(tenant.space.id, { take: 10, cameraIds: [] }),
+    ).resolves.toEqual([]);
+    await expect(
+      alertEventAccessor.query(tenant.space.id, {
+        take: 10,
+        cameraIds: [tenant.camera.id],
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      alertEventAccessor.findById(tenant.space.id, event.id, ['other']),
+    ).resolves.toBeNull();
+    await expect(
+      alertEventAccessor.findById(tenant.space.id, event.id, [
+        tenant.camera.id,
+      ]),
+    ).resolves.not.toBeNull();
   });
 });

@@ -4,11 +4,12 @@ import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { verifyAccessToken } from '../common/access-token';
-import { JwtPayload } from '../common/jwt-payload.type';
+import { AccessTokenClaims, JwtPayload } from '../common/jwt-payload.type';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { buildGuardException } from '../errors/guard-exception';
 
 export interface RequestWithUser extends Request {
+  claims?: AccessTokenClaims;
   user?: JwtPayload;
 }
 
@@ -39,7 +40,7 @@ export class JwtAuthGuard implements CanActivate {
       throw buildGuardException(verified.code, verified.message);
     }
 
-    request.user = verified.data;
+    request.claims = verified.data;
     return true;
   }
 

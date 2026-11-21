@@ -2,7 +2,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 import { buildData, buildError, Either } from '../errors/either';
 import { EnvNames, ErrorCode } from './constants';
-import { JwtPayload, RefreshJwtPayload } from './jwt-payload.type';
+import { AccessTokenClaims, RefreshJwtPayload } from './jwt-payload.type';
 
 /**
  * The one place an access token becomes claims.
@@ -20,12 +20,12 @@ export const verifyAccessToken = (
   jwtService: JwtService,
   configService: ConfigService,
   token: string | undefined,
-): Either<JwtPayload> => {
+): Either<AccessTokenClaims> => {
   if (!token) {
     return buildError(ErrorCode.UNAUTHORIZED, 'Missing bearer token');
   }
 
-  let payload: JwtPayload & Partial<RefreshJwtPayload>;
+  let payload: AccessTokenClaims & Partial<RefreshJwtPayload>;
   try {
     payload = jwtService.verify(token, {
       secret: configService.get<string>(EnvNames.JWT_SECRET),
@@ -41,10 +41,10 @@ export const verifyAccessToken = (
     );
   }
 
-  // A token signed before the tenant claims existed carries no space, and a
-  // request with no space cannot be scoped to one. Reject it instead of
-  // letting a downstream accessor receive `undefined` as a spaceId.
-  if (!payload.spaceId || !payload.role) {
+  // A token signed before the tenant claims existed has no `spaceId` key at
+  // all, which is different from `spaceId: null` (an account in no space yet).
+  // Reject the former so `undefined` never reaches a downstream accessor.
+  if (!('spaceId' in payload)) {
     return buildError(
       ErrorCode.UNAUTHORIZED,
       'Token carries no space membership',
@@ -54,8 +54,7 @@ export const verifyAccessToken = (
   return buildData({
     sub: payload.sub,
     email: payload.email,
-    spaceId: payload.spaceId,
-    role: payload.role,
+    spaceId: payload.spaceId || null,
     profileCompleted: payload.profileCompleted === true,
   });
 };

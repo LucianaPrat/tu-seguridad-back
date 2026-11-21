@@ -45,7 +45,7 @@ function buildDelivery(overrides: Partial<EventDelivery> = {}): EventDelivery {
 }
 
 function buildRecipient(userId = 1, email = 'owner@example.com') {
-  return { userId, user: { email, firstName: 'Ada' } };
+  return { userId, user: { email, firstName: 'Ada', locale: 'en' as const } };
 }
 
 describe('AlertEmailService', () => {

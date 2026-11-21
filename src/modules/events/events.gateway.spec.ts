@@ -6,6 +6,7 @@ import { getToken } from '@willsoto/nestjs-prometheus';
 import { AddressInfo } from 'net';
 import { Server } from 'http';
 import { io, Socket as ClientSocket } from 'socket.io-client';
+import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { MetricNames } from '../../cross/metrics/metric-names';
 import { ALERT_EVENT_MESSAGE, EventsGateway } from './events.gateway';
 
@@ -13,12 +14,29 @@ describe('EventsGateway', () => {
   const secret = 'gateway-test-secret';
   const spaceA = 'space-a-uuid';
   const spaceB = 'space-b-uuid';
+  const spaceGuest = 'space-guest-uuid';
 
   let app: INestApplication;
   let jwtService: JwtService;
   let gateway: EventsGateway;
   let baseUrl: string;
   const wsConnections = { inc: jest.fn(), dec: jest.fn() };
+  // Everyone is a member except the space named here.
+  const spaceWithoutMember = 'space-without-member-uuid';
+  const spaceMemberAccessor = {
+    findBySpaceAndUser: jest.fn((spaceId: string) => {
+      if (spaceId === spaceWithoutMember) return Promise.resolve(null);
+      if (spaceId === spaceGuest) {
+        return Promise.resolve({
+          userId: 1,
+          role: 'guest',
+          menuAccess: [],
+          cameraIds: ['cam-1'],
+        });
+      }
+      return Promise.resolve({ userId: 1 });
+    }),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -29,6 +47,7 @@ describe('EventsGateway', () => {
           provide: ConfigService,
           useValue: { get: () => secret },
         },
+        { provide: SpaceMemberAccessorService, useValue: spaceMemberAccessor },
         {
           provide: getToken(MetricNames.WEBSOCKET_CONNECTIONS_ACTIVE),
           useValue: wsConnections,
@@ -59,13 +78,14 @@ describe('EventsGateway', () => {
     });
   }
 
-  function tokenFor(spaceId?: string): string {
+  // `undefined` omits the key (a pre-tenant token); `null` is a session in no
+  // space.
+  function tokenFor(spaceId?: string | null): string {
     return jwtService.sign({
       sub: 1,
       email: 'admin@example.com',
-      role: 'admin',
       profileCompleted: true,
-      ...(spaceId ? { spaceId } : {}),
+      ...(spaceId === undefined ? {} : { spaceId }),
     });
   }
 
@@ -107,6 +127,24 @@ describe('EventsGateway', () => {
     });
   }, 5000);
 
+  it('disconnects a client whose session is in no space', (done) => {
+    const client = connect(tokenFor(null));
+
+    client.on('disconnect', () => {
+      client.close();
+      done();
+    });
+  }, 5000);
+
+  it('disconnects a client that is no longer a member of the token space', (done) => {
+    const client = connect(tokenFor(spaceWithoutMember));
+
+    client.on('disconnect', () => {
+      client.close();
+      done();
+    });
+  }, 5000);
+
   it('delivers a broadcast for the socket own space within 1s', (done) => {
     const client = connect(tokenFor(spaceA));
 
@@ -117,7 +155,7 @@ describe('EventsGateway', () => {
         done();
       });
 
-      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'evt-1' });
+      gateway.broadcast(spaceA, null, ALERT_EVENT_MESSAGE, { id: 'evt-1' });
     });
   }, 5000);
 
@@ -133,8 +171,44 @@ describe('EventsGateway', () => {
         done();
       });
 
-      gateway.broadcast(spaceB, ALERT_EVENT_MESSAGE, { id: 'other-space' });
-      gateway.broadcast(spaceA, ALERT_EVENT_MESSAGE, { id: 'own-space' });
+      gateway.broadcast(spaceB, null, ALERT_EVENT_MESSAGE, {
+        id: 'other-space',
+      });
+      gateway.broadcast(spaceA, null, ALERT_EVENT_MESSAGE, { id: 'own-space' });
+    });
+  }, 5000);
+
+  it('delivers a guest only the broadcasts of its own cameras', (done) => {
+    const client = connect(tokenFor(spaceGuest));
+
+    client.on('connect', () => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
+        // cam-2 and a camera-less event went first; either arriving here
+        // means the guest is in the space room or a foreign camera room.
+        expect(payload).toEqual({ id: 'own' });
+        client.close();
+        done();
+      });
+
+      gateway.broadcast(spaceGuest, 'cam-2', ALERT_EVENT_MESSAGE, { id: 'x' });
+      gateway.broadcast(spaceGuest, null, ALERT_EVENT_MESSAGE, { id: 'none' });
+      gateway.broadcast(spaceGuest, 'cam-1', ALERT_EVENT_MESSAGE, {
+        id: 'own',
+      });
+    });
+  }, 5000);
+
+  it('delivers a non-guest the broadcast of any camera of its space', (done) => {
+    const client = connect(tokenFor(spaceA));
+
+    client.on('connect', () => {
+      client.once(ALERT_EVENT_MESSAGE, (payload: { id: string }) => {
+        expect(payload).toEqual({ id: 'cam-9' });
+        client.close();
+        done();
+      });
+
+      gateway.broadcast(spaceA, 'cam-9', ALERT_EVENT_MESSAGE, { id: 'cam-9' });
     });
   }, 5000);
 

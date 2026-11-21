@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, User } from '@prisma/client';
+import { Locale, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface ProfileCompletionFields {
@@ -8,6 +8,13 @@ export interface ProfileCompletionFields {
   phone: string;
   avatarUrl?: string | null;
   passwordHash: string;
+}
+
+export interface EditableProfileFields {
+  locale?: Locale;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
 }
 
 @Injectable()
@@ -30,10 +37,22 @@ export class UserAccessorService {
     return this.prisma.user.update({ where: { id }, data: { passwordHash } });
   }
 
+  /** Only the keys present are written; `undefined` leaves a column alone. */
+  updateProfile(id: number, fields: EditableProfileFields): Promise<User> {
+    return this.prisma.user.update({ where: { id }, data: fields });
+  }
+
   completeProfile(id: number, fields: ProfileCompletionFields): Promise<User> {
     return this.prisma.user.update({
       where: { id },
       data: { ...fields, profileCompleted: true },
+    });
+  }
+
+  setLastSpaceId(id: number, spaceId: string | null): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { lastSpaceId: spaceId },
     });
   }
 

@@ -9,9 +9,13 @@ export class CameraAccessorService {
   // Ordered by the recorder's channel key, not by the UUID primary key: the
   // dashboard grid renders in this order, and a UUID order is arbitrary and
   // reshuffles as cameras come and go.
-  findAll(spaceId: string): Promise<Camera[]> {
+  findAll(spaceId: string, cameraIds?: string[]): Promise<Camera[]> {
     return this.prisma.camera.findMany({
-      where: { dvr: { spaceId }, deletedAt: null },
+      where: {
+        dvr: { spaceId },
+        deletedAt: null,
+        ...(cameraIds ? { id: { in: cameraIds } } : {}),
+      },
       orderBy: { externalId: 'asc' },
     });
   }

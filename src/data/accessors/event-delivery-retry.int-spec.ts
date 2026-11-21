@@ -46,7 +46,7 @@ describe('event delivery retry (int)', () => {
     });
     userId = user.id;
     const space = await prisma.space.create({
-      data: { name: 'My Secure Space', ownerUserId: user.id },
+      data: { name: 'My Secure Space', createdByUserId: user.id },
     });
     spaceId = space.id;
     const event = await prisma.alertEvent.create({

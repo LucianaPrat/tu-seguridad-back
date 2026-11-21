@@ -11,6 +11,7 @@ import {
   Put,
   UploadedFile,
   UseFilters,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -24,13 +25,16 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SpaceMemberRole } from '@prisma/client';
+import { cameraScope } from '../../cross/common/permissions';
 import type { JwtPayload } from '../../cross/common/jwt-payload.type';
 import { ErrorCode } from '../../cross/common/constants';
 import { CurrentUser } from '../../cross/decorators/current-user.decorator';
+import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { UploadTooLargeFilter } from '../../cross/errors/upload-too-large.filter';
+import { CameraAccessGuard } from '../../cross/guards/camera-access.guard';
 import { AnalysisResult } from '../pipeline/analysis-result';
 import { SnapshotDto } from '../snapshots/dto/snapshot.dto';
 import { LiveStreamDto } from '../streaming/dto/live-stream.dto';
@@ -52,7 +56,8 @@ export class CamerasController {
   @ApiOperation({
     summary: 'List the cameras of the space',
     description:
-      'Every camera discovered on the space recorder, soft-deleted ones excluded. Each ' +
+      'Every camera discovered on the space recorder, soft-deleted ones excluded (a ' +
+      'guest sees only the cameras its membership lists). Each ' +
       'carries its discovery fields, its monitor configuration and a derived ' +
       '`latestSnapshotUrl`. A camera the recorder stopped reporting stays in the list ' +
       'with `isConfigured: false` rather than disappearing.',
@@ -66,9 +71,10 @@ export class CamerasController {
     [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
   })
   findAll(@CurrentUser() user: JwtPayload): Promise<Either<CameraDto[]>> {
-    return this.camerasService.findAll(user.spaceId);
+    return this.camerasService.findAll(user.spaceId, cameraScope(user));
   }
 
+  @UseGuards(CameraAccessGuard)
   @Get(':id')
   @ApiOperation({
     summary: 'Read one camera',
@@ -84,7 +90,8 @@ export class CamerasController {
   @ApiOkResponse({ type: CameraDto, description: 'The camera.' })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   findOne(
@@ -94,13 +101,14 @@ export class CamerasController {
     return this.camerasService.findById(user.spaceId, id);
   }
 
-  /** Monitor behavior is space configuration, so it is an admin's to change. */
-  @Roles(SpaceMemberRole.admin)
+  /** Monitor behavior is space configuration: admins and collaborators with the dvr section. */
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Put(':id')
   @ApiOperation({
     summary: 'Update a camera',
     description:
-      'Admin only. Operator-editable fields only — `externalId` and `status` come from ' +
+      'Admin or collaborator with the dvr section. Operator-editable fields only — `externalId` and `status` come from ' +
       'discovery and are rejected here. Switching a camera to full-frame monitoring ' +
       'requires an `alertType`, since there are no zones to take the alert level from.',
   })
@@ -114,7 +122,7 @@ export class CamerasController {
       'Malformed body, a rejected discovery field, or full-frame monitoring without an alertType.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   update(
@@ -125,12 +133,13 @@ export class CamerasController {
     return this.camerasService.update(user.spaceId, id, dto);
   }
 
-  @Roles(SpaceMemberRole.admin)
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
+  @RequireMenu('dvr')
   @Delete(':id')
   @ApiOperation({
     summary: 'Delete a camera',
     description:
-      'Admin only. Logical delete: the camera leaves every read and the DVR poll list, ' +
+      'Admin or collaborator with the dvr section. Logical delete: the camera leaves every read and the DVR poll list, ' +
       'its alert history is kept. A later discovery run can bring the same channel back.',
   })
   @ApiParam({
@@ -141,7 +150,7 @@ export class CamerasController {
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is a guest, lacks the dvr section, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   remove(
@@ -151,6 +160,7 @@ export class CamerasController {
     return this.camerasService.delete(user.spaceId, id);
   }
 
+  @UseGuards(CameraAccessGuard)
   @Get(':id/status')
   @ApiOperation({
     summary: 'Read the pipeline status of a camera',
@@ -171,7 +181,8 @@ export class CamerasController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
   })
   status(
@@ -181,6 +192,7 @@ export class CamerasController {
     return this.camerasService.getStatus(user.spaceId, id);
   }
 
+  @UseGuards(CameraAccessGuard)
   @Get(':id/live')
   @ApiOperation({
     summary: 'Get the live stream of a camera',
@@ -204,7 +216,8 @@ export class CamerasController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]:
       'No camera with that id in the caller space, or the space has no recorder.',
     [ErrorCode.CONFLICT]:
@@ -222,6 +235,7 @@ export class CamerasController {
   }
 
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(CameraAccessGuard)
   @Post(':id/snapshots')
   @ApiOperation({
     summary: 'Capture a snapshot now',
@@ -241,7 +255,8 @@ export class CamerasController {
   })
   @ApiFailures({
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller has not completed their profile, or a guest without this camera.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
     [ErrorCode.VALIDATION_ERROR]:
       'The recorder returned a frame over the stored-size limit.',
@@ -262,11 +277,12 @@ export class CamerasController {
    * raises an alert is stored, so accepting one that could not be persisted
    * would only fail later.
    */
+  @Roles(SpaceMemberRole.admin, SpaceMemberRole.collaborator)
   @Post(':id/analyze')
   @ApiOperation({
     summary: 'Analyze an uploaded frame',
     description:
-      'Runs the detection pipeline synchronously against an image you upload, as the ' +
+      'Admin or collaborator. Runs the detection pipeline synchronously against an image you upload, as the ' +
       'manual path for when the recorder is unreachable. Answers the detected persons, ' +
       'the per-zone results and any alerts raised; a frame that raises an alert is ' +
       'stored, the rest are not. The upload must be a real image — the magic numbers ' +
@@ -295,7 +311,7 @@ export class CamerasController {
     [ErrorCode.VALIDATION_ERROR]:
       'Missing file, a file that is not an image, or one over the size limit.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
-    [ErrorCode.FORBIDDEN]: 'Caller has not completed their profile.',
+    [ErrorCode.FORBIDDEN]: 'Caller is a guest, or has an incomplete profile.',
     [ErrorCode.NOT_FOUND]: 'No camera with that id in the caller space.',
     [ErrorCode.CONFLICT]:
       'The camera is disabled or has no monitoring configured.',

@@ -1,18 +1,18 @@
 import { HttpException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { buildData, buildError } from '../../cross/errors/either';
 import { SnapshotsController } from './snapshots.controller';
 
 describe('SnapshotsController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'member@example.com',
     spaceId: 'space-uuid',
-    role: 'member',
+    role: 'collaborator',
     profileCompleted: true,
-  };
+  });
 
   let snapshotService: { read: jest.Mock };
   let request: { fresh: boolean };
@@ -66,6 +66,29 @@ describe('SnapshotsController', () => {
     );
     expect(response.setHeader).toHaveBeenCalledWith('ETag', '"abc123"');
     expect(response.end).toHaveBeenCalledWith(data);
+  });
+
+  it('answers 403 to a guest whose cameras exclude the snapshot camera', async () => {
+    snapshotService.read.mockResolvedValue(
+      buildData({
+        cameraId: 'cam-2',
+        mimeType: 'image/png',
+        byteSize: 1,
+        sha256: 'abc',
+        data: Buffer.from('x'),
+      }),
+    );
+    const guest = buildPrincipal({ role: 'guest', cameraIds: ['cam-1'] });
+
+    await expect(
+      controller.read(
+        guest,
+        'snapshot-uuid',
+        request as unknown as Request,
+        response as unknown as Response,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(response.end).not.toHaveBeenCalled();
   });
 
   /**

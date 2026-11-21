@@ -1,10 +1,14 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Locale } from '@prisma/client';
 import {
   IsEmail,
+  IsEnum,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   AuthPolicy,
@@ -13,7 +17,8 @@ import {
 
 /**
  * Self-registration: the account, its space, its `admin` membership and the
- * space's default routing matrix. The profile is complete from the start, so a
+ * space's default routing matrix. With an `inviteToken` only the account is
+ * created: the invitation, not a new space, is where the user is headed. The profile is complete from the start, so a
  * registered owner never sees the completion gate an invited member does.
  */
 export class RegisterDto {
@@ -45,9 +50,32 @@ export class RegisterDto {
   })
   phone!: string;
 
-  @ApiProperty({ example: 'My Secure Space' })
+  @ApiPropertyOptional({
+    example: 'My Secure Space',
+    description: 'Required unless registering with an inviteToken.',
+  })
+  @ValidateIf((dto: RegisterDto) => !dto.inviteToken)
   @IsString()
   @MinLength(1)
   @MaxLength(AuthPolicy.MAX_SPACE_NAME_LENGTH)
-  spaceName!: string;
+  spaceName?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Invitation token from the mailed link. The account is created with no space; ' +
+      'accept the invitation afterwards.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(AuthPolicy.MAX_TOKEN_LENGTH)
+  inviteToken?: string;
+
+  @ApiPropertyOptional({
+    enum: Locale,
+    description: 'UI and mail language. Defaults to es.',
+  })
+  @IsOptional()
+  @IsEnum(Locale)
+  locale?: Locale;
 }

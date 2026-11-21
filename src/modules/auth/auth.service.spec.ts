@@ -31,15 +31,30 @@ describe('AuthService', () => {
     findById: jest.Mock;
     recordLogin: jest.Mock;
     completeProfile: jest.Mock;
+    updateProfile: jest.Mock;
+    updatePassword: jest.Mock;
+    create: jest.Mock;
   };
   let spaceAccessor: { createWithOwner: jest.Mock; findById: jest.Mock };
-  let spaceMemberAccessor: { findByUserId: jest.Mock };
+  let spaceMemberAccessor: {
+    findBySpaceAndUser: jest.Mock;
+    findManyByUserIdWithSpace: jest.Mock;
+  };
+  let invitationAccessor: {
+    countPendingForEmail: jest.Mock;
+    findPendingByToken: jest.Mock;
+  };
+  let dvrAccessor: { findBySpaceId: jest.Mock };
   let passwordHash: {
     hash: jest.Mock;
     verify: jest.Mock;
     verifyAgainstDummy: jest.Mock;
   };
-  let sessionService: { issue: jest.Mock; loadActiveMembership: jest.Mock };
+  let sessionService: {
+    issue: jest.Mock;
+    loadActiveMembership: jest.Mock;
+    revokeAll: jest.Mock;
+  };
   let service: AuthService;
 
   beforeEach(() => {
@@ -48,12 +63,25 @@ describe('AuthService', () => {
       findById: jest.fn(),
       recordLogin: jest.fn().mockResolvedValue(user),
       completeProfile: jest.fn(),
+      updateProfile: jest.fn(),
+      updatePassword: jest.fn().mockResolvedValue(user),
+      create: jest.fn(),
     };
     spaceAccessor = {
       createWithOwner: jest.fn(),
       findById: jest.fn().mockResolvedValue(space),
     };
-    spaceMemberAccessor = { findByUserId: jest.fn().mockResolvedValue(member) };
+    spaceMemberAccessor = {
+      findBySpaceAndUser: jest.fn().mockResolvedValue(member),
+      findManyByUserIdWithSpace: jest
+        .fn()
+        .mockResolvedValue([{ ...member, space }]),
+    };
+    invitationAccessor = {
+      countPendingForEmail: jest.fn().mockResolvedValue(0),
+      findPendingByToken: jest.fn(),
+    };
+    dvrAccessor = { findBySpaceId: jest.fn().mockResolvedValue({ id: 'dvr' }) };
     passwordHash = {
       hash: jest.fn().mockResolvedValue('new-hash'),
       verify: jest.fn().mockResolvedValue(true),
@@ -62,6 +90,7 @@ describe('AuthService', () => {
     sessionService = {
       issue: jest.fn().mockResolvedValue(TOKEN_PAIR),
       loadActiveMembership: jest.fn().mockResolvedValue({ user, member }),
+      revokeAll: jest.fn().mockResolvedValue(undefined),
     };
     service = new AuthService(
       userAccessor as never,
@@ -69,6 +98,8 @@ describe('AuthService', () => {
       spaceMemberAccessor as never,
       passwordHash,
       sessionService as never,
+      invitationAccessor as never,
+      dvrAccessor as never,
     );
   });
 
@@ -120,14 +151,17 @@ describe('AuthService', () => {
       });
     });
 
-    it('rejects an account with no accepted membership', async () => {
+    it('logs in an account that belongs to no space', async () => {
       userAccessor.findByEmail.mockResolvedValue(user);
-      spaceMemberAccessor.findByUserId.mockResolvedValue(null);
+      sessionService.loadActiveMembership.mockResolvedValue({
+        user,
+        member: null,
+      });
 
       const result = await service.login(user.email, 'correct', context);
 
-      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
-      expect(sessionService.issue).not.toHaveBeenCalled();
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+      expect(sessionService.issue).toHaveBeenCalledWith(user, null, context);
     });
 
     it('issues a session and stamps the login on success', async () => {
@@ -178,6 +212,18 @@ describe('AuthService', () => {
       expect(sessionService.issue).toHaveBeenCalledWith(user, member, context);
     });
 
+    it('registers into no space when the email has a pending invitation, even without the token', async () => {
+      userAccessor.findByEmail.mockResolvedValue(null);
+      invitationAccessor.countPendingForEmail.mockResolvedValue(1);
+      userAccessor.create.mockResolvedValue(user);
+
+      const result = await service.register(dto, context);
+
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+      expect(spaceAccessor.createWithOwner).not.toHaveBeenCalled();
+      expect(sessionService.issue).toHaveBeenCalledWith(user, null, context);
+    });
+
     it('never stores the plaintext password', async () => {
       userAccessor.findByEmail.mockResolvedValue(null);
       spaceAccessor.createWithOwner.mockResolvedValue({ user, space, member });
@@ -208,6 +254,54 @@ describe('AuthService', () => {
       spaceAccessor.createWithOwner.mockRejectedValue(new Error('boom'));
 
       await expect(service.register(dto, context)).rejects.toThrow('boom');
+    });
+
+    describe('with an inviteToken', () => {
+      const inviteDto = {
+        ...dto,
+        spaceName: undefined,
+        inviteToken: 'raw-invite',
+      };
+
+      it('creates the user alone, in no space, and leaves the invitation pending', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue({
+          email: 'new@example.com',
+        });
+        userAccessor.findByEmail.mockResolvedValue(null);
+        userAccessor.create.mockResolvedValue(user);
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+        expect(spaceAccessor.createWithOwner).not.toHaveBeenCalled();
+        expect(userAccessor.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'new@example.com',
+            profileCompleted: true,
+          }),
+        );
+        expect(sessionService.issue).toHaveBeenCalledWith(user, null, context);
+      });
+
+      it('answers not found when the invitation is not pending', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue(null);
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toMatchObject({ code: ErrorCode.NOT_FOUND });
+        expect(userAccessor.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses an email other than the invited one', async () => {
+        invitationAccessor.findPendingByToken.mockResolvedValue({
+          email: 'someone-else@example.com',
+        });
+
+        const result = await service.register(inviteDto, context);
+
+        expect(result).toMatchObject({ code: ErrorCode.FORBIDDEN });
+        expect(userAccessor.create).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -263,8 +357,40 @@ describe('AuthService', () => {
   });
 
   describe('me', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+
+    beforeEach(() => {
+      userAccessor.findById.mockResolvedValue(user);
+    });
+
+    it('returns null space fields for an account in no space', async () => {
+      const result = await service.me({ ...claims, spaceId: null });
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { spaceId: null, spaceName: null, role: null },
+      });
+    });
+
+    it('reports hasDvr false while the space has no recorder', async () => {
+      dvrAccessor.findBySpaceId.mockResolvedValue(null);
+
+      const result = await service.me(claims);
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { currentSpace: { hasDvr: false } },
+      });
+    });
+
     it('returns the profile with its space context', async () => {
-      const result = await service.me(1);
+      invitationAccessor.countPendingForEmail.mockResolvedValue(2);
+      const result = await service.me(claims);
 
       expect(result).toEqual({
         ok: true,
@@ -281,12 +407,32 @@ describe('AuthService', () => {
           spaceName: 'My Secure Space',
           role: 'admin',
           receiveAlerts: true,
+          spaces: [{ id: 'space-1', name: 'My Secure Space', role: 'admin' }],
+          currentSpace: {
+            id: 'space-1',
+            name: 'My Secure Space',
+            role: 'admin',
+            hasDvr: true,
+            menuAccess: [],
+            cameraIds: [],
+          },
+          pendingInvitationsCount: 2,
         },
       });
     });
 
+    it('returns a null currentSpace for an account in no space', async () => {
+      invitationAccessor.countPendingForEmail.mockResolvedValue(2);
+      const result = await service.me({ ...claims, spaceId: null });
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { currentSpace: null, pendingInvitationsCount: 2 },
+      });
+    });
+
     it('never returns the password hash', async () => {
-      const result = await service.me(1);
+      const result = await service.me(claims);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -294,12 +440,145 @@ describe('AuthService', () => {
       }
     });
 
-    it('returns UNAUTHORIZED for a deactivated or membership-less account', async () => {
-      sessionService.loadActiveMembership.mockResolvedValue(null);
+    it('returns UNAUTHORIZED for a deactivated account', async () => {
+      userAccessor.findById.mockResolvedValue({ ...user, isActive: false });
 
-      const result = await service.me(1);
+      const result = await service.me(claims);
 
       expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+
+    it('returns UNAUTHORIZED when the membership behind the token is gone', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      const result = await service.me(claims);
+
+      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+  });
+
+  describe('switchSpace', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+
+    it('returns FORBIDDEN when the caller is not a member of the target', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      const result = await service.switchSpace(claims, 'space-9', context);
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.FORBIDDEN,
+        message: 'You are not a member of this space',
+      });
+      expect(sessionService.issue).not.toHaveBeenCalled();
+    });
+
+    it('issues a session in the target space', async () => {
+      userAccessor.findById.mockResolvedValue(user);
+
+      const result = await service.switchSpace(claims, 'space-1', context);
+
+      expect(spaceMemberAccessor.findBySpaceAndUser).toHaveBeenCalledWith(
+        'space-1',
+        1,
+      );
+      expect(sessionService.issue).toHaveBeenCalledWith(user, member, context);
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
+    });
+
+    it('returns UNAUTHORIZED for a deactivated account', async () => {
+      userAccessor.findById.mockResolvedValue({ ...user, isActive: false });
+
+      const result = await service.switchSpace(claims, 'space-1', context);
+
+      expect(result).toMatchObject({ code: ErrorCode.UNAUTHORIZED });
+    });
+  });
+
+  describe('updateMe', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+
+    beforeEach(() => userAccessor.findById.mockResolvedValue(user));
+
+    it('writes only the provided fields', async () => {
+      await service.updateMe(claims, {
+        firstName: 'Grace',
+        phone: '+5491100000000',
+      });
+
+      expect(userAccessor.updateProfile).toHaveBeenCalledWith(1, {
+        locale: undefined,
+        firstName: 'Grace',
+        lastName: undefined,
+        phone: '+5491100000000',
+      });
+    });
+
+    it('is a no-op for an empty body', async () => {
+      const result = await service.updateMe(claims, {});
+
+      expect(userAccessor.updateProfile).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ ok: true });
+    });
+  });
+
+  describe('changePassword', () => {
+    const claims = {
+      sub: 1,
+      email: 'owner@example.com',
+      spaceId: 'space-1' as string | null,
+      profileCompleted: true,
+    };
+    const dto = {
+      currentPassword: 'old-password',
+      newPassword: 'new-password',
+    };
+
+    beforeEach(() => userAccessor.findById.mockResolvedValue(user));
+
+    it('rejects a wrong current password with VALIDATION_ERROR', async () => {
+      passwordHash.verify.mockResolvedValue(false);
+
+      const result = await service.changePassword(claims, dto, context);
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(userAccessor.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('rejects a new password equal to the current one', async () => {
+      const result = await service.changePassword(
+        claims,
+        { currentPassword: 'same-password', newPassword: 'same-password' },
+        context,
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(userAccessor.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('stores the hash, revokes every session and issues a new one', async () => {
+      const result = await service.changePassword(claims, dto, context);
+
+      expect(userAccessor.updatePassword).toHaveBeenCalledWith(1, 'new-hash');
+      expect(sessionService.revokeAll).toHaveBeenCalledWith(1);
+      expect(sessionService.issue).toHaveBeenCalledWith(user, member, context);
+      expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
     });
   });
 });

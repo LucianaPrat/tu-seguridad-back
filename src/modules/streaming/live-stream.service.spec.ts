@@ -1,6 +1,6 @@
 import { Camera } from '@prisma/client';
 import { EnvNames, ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { buildData, buildError } from '../../cross/errors/either';
 import { LiveStreamService } from './live-stream.service';
 
@@ -25,17 +25,12 @@ const camera = (overrides: Partial<Camera> = {}): Camera =>
     ...overrides,
   }) as Camera;
 
-const claims: JwtPayload = {
-  sub: 1,
-  email: 'admin@example.com',
-  spaceId: 'space-uuid',
-  role: 'admin',
-  profileCompleted: true,
-};
+const claims = buildPrincipal();
 
 describe('LiveStreamService', () => {
   let cameraAccessor: { findById: jest.Mock };
   let dvrAccessor: { findCredentialsBySpaceId: jest.Mock };
+  let spaceMemberAccessor: { findBySpaceAndUser: jest.Mock };
   let dvrClient: { streamUrl: jest.Mock };
   let publisher: { publish: jest.Mock; unpublish: jest.Mock };
   let jwtService: { verify: jest.Mock };
@@ -67,6 +62,9 @@ describe('LiveStreamService', () => {
         }),
       ),
     };
+    spaceMemberAccessor = {
+      findBySpaceAndUser: jest.fn().mockResolvedValue({ userId: 1 }),
+    };
     jwtService = { verify: jest.fn().mockReturnValue(claims) };
     configService = { get: jest.fn().mockReturnValue('jwt-secret') };
     service = new LiveStreamService(
@@ -76,6 +74,7 @@ describe('LiveStreamService', () => {
       publisher,
       jwtService as never,
       configService as never,
+      spaceMemberAccessor as never,
     );
   });
 
@@ -240,6 +239,33 @@ describe('LiveStreamService', () => {
       expect(cameraAccessor.findById).not.toHaveBeenCalled();
     });
 
+    it('refuses a guest a camera outside its membership, before any camera lookup', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        userId: 1,
+        role: 'guest',
+        menuAccess: [],
+        cameraIds: ['other-camera'],
+      });
+
+      const result = await service.authorize(request);
+
+      expect(result).toMatchObject({ ok: false, code: ErrorCode.FORBIDDEN });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
+    });
+
+    it('authorizes a guest on a camera of its membership', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        userId: 1,
+        role: 'guest',
+        menuAccess: [],
+        cameraIds: ['camera-uuid'],
+      });
+
+      const result = await service.authorize(request);
+
+      expect(result).toEqual({ ok: true, data: { authorized: true } });
+    });
+
     it('refuses a refresh token presented as a reader credential', async () => {
       jwtService.verify.mockReturnValue({ ...claims, type: 'refresh' });
 
@@ -258,6 +284,30 @@ describe('LiveStreamService', () => {
         ...claims,
         profileCompleted: false,
       });
+
+      const result = await service.authorize(request);
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.FORBIDDEN,
+      });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
+    });
+
+    it('refuses a token that names no space', async () => {
+      jwtService.verify.mockReturnValue({ ...claims, spaceId: null });
+
+      const result = await service.authorize(request);
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.UNAUTHORIZED,
+      });
+      expect(cameraAccessor.findById).not.toHaveBeenCalled();
+    });
+
+    it('refuses a reader who is no longer a member of the token space', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
 
       const result = await service.authorize(request);
 

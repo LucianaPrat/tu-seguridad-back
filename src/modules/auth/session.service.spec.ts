@@ -10,6 +10,7 @@ describe('SessionService', () => {
     email: 'owner@example.com',
     isActive: true,
     profileCompleted: true,
+    lastSpaceId: 'space-1',
   } as User;
   const member = {
     id: 'member-1',
@@ -27,8 +28,11 @@ describe('SessionService', () => {
     revoke: jest.Mock;
     revokeAllByUserAndPurpose: jest.Mock;
   };
-  let userAccessor: { findById: jest.Mock };
-  let spaceMemberAccessor: { findByUserId: jest.Mock };
+  let userAccessor: { findById: jest.Mock; setLastSpaceId: jest.Mock };
+  let spaceMemberAccessor: {
+    findBySpaceAndUser: jest.Mock;
+    findLatestByUserId: jest.Mock;
+  };
   let service: SessionService;
 
   beforeEach(() => {
@@ -59,9 +63,13 @@ describe('SessionService', () => {
       revoke: jest.fn().mockResolvedValue(true),
       revokeAllByUserAndPurpose: jest.fn().mockResolvedValue(2),
     };
-    userAccessor = { findById: jest.fn().mockResolvedValue(user) };
+    userAccessor = {
+      findById: jest.fn().mockResolvedValue(user),
+      setLastSpaceId: jest.fn().mockResolvedValue(user),
+    };
     spaceMemberAccessor = {
-      findByUserId: jest.fn().mockResolvedValue(member),
+      findBySpaceAndUser: jest.fn().mockResolvedValue(member),
+      findLatestByUserId: jest.fn().mockResolvedValue(member),
     };
     service = new SessionService(
       jwtService as never,
@@ -77,19 +85,66 @@ describe('SessionService', () => {
       userAccessor.findById.mockResolvedValue({ ...user, isActive: false });
 
       await expect(service.loadActiveMembership(1)).resolves.toBeNull();
-      expect(spaceMemberAccessor.findByUserId).not.toHaveBeenCalled();
+      expect(spaceMemberAccessor.findLatestByUserId).not.toHaveBeenCalled();
     });
 
-    it('rejects an account with no accepted membership', async () => {
-      spaceMemberAccessor.findByUserId.mockResolvedValue(null);
+    it('returns the user with no membership when it belongs to no space', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+      spaceMemberAccessor.findLatestByUserId.mockResolvedValue(null);
 
-      await expect(service.loadActiveMembership(1)).resolves.toBeNull();
-    });
-
-    it('returns the user with its membership', async () => {
       await expect(service.loadActiveMembership(1)).resolves.toEqual({
         user,
-        member,
+        member: null,
+      });
+    });
+
+    describe('which space it resolves', () => {
+      const other = { ...member, spaceId: 'space-2' };
+      const latest = { ...member, spaceId: 'space-3' };
+      const memberOf = (...spaceIds: string[]) =>
+        spaceMemberAccessor.findBySpaceAndUser.mockImplementation(
+          (spaceId: string) =>
+            Promise.resolve(
+              [member, other].find(
+                (m) => m.spaceId === spaceId && spaceIds.includes(spaceId),
+              ) ?? null,
+            ),
+        );
+
+      beforeEach(() => {
+        spaceMemberAccessor.findLatestByUserId.mockResolvedValue(latest);
+      });
+
+      it('prefers the requested space', async () => {
+        memberOf('space-1', 'space-2');
+
+        const result = await service.loadActiveMembership(1, 'space-2');
+
+        expect(result?.member).toBe(other);
+      });
+
+      it('falls back to lastSpaceId when the requested space is no longer a membership', async () => {
+        memberOf('space-1');
+
+        const result = await service.loadActiveMembership(1, 'space-2');
+
+        expect(result?.member).toBe(member);
+      });
+
+      it('falls back to the latest membership when lastSpaceId is gone too', async () => {
+        memberOf();
+
+        const result = await service.loadActiveMembership(1, 'space-2');
+
+        expect(result?.member).toBe(latest);
+      });
+
+      it('uses lastSpaceId when nothing was requested', async () => {
+        memberOf('space-1', 'space-2');
+
+        const result = await service.loadActiveMembership(1);
+
+        expect(result?.member).toBe(member);
       });
     });
   });
@@ -107,7 +162,6 @@ describe('SessionService', () => {
           sub: 1,
           email: user.email,
           spaceId: 'space-1',
-          role: 'admin',
           profileCompleted: true,
         },
         expect.objectContaining({ secret: 'access-secret' }),
@@ -116,6 +170,24 @@ describe('SessionService', () => {
         expect.objectContaining({ type: 'refresh', spaceId: 'space-1' }),
         expect.objectContaining({ secret: 'refresh-secret' }),
       );
+    });
+
+    it('signs a null space for an account with no membership', async () => {
+      await service.issue(user, null, context);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ spaceId: null }),
+        expect.objectContaining({ secret: 'access-secret' }),
+      );
+      expect(userAccessor.setLastSpaceId).not.toHaveBeenCalled();
+    });
+
+    it('persists the space it lands in as lastSpaceId, only when it changed', async () => {
+      await service.issue(user, member, context);
+      expect(userAccessor.setLastSpaceId).not.toHaveBeenCalled();
+
+      await service.issue(user, { ...member, spaceId: 'space-2' }, context);
+      expect(userAccessor.setLastSpaceId).toHaveBeenCalledWith(1, 'space-2');
     });
 
     /**
@@ -164,7 +236,6 @@ describe('SessionService', () => {
         sub: 1,
         email: user.email,
         spaceId: 'space-1',
-        role: 'admin',
         profileCompleted: true,
         type: 'refresh',
       };
@@ -205,11 +276,11 @@ describe('SessionService', () => {
 
     it('rotates the stored token and rebuilds the claims from the database', async () => {
       jwtService.verify.mockReturnValue(validRefreshPayload());
-      // Claims that went stale since the token was signed: the member was
-      // promoted, and refresh is where the client finds out.
-      spaceMemberAccessor.findByUserId.mockResolvedValue({
-        ...member,
-        role: 'member',
+      // The profile was completed since the token was signed; refresh is where
+      // the client finds out.
+      userAccessor.findById.mockResolvedValue({
+        ...user,
+        profileCompleted: false,
       });
       authTokenAccessor.rotateRefresh.mockResolvedValue({ id: 'token-2' });
 
@@ -223,7 +294,10 @@ describe('SessionService', () => {
         },
       });
       expect(jwtService.sign).toHaveBeenCalledWith(
-        expect.objectContaining({ role: 'member' }),
+        expect.objectContaining({
+          spaceId: 'space-1',
+          profileCompleted: false,
+        }),
         expect.objectContaining({ secret: 'access-secret' }),
       );
       expect(authTokenAccessor.rotateRefresh).toHaveBeenCalledWith(
@@ -233,6 +307,25 @@ describe('SessionService', () => {
           token: 'signed-with-refresh-secret',
           expiresAt: new Date(NOW_SECONDS * 1000),
         }),
+      );
+    });
+
+    it('keeps the space the refresh token was in', async () => {
+      jwtService.verify.mockReturnValue({
+        ...validRefreshPayload(),
+        spaceId: 'space-2',
+      });
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({
+        ...member,
+        spaceId: 'space-2',
+      });
+      authTokenAccessor.rotateRefresh.mockResolvedValue({ id: 'token-2' });
+
+      await service.rotate('refresh-token', context);
+
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ spaceId: 'space-2' }),
+        expect.objectContaining({ secret: 'access-secret' }),
       );
     });
 

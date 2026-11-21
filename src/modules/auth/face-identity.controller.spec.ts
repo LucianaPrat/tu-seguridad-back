@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { ErrorCode } from '../../cross/common/constants';
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { SessionContext } from '../../cross/common/session-context.type';
 import { buildData, buildError } from '../../cross/errors/either';
 import { AccessTokenDto } from './dto/access-token.dto';
@@ -11,13 +11,13 @@ import { FaceIdentityController } from './face-identity.controller';
 const CONTEXT: SessionContext = { userAgent: 'jest', ip: '127.0.0.1' };
 
 describe('FaceIdentityController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'owner@example.com',
     spaceId: 'space-uuid',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   let faceIdentityService: { register: jest.Mock; login: jest.Mock };
   let refreshCookie: { issueSession: jest.Mock };
@@ -57,7 +57,7 @@ describe('FaceIdentityController', () => {
     });
 
     it("uses the caller's own id, not a fixed one", async () => {
-      const otherUser: JwtPayload = { ...user, sub: 42 };
+      const otherUser = { ...user, sub: 42 };
       faceIdentityService.register.mockResolvedValue(
         buildData<FaceIdentityDto>({
           id: 'identity-uuid',

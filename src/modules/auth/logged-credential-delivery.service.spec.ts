@@ -7,6 +7,7 @@ describe('LoggedCredentialDeliveryService', () => {
     email: 'member@example.com',
     token: 'raw-secret-token',
     expiresAt: new Date('2026-08-25T00:00:00.000Z'),
+    locale: 'es' as const,
   };
 
   function serviceFor(nodeEnv: string) {
@@ -26,6 +27,25 @@ describe('LoggedCredentialDeliveryService', () => {
 
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('raw-secret-token'),
+    );
+  });
+
+  it('also prints space, inviter and role for an invitation in development', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await serviceFor('development').deliver({
+      ...delivery,
+      invitation: {
+        spaceName: 'Casa',
+        inviterName: 'Ada Lovelace',
+        role: 'guest',
+      },
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'space "Casa", invited by Ada Lovelace, role guest',
+      ),
     );
   });
 

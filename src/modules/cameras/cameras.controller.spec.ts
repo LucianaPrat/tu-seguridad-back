@@ -1,14 +1,14 @@
-import { JwtPayload } from '../../cross/common/jwt-payload.type';
+import { buildPrincipal } from '../../cross/common/jwt-payload.fixture';
 import { CamerasController } from './cameras.controller';
 
 describe('CamerasController', () => {
-  const user: JwtPayload = {
+  const user = buildPrincipal({
     sub: 1,
     email: 'admin@example.com',
     spaceId: 'space-uuid',
     role: 'admin',
     profileCompleted: true,
-  };
+  });
 
   let camerasService: {
     findAll: jest.Mock;
@@ -41,7 +41,19 @@ describe('CamerasController', () => {
 
   it('delegates findAll with the caller space', async () => {
     await controller.findAll(user);
-    expect(camerasService.findAll).toHaveBeenCalledWith('space-uuid');
+    expect(camerasService.findAll).toHaveBeenCalledWith(
+      'space-uuid',
+      undefined,
+    );
+  });
+
+  it('scopes findAll to the cameras of a guest', async () => {
+    await controller.findAll(
+      buildPrincipal({ role: 'guest', cameraIds: ['cam-1'] }),
+    );
+    expect(camerasService.findAll).toHaveBeenCalledWith('space-uuid', [
+      'cam-1',
+    ]);
   });
 
   it('delegates findOne with the caller space', async () => {

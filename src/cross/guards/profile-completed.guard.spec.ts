@@ -1,6 +1,6 @@
 import { ExecutionContext, HttpException } from '@nestjs/common';
 import { ErrorCode } from '../common/constants';
-import { JwtPayload } from '../common/jwt-payload.type';
+import type { AccessTokenClaims } from '../common/jwt-payload.type';
 import { RequestWithUser } from './jwt-auth.guard';
 import { ProfileCompletedGuard } from './profile-completed.guard';
 
@@ -8,16 +8,15 @@ describe('ProfileCompletedGuard', () => {
   let reflector: { getAllAndOverride: jest.Mock };
   let guard: ProfileCompletedGuard;
 
-  const invitedUser: JwtPayload = {
+  const invitedUser: AccessTokenClaims = {
     sub: 7,
     email: 'invited@example.com',
     spaceId: 'space-1',
-    role: 'member',
     profileCompleted: false,
   };
 
-  function contextFor(user?: JwtPayload): ExecutionContext {
-    const request: Partial<RequestWithUser> = { user };
+  function contextFor(claims?: AccessTokenClaims): ExecutionContext {
+    const request: Partial<RequestWithUser> = { claims };
     return {
       getHandler: () => ({}),
       getClass: () => ({}),

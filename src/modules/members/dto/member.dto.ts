@@ -1,4 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SpaceMemberRole } from '@prisma/client';
+import { MENU_KEYS, MenuKey } from '../../../cross/common/permissions';
 
 /**
  * One row of the space roster the Members screen renders.
@@ -44,4 +46,20 @@ export class MemberDto {
       'member stays in the space but no alert delivery is planned for them.',
   })
   receiveAlerts!: boolean;
+
+  @ApiProperty({ enum: SpaceMemberRole })
+  role!: SpaceMemberRole;
+
+  @ApiPropertyOptional({
+    enum: MENU_KEYS,
+    isArray: true,
+    description: 'Only when the caller is an admin.',
+  })
+  menuAccess?: MenuKey[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Only when the caller is an admin.',
+  })
+  cameraIds?: string[];
 }

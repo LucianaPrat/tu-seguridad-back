@@ -297,9 +297,12 @@ describe('Monitor zones (e2e)', () => {
     expect(deleted.status).toBe(404);
   });
 
-  it('lets a member read zones but not draw them', async () => {
+  it('lets a guest read zones but not draw them', async () => {
     await createZone(validZone);
-    await seedMember(ctx.prisma, admin.spaceId, 'zones-member@example.com');
+    await seedMember(ctx.prisma, admin.spaceId, 'zones-member@example.com', {
+      role: 'guest',
+      cameraIds: [camera.id],
+    });
     const memberToken = await loginAs(
       ctx.httpServer,
       'zones-member@example.com',
