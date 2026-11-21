@@ -54,37 +54,41 @@ jobs:
         with:
           submodules: true
 
+      # Before setup-node: its pnpm cache needs the binary. Version comes from
+      # package.json `packageManager`.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
+          cache: 'pnpm'
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
-      - run: npm run format:check
+      - run: pnpm run format:check
 
-      - run: npm run lint
+      - run: pnpm run lint
 
-      - run: npm run typecheck
+      - run: pnpm run typecheck
 
-      - run: npm run build
+      - run: pnpm run build
 
       - name: Check OpenAPI contract is up to date
         run: |
-          npm run openapi:export
+          pnpm run openapi:export
           git diff --exit-code -- openapi.json \
-            || (echo "::error::OpenAPI contract changed. Run 'npm run openapi:export' and commit openapi.json." && exit 1)
+            || (echo "::error::OpenAPI contract changed. Run 'pnpm run openapi:export' and commit openapi.json." && exit 1)
 
-      - run: npx prisma migrate deploy
+      - run: pnpm exec prisma migrate deploy
 
-      - run: npm run prisma:seed
+      - run: pnpm run prisma:seed
 
-      - run: npm run test:all
+      - run: pnpm run test:all
 
       # The coverage threshold in package.json (lines: 80) was configured but
       # nothing ran it, so it could not fail a build. This is the step that
       # makes it a gate.
-      - run: npm run test:cov
+      - run: pnpm run test:cov
 
       # Dependency audit + secret scan. Gate scope and why: see AGENTS.md "Checks".
-      - run: npm run security
+      - run: pnpm run security
