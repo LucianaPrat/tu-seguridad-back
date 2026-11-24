@@ -3,7 +3,7 @@
 # Dev counterpart and full rationale: docker/mediamtx.yml,
 # docs/DEPLOY_ROADMAP.md (phase 6, sections 5 and 7).
 #
-#   DVR :554 --(router WAN port)--> MediaMTX --HLS 127.0.0.1:8888--> nginx /hls/
+#   DVR :554 --(router WAN port)--> MediaMTX --HLS 127.0.0.1:8890--> nginx /hls/
 #     --> CloudFront /hls/* --> browser
 ###############################################################################
 
@@ -24,8 +24,10 @@ authHTTPExclude:
   - action: pprof
 
 # HLS: loopback only, nginx exposes it under /hls/ with TLS.
+# Not 8888: the OTel collector (deployed by face-api) holds it for its own
+# telemetry on this host.
 hls: yes
-hlsAddress: 127.0.0.1:8888
+hlsAddress: 127.0.0.1:8890
 hlsVariant: fmp4
 hlsAllowOrigins:
   - 'https://paulina.frascarelli.com.uy'
