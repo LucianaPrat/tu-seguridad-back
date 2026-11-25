@@ -1,4 +1,5 @@
 import { SpaceMemberRosterRecord } from '../../data/accessors/space-member.accessor';
+import { ErrorCode } from '../../cross/common/constants';
 import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { MembersService } from './members.service';
 
@@ -40,8 +41,14 @@ describe('MembersService', () => {
     findBySpaceAndUser: jest.Mock;
     update: jest.Mock;
     remove: jest.Mock;
+    create: jest.Mock;
+    createUserWithMembership: jest.Mock;
+    findRoster: jest.Mock;
   };
   let cameraAccessor: { findAll: jest.Mock };
+  let userAccessor: { findByEmail: jest.Mock; findById: jest.Mock };
+  let invitationAccessor: { findPendingBySpaceAndEmail: jest.Mock };
+  let passwordHash: { hash: jest.Mock };
   let service: MembersService;
 
   beforeEach(() => {
@@ -50,11 +57,150 @@ describe('MembersService', () => {
       findBySpaceAndUser: jest.fn(),
       update: jest.fn(),
       remove: jest.fn(),
+      create: jest.fn(),
+      createUserWithMembership: jest.fn(),
+      findRoster: jest.fn(),
     };
     cameraAccessor = { findAll: jest.fn() };
+    userAccessor = { findByEmail: jest.fn(), findById: jest.fn() };
+    invitationAccessor = { findPendingBySpaceAndEmail: jest.fn() };
+    passwordHash = { hash: jest.fn().mockResolvedValue('hashed') };
     service = new MembersService(
       spaceMemberAccessor as never,
       cameraAccessor as never,
+      userAccessor as never,
+      invitationAccessor as never,
+      passwordHash as never,
+    );
+  });
+
+  describe('create', () => {
+    const adminId = 9;
+    const profile = {
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      phone: '+5491122334455',
+      password: 'a-long-password-1',
+    };
+
+    beforeEach(() => {
+      userAccessor.findByEmail.mockResolvedValue(null);
+      userAccessor.findById.mockResolvedValue({ locale: 'en' });
+      invitationAccessor.findPendingBySpaceAndEmail.mockResolvedValue(null);
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+      spaceMemberAccessor.createUserWithMembership.mockResolvedValue({
+        id: 5,
+      });
+      spaceMemberAccessor.findRoster.mockResolvedValue(buildMember({ id: 5 }));
+    });
+
+    it('creates user and membership in one call for a new email', async () => {
+      const res = await service.create(spaceId, adminId, {
+        email: ' New@Example.com ',
+        role: 'guest',
+        ...profile,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(passwordHash.hash).toHaveBeenCalledWith(profile.password);
+      expect(spaceMemberAccessor.createUserWithMembership).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'new@example.com',
+          passwordHash: 'hashed',
+          isActive: true,
+          profileCompleted: true,
+          lastSpaceId: spaceId,
+          locale: 'en',
+        }),
+        {
+          spaceId,
+          role: 'guest',
+          menuAccess: DEFAULT_MENU_ACCESS.guest,
+          cameraIds: [],
+          invitedByUserId: adminId,
+          receiveAlerts: false,
+        },
+      );
+      expect(spaceMemberAccessor.create).not.toHaveBeenCalled();
+    });
+
+    it('only creates the membership for an existing non-member and keeps the account', async () => {
+      userAccessor.findByEmail.mockResolvedValue({ id: 5 });
+
+      const res = await service.create(spaceId, adminId, {
+        email: 'old@example.com',
+        role: 'collaborator',
+        password: 'ignored-password-1',
+      });
+
+      expect(res.ok).toBe(true);
+      expect(spaceMemberAccessor.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 5, receiveAlerts: true }),
+      );
+      expect(passwordHash.hash).not.toHaveBeenCalled();
+      expect(
+        spaceMemberAccessor.createUserWithMembership,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 for an existing member', async () => {
+      userAccessor.findByEmail.mockResolvedValue({ id: 5 });
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue({});
+
+      const res = await service.create(spaceId, adminId, {
+        email: 'old@example.com',
+        role: 'collaborator',
+      });
+
+      expect(res).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
+    });
+
+    it('answers 409 for a pending invitation', async () => {
+      invitationAccessor.findPendingBySpaceAndEmail.mockResolvedValue({});
+
+      const res = await service.create(spaceId, adminId, {
+        email: 'x@example.com',
+        role: 'collaborator',
+        ...profile,
+      });
+
+      expect(res).toMatchObject({ ok: false, code: ErrorCode.CONFLICT });
+    });
+
+    it('rejects cameras of another space', async () => {
+      cameraAccessor.findAll.mockResolvedValue([]);
+
+      const res = await service.create(spaceId, adminId, {
+        email: 'x@example.com',
+        role: 'guest',
+        cameraIds: ['11111111-1111-4111-8111-111111111111'],
+        ...profile,
+      });
+
+      expect(res).toMatchObject({
+        ok: false,
+        code: ErrorCode.VALIDATION_ERROR,
+      });
+      expect(
+        spaceMemberAccessor.createUserWithMembership,
+      ).not.toHaveBeenCalled();
+    });
+
+    it.each(['firstName', 'lastName', 'phone', 'password'] as const)(
+      'rejects a new user missing %s',
+      async (field) => {
+        const res = await service.create(spaceId, adminId, {
+          email: 'x@example.com',
+          role: 'collaborator',
+          ...profile,
+          [field]: undefined,
+        });
+
+        expect(res).toMatchObject({
+          ok: false,
+          code: ErrorCode.VALIDATION_ERROR,
+        });
+      },
     );
   });
 
