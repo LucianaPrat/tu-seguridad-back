@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, SpaceMember, SpaceMemberRole } from '@prisma/client';
+import { Prisma, SpaceMember, SpaceMemberRole, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Only the columns the roster renders. `include: { user: true }` would hand the
@@ -50,6 +50,28 @@ export class SpaceMemberAccessorService {
 
   create(data: Prisma.SpaceMemberUncheckedCreateInput): Promise<SpaceMember> {
     return this.prisma.spaceMember.create({ data });
+  }
+
+  /** A new account and its membership land together or not at all. */
+  createUserWithMembership(
+    user: Prisma.UserUncheckedCreateInput,
+    member: Omit<Prisma.SpaceMemberUncheckedCreateInput, 'userId'>,
+  ): Promise<User> {
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({ data: user });
+      await tx.spaceMember.create({ data: { ...member, userId: created.id } });
+      return created;
+    });
+  }
+
+  findRoster(
+    spaceId: string,
+    userId: number,
+  ): Promise<SpaceMemberRosterRecord | null> {
+    return this.prisma.spaceMember.findUnique({
+      where: { spaceId_userId: { spaceId, userId } },
+      select: ROSTER_SELECT,
+    });
   }
 
   findLatestByUserId(userId: number): Promise<SpaceMember | null> {

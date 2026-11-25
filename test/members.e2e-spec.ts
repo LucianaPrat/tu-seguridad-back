@@ -252,4 +252,107 @@ describe('Members (e2e)', () => {
       expect(res.status).toBe(400);
     });
   });
+
+  describe('POST /members', () => {
+    const profile = {
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      phone: '+5491122334455',
+      password: 'a-long-password-1',
+    };
+
+    function createMember(body: object, bearer = token) {
+      return request(ctx.httpServer)
+        .post('/api/v1/members')
+        .set(auth(bearer))
+        .send(body);
+    }
+
+    it('creates a new user who logs in and passes the profile gate', async () => {
+      const res = await createMember({
+        email: 'New@Example.com',
+        role: 'collaborator',
+        ...profile,
+      });
+
+      expect(res.status).toBe(201);
+      expect(typedBody<MemberBody>(res)).toMatchObject({
+        email: 'new@example.com',
+        firstName: 'Ada',
+        role: 'collaborator',
+        isActive: true,
+        profileCompleted: true,
+        receiveAlerts: true,
+      });
+
+      const newToken = await loginAs(
+        ctx.httpServer,
+        'new@example.com',
+        profile.password,
+      );
+      // A menu route behind the profile-completed guard: 200, not 403.
+      const cameras = await request(ctx.httpServer)
+        .get('/api/v1/cameras')
+        .set(auth(newToken));
+      expect(cameras.status).toBe(200);
+    });
+
+    it('adds an existing account without touching its password', async () => {
+      const other = await seedTenant(
+        ctx.prisma,
+        'other-owner@example.com',
+        'Other Space',
+      );
+
+      const res = await createMember({
+        email: other.email,
+        role: 'guest',
+        password: 'would-be-new-password-1',
+      });
+
+      expect(res.status).toBe(201);
+      expect(typedBody<MemberBody>(res).id).toBe(other.userId);
+      await expect(
+        loginAs(ctx.httpServer, other.email, other.password),
+      ).resolves.toEqual(expect.any(String));
+    });
+
+    it('answers 409 for a current member', async () => {
+      const member = await seedMember(
+        ctx.prisma,
+        admin.spaceId,
+        'm@example.com',
+      );
+
+      const res = await createMember({ email: member.email, role: 'guest' });
+
+      expect(res.status).toBe(409);
+    });
+
+    it('answers 400 for a new user without profile fields', async () => {
+      const res = await createMember({ email: 'x@example.com', role: 'guest' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('answers 403 for a non-admin', async () => {
+      const member = await seedMember(
+        ctx.prisma,
+        admin.spaceId,
+        'm@example.com',
+      );
+      const memberToken = await loginAs(
+        ctx.httpServer,
+        member.email,
+        E2E_PASSWORD,
+      );
+
+      const res = await createMember(
+        { email: 'x@example.com', role: 'guest', ...profile },
+        memberToken,
+      );
+
+      expect(res.status).toBe(403);
+    });
+  });
 });

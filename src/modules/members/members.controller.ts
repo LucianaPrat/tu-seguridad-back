@@ -8,8 +8,10 @@ import {
   Param,
   ParseIntPipe,
   Patch,
+  Post,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -23,6 +25,7 @@ import { RequireMenu } from '../../cross/decorators/require-menu.decorator';
 import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
+import { CreateMemberDto } from './dto/create-member.dto';
 import { MemberDto } from './dto/member.dto';
 import { MemberListDto } from './dto/member-list.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
@@ -53,6 +56,32 @@ export class MembersController {
       user.spaceId,
       user.role === SpaceMemberRole.admin,
     );
+  }
+
+  @Roles(SpaceMemberRole.admin)
+  @Post()
+  @ApiOperation({
+    summary: 'Add a member directly, with no invitation or email',
+    description:
+      'Admin only. An email with an account only gains the membership; its password ' +
+      'and profile are left alone. A new email needs firstName, lastName, phone and ' +
+      'password (400 otherwise) and gets a ready-to-use account.',
+  })
+  @ApiCreatedResponse({ type: MemberDto, description: 'The created member.' })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]:
+      'Malformed body, cameraIds outside this space, or profile fields missing for a new user.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+    [ErrorCode.CONFLICT]:
+      'Already a member of the space, or an invitation for the email is pending.',
+  })
+  create(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateMemberDto,
+  ): Promise<Either<MemberDto>> {
+    return this.membersService.create(user.spaceId, user.sub, dto);
   }
 
   @Roles(SpaceMemberRole.admin)
