@@ -1,0 +1,37 @@
+###############################################################################
+# MediaMTX — production config (EC2 that runs the API under pm2, no Docker).
+# Dev counterpart and full rationale: docker/mediamtx.yml,
+# docs/DEPLOY_ROADMAP.md (phase 6, sections 5 and 7).
+#
+#   DVR :554 --(router WAN port)--> MediaMTX --HLS 127.0.0.1:8888--> nginx /hls/
+#     --> CloudFront /hls/* --> browser
+###############################################################################
+
+logLevel: info
+
+# Control API: receives the DVR password, authenticates nobody. Loopback only.
+api: yes
+apiAddress: 127.0.0.1:9997
+
+# Every playlist/segment request is authorized by the API (port 3001 on this
+# host, 3000 belongs to face-api). authHTTPExclude is load-bearing: without it
+# the API path registration itself goes through the hook and is denied.
+authMethod: http
+authHTTPAddress: http://127.0.0.1:3001/api/v1/streaming/authorize
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+# HLS: loopback only, nginx exposes it under /hls/ with TLS.
+hls: yes
+hlsAddress: 127.0.0.1:8888
+hlsVariant: fmp4
+hlsAllowOrigins:
+  - 'https://paulina.frascarelli.com.uy'
+
+rtsp: no
+rtmp: no
+webrtc: no
+srt: no
+moq: no
