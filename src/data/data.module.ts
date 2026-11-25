@@ -18,6 +18,7 @@ import { SpaceAccessorService } from './accessors/space.accessor';
 import { UserAccessorService } from './accessors/user.accessor';
 import { UserFaceIdentityAccessorService } from './accessors/user-face-identity.accessor';
 import { MonitorZoneAccessorService } from './accessors/zone.accessor';
+import { MemberActivityAccessorService } from './accessors/member-activity.accessor';
 import { PrismaService } from './prisma/prisma.service';
 
 @Global()
@@ -43,6 +44,7 @@ import { PrismaService } from './prisma/prisma.service';
     AlertRoutingAccessorService,
     AlertEventAccessorService,
     EventDeliveryAccessorService,
+    MemberActivityAccessorService,
   ],
   exports: [
     CredentialHashService,
@@ -64,6 +66,7 @@ import { PrismaService } from './prisma/prisma.service';
     AlertRoutingAccessorService,
     AlertEventAccessorService,
     EventDeliveryAccessorService,
+    MemberActivityAccessorService,
   ],
 })
 export class DataModule {}

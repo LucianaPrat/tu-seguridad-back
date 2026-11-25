@@ -6340,6 +6340,117 @@
         ]
       }
     },
+    "/api/v1/members/activity": {
+      "get": {
+        "description": "Admin only. An access is a session of authenticated API requests (a new one starts after 30 idle minutes), so saved-token users count. Covers the last `days` calendar days (7, 30 or 90; default 30) ending today in the space DVR timezone, plus totals for the `days` before for deltas. `lastAccess` is all time. Only current members are counted.",
+        "operationId": "MembersController_activity_v1",
+        "parameters": [
+          {
+            "name": "days",
+            "required": false,
+            "in": "query",
+            "description": "Window, in calendar days ending today in the space timezone",
+            "schema": {
+              "default": 30,
+              "type": "number",
+              "enum": [
+                7,
+                30,
+                90
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberActivityDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — `days` is not 7, 30 or 90.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Access and live-stream activity of the space members",
+        "tags": [
+          "members"
+        ]
+      }
+    },
     "/api/v1/members/{userId}": {
       "patch": {
         "description": "Admin only. The id is the user id the roster returns. Every field is optional. An admin cannot change their own role (409); the same role is a no-op.",
@@ -8836,6 +8947,154 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "AccessesByDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-09-14"
+          },
+          "userId": {
+            "type": "number"
+          },
+          "sessions": {
+            "type": "number",
+            "description": "Sessions that started that day (always > 0)"
+          }
+        },
+        "required": [
+          "date",
+          "userId",
+          "sessions"
+        ]
+      },
+      "WatchByDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-09-14"
+          },
+          "cameraId": {
+            "type": "string"
+          },
+          "minutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "cameraId",
+          "minutes"
+        ]
+      },
+      "WatchByUserCameraDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "number"
+          },
+          "cameraId": {
+            "type": "string"
+          },
+          "minutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "userId",
+          "cameraId",
+          "minutes"
+        ]
+      },
+      "LastAccessDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "number"
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO 8601 instant of the last authenticated hit"
+          }
+        },
+        "required": [
+          "userId",
+          "at"
+        ]
+      },
+      "PreviousPeriodDto": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "number"
+          },
+          "activeUsers": {
+            "type": "number"
+          },
+          "watchMinutes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "sessions",
+          "activeUsers",
+          "watchMinutes"
+        ]
+      },
+      "MemberActivityDto": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "example": "America/Montevideo"
+          },
+          "days": {
+            "description": "Every YYYY-MM-DD of the period, ascending",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accessesByDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessesByDayDto"
+            }
+          },
+          "watchByDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchByDayDto"
+            }
+          },
+          "watchByUserCamera": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchByUserCameraDto"
+            }
+          },
+          "lastAccess": {
+            "description": "All time; members with no hits are omitted",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LastAccessDto"
+            }
+          },
+          "previous": {
+            "$ref": "#/components/schemas/PreviousPeriodDto"
+          }
+        },
+        "required": [
+          "timezone",
+          "days",
+          "accessesByDay",
+          "watchByDay",
+          "watchByUserCamera",
+          "lastAccess",
+          "previous"
         ]
       },
       "CreateMemberDto": {

@@ -6,13 +6,19 @@ import { Counter } from 'prom-client';
 import { EnvNames } from '../../cross/common/constants';
 import { MetricNames } from '../../cross/metrics/metric-names';
 import { AuthTokenAccessorService } from '../../data/accessors/auth-token.accessor';
+import { MemberActivityAccessorService } from '../../data/accessors/member-activity.accessor';
 import { InvitationAccessorService } from '../../data/accessors/invitation.accessor';
 import { SnapshotAccessorService } from '../../data/accessors/snapshot.accessor';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Sweep names are label values on the counter, so they are fixed strings. */
-type SweepName = 'auth_tokens' | 'invitations' | 'snapshots';
+type SweepName =
+  | 'auth_tokens'
+  | 'invitations'
+  | 'snapshots'
+  | 'login_events'
+  | 'stream_watch_minutes';
 
 /**
  * The only thing in this process that deletes a row.
@@ -35,6 +41,7 @@ export class RetentionService {
     private readonly authTokenAccessor: AuthTokenAccessorService,
     private readonly invitationAccessor: InvitationAccessorService,
     private readonly snapshotAccessor: SnapshotAccessorService,
+    private readonly memberActivityAccessor: MemberActivityAccessorService,
     @InjectMetric(MetricNames.RETENTION_ROWS_DELETED_TOTAL)
     private readonly rowsDeleted: Counter<string>,
   ) {}
@@ -66,6 +73,14 @@ export class RetentionService {
     );
     await this.run('snapshots', EnvNames.RETENTION_SNAPSHOT_DAYS, (before) =>
       this.snapshotAccessor.deleteEvidenceBefore(before, limit),
+    );
+    await this.run('login_events', EnvNames.RETENTION_ACTIVITY_DAYS, (before) =>
+      this.memberActivityAccessor.deleteLoginsBefore(before, limit),
+    );
+    await this.run(
+      'stream_watch_minutes',
+      EnvNames.RETENTION_ACTIVITY_DAYS,
+      (before) => this.memberActivityAccessor.deleteWatchBefore(before, limit),
     );
   }
 

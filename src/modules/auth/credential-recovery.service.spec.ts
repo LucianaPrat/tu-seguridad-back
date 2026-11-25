@@ -212,7 +212,7 @@ describe('CredentialRecoveryService', () => {
 
       expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
       expect(order).toEqual(['consume', 'issue']);
-      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1);
+      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1, 'magic_link');
     });
 
     it('rejects a second use of the same link', async () => {

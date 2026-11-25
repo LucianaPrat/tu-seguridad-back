@@ -58,7 +58,7 @@ export class FaceIdentityService {
     }
 
     await this.faceIdentityAccessor.recordUse(faceToken);
-    await this.userAccessor.recordLogin(session.user.id);
+    await this.userAccessor.recordLogin(session.user.id, 'face');
     return buildData(
       await this.sessionService.issue(session.user, session.member, context),
     );

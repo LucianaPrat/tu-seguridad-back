@@ -293,6 +293,11 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .default(30),
   [EnvNames.RETENTION_SNAPSHOT_DAYS]: Joi.number().integer().min(1).default(90),
+  // Login and stream-watch rows feed the 12-month members chart, so keep a bit more.
+  [EnvNames.RETENTION_ACTIVITY_DAYS]: Joi.number()
+    .integer()
+    .min(1)
+    .default(400),
   // Rows per sweep per run. The first run after this ships has every row the
   // system ever wrote to get through, and an unbounded DELETE on that holds a
   // lock for as long as it takes.

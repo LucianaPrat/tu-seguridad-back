@@ -16,6 +16,12 @@ enum SpaceMemberRole {
   guest
 }
 
+enum LoginMethod {
+  password
+  magic_link
+  face
+}
+
 enum AuthTokenPurpose {
   refresh
   magic_link
@@ -93,6 +99,7 @@ model User {
   faceIdentities          UserFaceIdentity[]
   acknowledgedAlertEvents AlertEvent[]       @relation("AlertEventAcknowledgedBy")
   eventDeliveries         EventDelivery[]    @relation("EventDeliveryRecipient")
+  loginEvents             LoginEvent[]
 
   @@map("users")
 }
@@ -389,5 +396,33 @@ model Hit {
   isError    Boolean  @map("is_error")
   createdAt  DateTime @default(now()) @map("created_at")
 
+  @@index([userId, createdAt])
   @@map("hits")
+}
+
+/// One row per successful login. `users.last_login_at` only keeps the latest.
+model LoginEvent {
+  id        Int         @id @default(autoincrement())
+  userId    Int         @map("user_id")
+  method    LoginMethod
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("login_events")
+}
+
+/// One row per minute a user pulled a camera's live stream. No foreign keys:
+/// it is an append-only log swept by retention, never joined for integrity.
+model StreamWatchMinute {
+  spaceId  String   @map("space_id")
+  userId   Int      @map("user_id")
+  cameraId String   @map("camera_id")
+  minute   DateTime
+
+  @@id([spaceId, userId, cameraId, minute])
+  @@index([spaceId, minute])
+  @@map("stream_watch_minutes")
 }

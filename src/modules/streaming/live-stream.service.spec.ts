@@ -31,6 +31,7 @@ describe('LiveStreamService', () => {
   let cameraAccessor: { findById: jest.Mock };
   let dvrAccessor: { findCredentialsBySpaceId: jest.Mock };
   let spaceMemberAccessor: { findBySpaceAndUser: jest.Mock };
+  let memberActivityAccessor: { recordWatch: jest.Mock };
   let dvrClient: { streamUrl: jest.Mock };
   let publisher: { publish: jest.Mock; unpublish: jest.Mock };
   let jwtService: { verify: jest.Mock };
@@ -65,6 +66,9 @@ describe('LiveStreamService', () => {
     spaceMemberAccessor = {
       findBySpaceAndUser: jest.fn().mockResolvedValue({ userId: 1 }),
     };
+    memberActivityAccessor = {
+      recordWatch: jest.fn().mockResolvedValue(undefined),
+    };
     jwtService = { verify: jest.fn().mockReturnValue(claims) };
     configService = { get: jest.fn().mockReturnValue('jwt-secret') };
     service = new LiveStreamService(
@@ -75,6 +79,7 @@ describe('LiveStreamService', () => {
       jwtService as never,
       configService as never,
       spaceMemberAccessor as never,
+      memberActivityAccessor as never,
     );
   });
 
@@ -189,6 +194,49 @@ describe('LiveStreamService', () => {
         'space-uuid',
         'camera-uuid',
       );
+    });
+
+    it('records one watch minute per user and camera, however many segments', async () => {
+      await service.authorize(request);
+      await service.authorize(request);
+      await service.authorize(request);
+
+      expect(memberActivityAccessor.recordWatch).toHaveBeenCalledTimes(1);
+      expect(memberActivityAccessor.recordWatch).toHaveBeenCalledWith(
+        'space-uuid',
+        claims.sub,
+        'camera-uuid',
+        expect.any(Date),
+      );
+    });
+
+    it('records again once the minute changes', async () => {
+      const now = jest.spyOn(Date, 'now');
+      now.mockReturnValue(Date.parse('2026-09-01T10:00:10Z'));
+      await service.authorize(request);
+      now.mockReturnValue(Date.parse('2026-09-01T10:01:10Z'));
+      await service.authorize(request);
+      now.mockRestore();
+
+      expect(memberActivityAccessor.recordWatch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not record a viewer who cannot see the camera', async () => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(null);
+
+      await service.authorize(request);
+
+      expect(memberActivityAccessor.recordWatch).not.toHaveBeenCalled();
+    });
+
+    it('still admits the reader when recording the minute fails', async () => {
+      memberActivityAccessor.recordWatch.mockRejectedValue(
+        new Error('db down'),
+      );
+
+      const result = await service.authorize(request);
+
+      expect(result).toEqual(buildData({ authorized: true }));
     });
 
     // A granted publish would let a caller push their own video into a camera

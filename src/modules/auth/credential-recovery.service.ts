@@ -94,7 +94,7 @@ export class CredentialRecoveryService {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_TOKEN_MESSAGE);
     }
 
-    await this.userAccessor.recordLogin(session.user.id);
+    await this.userAccessor.recordLogin(session.user.id, 'magic_link');
     return buildData(
       await this.sessionService.issue(session.user, session.member, context),
     );
