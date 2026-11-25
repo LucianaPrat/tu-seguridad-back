@@ -16,6 +16,7 @@ export function toMemberDto(
     isActive: member.user.isActive,
     lastLoginAt: member.user.lastLoginAt,
     profileCompleted: member.user.profileCompleted,
+    profileEditable: member.user._count.memberships === 1,
     receiveAlerts: member.receiveAlerts,
     role: member.role,
     ...(withPermissions ? toMemberPermissions(member) : {}),

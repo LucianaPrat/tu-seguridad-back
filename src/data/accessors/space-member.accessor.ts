@@ -20,6 +20,7 @@ const ROSTER_SELECT = {
       isActive: true,
       lastLoginAt: true,
       profileCompleted: true,
+      _count: { select: { memberships: true } },
     },
   },
 } as const;
@@ -138,6 +139,27 @@ export class SpaceMemberAccessorService {
       data,
       select: ROSTER_SELECT,
     });
+  }
+
+  /** Membership and the user's own profile columns land together or not at all. */
+  updateWithProfile(
+    spaceId: string,
+    userId: number,
+    data: Prisma.SpaceMemberUpdateInput,
+    profile: Prisma.UserUpdateInput,
+  ): Promise<SpaceMemberRosterRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: profile });
+      return tx.spaceMember.update({
+        where: { spaceId_userId: { spaceId, userId } },
+        data,
+        select: ROSTER_SELECT,
+      });
+    });
+  }
+
+  countByUser(userId: number): Promise<number> {
+    return this.prisma.spaceMember.count({ where: { userId } });
   }
 
   /** Drops the membership and forgets it as the user's last space, together. */

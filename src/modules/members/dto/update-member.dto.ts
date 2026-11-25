@@ -4,11 +4,20 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsIn,
   IsOptional,
+  IsString,
   IsUUID,
+  Matches,
+  MaxLength,
+  MinLength,
 } from 'class-validator';
+import {
+  AuthPolicy,
+  E164_PHONE_PATTERN,
+} from '../../../cross/common/constants';
 import { MENU_KEYS, MenuKey } from '../../../cross/common/permissions';
 
 export class UpdateMemberDto {
@@ -44,4 +53,36 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsBoolean()
   receiveAlerts?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'Ada',
+    description: 'Profile fields only apply to a user of this space alone.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(AuthPolicy.MAX_NAME_LENGTH)
+  firstName?: string;
+
+  @ApiPropertyOptional({ example: 'Lovelace' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(AuthPolicy.MAX_NAME_LENGTH)
+  lastName?: string;
+
+  @ApiPropertyOptional({ example: '+5491122334455', description: 'E.164' })
+  @IsOptional()
+  @Matches(E164_PHONE_PATTERN, {
+    message: 'phone must be an E.164 number, e.g. +5491122334455',
+  })
+  phone?: string;
+
+  @ApiPropertyOptional({
+    example: 'member@example.com',
+    description: 'A change revokes every session of the user.',
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 }

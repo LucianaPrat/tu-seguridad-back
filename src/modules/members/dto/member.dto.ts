@@ -47,6 +47,12 @@ export class MemberDto {
   })
   receiveAlerts!: boolean;
 
+  @ApiProperty({
+    description:
+      'True when the user belongs to this space only, so an admin may edit its name, phone and email.',
+  })
+  profileEditable!: boolean;
+
   @ApiProperty({ enum: SpaceMemberRole })
   role!: SpaceMemberRole;
 
