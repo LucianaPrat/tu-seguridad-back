@@ -6211,6 +6211,133 @@
         "tags": [
           "members"
         ]
+      },
+      "post": {
+        "description": "Admin only. An email with an account only gains the membership; its password and profile are left alone. A new email needs firstName, lastName, phone and password (400 otherwise) and gets a ready-to-use account.",
+        "operationId": "MembersController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMemberDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_ERROR` — Malformed body, cameraIds outside this space, or profile fields missing for a new user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHORIZED` — Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "UNAUTHORIZED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FORBIDDEN"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`CONFLICT` — Already a member of the space, or an invitation for the email is pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorDto"
+                    },
+                    {
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Add a member directly, with no invitation or email",
+        "tags": [
+          "members"
+        ]
       }
     },
     "/api/v1/members/{userId}": {
@@ -8709,6 +8836,77 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "CreateMemberDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "member@example.com"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "collaborator",
+              "guest"
+            ]
+          },
+          "menuAccess": {
+            "type": "array",
+            "description": "Defaults to the role defaults.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "home",
+                "monitor",
+                "events",
+                "dvr",
+                "channels",
+                "members"
+              ]
+            }
+          },
+          "cameraIds": {
+            "description": "Cameras of this space the member may see. Defaults to none.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "description": "Language of a new account. Defaults to the admin's own locale; ignored for an existing account."
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada",
+            "description": "Required for a new user, ignored for an existing one."
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace",
+            "description": "Required for a new user, ignored for an existing one."
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164. Required for a new user, ignored for an existing one."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "description": "Required for a new user, never applied to an existing one."
+          }
+        },
+        "required": [
+          "email",
+          "role"
         ]
       },
       "UpdateMemberDto": {
