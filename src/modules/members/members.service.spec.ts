@@ -16,6 +16,7 @@ function buildUser(
     isActive: true,
     lastLoginAt: null,
     profileCompleted: true,
+    _count: { memberships: 1 },
     ...overrides,
   };
 }
@@ -44,11 +45,14 @@ describe('MembersService', () => {
     create: jest.Mock;
     createUserWithMembership: jest.Mock;
     findRoster: jest.Mock;
+    updateWithProfile: jest.Mock;
+    countByUser: jest.Mock;
   };
   let cameraAccessor: { findAll: jest.Mock };
   let userAccessor: { findByEmail: jest.Mock; findById: jest.Mock };
   let invitationAccessor: { findPendingBySpaceAndEmail: jest.Mock };
   let passwordHash: { hash: jest.Mock };
+  let authTokenAccessor: { revokeAllByUserAndPurpose: jest.Mock };
   let service: MembersService;
 
   beforeEach(() => {
@@ -60,7 +64,10 @@ describe('MembersService', () => {
       create: jest.fn(),
       createUserWithMembership: jest.fn(),
       findRoster: jest.fn(),
+      updateWithProfile: jest.fn(),
+      countByUser: jest.fn().mockResolvedValue(1),
     };
+    authTokenAccessor = { revokeAllByUserAndPurpose: jest.fn() };
     cameraAccessor = { findAll: jest.fn() };
     userAccessor = { findByEmail: jest.fn(), findById: jest.fn() };
     invitationAccessor = { findPendingBySpaceAndEmail: jest.fn() };
@@ -71,6 +78,7 @@ describe('MembersService', () => {
       userAccessor as never,
       invitationAccessor as never,
       passwordHash as never,
+      authTokenAccessor as never,
     );
   });
 
@@ -240,6 +248,7 @@ describe('MembersService', () => {
         isActive: true,
         lastLoginAt: null,
         profileCompleted: true,
+        profileEditable: true,
         receiveAlerts: true,
         role: 'collaborator',
         menuAccess: ['home'],
@@ -432,6 +441,105 @@ describe('MembersService', () => {
         cameraIds: [],
       });
     });
+  });
+
+  describe('update profile fields', () => {
+    const existing = { spaceId, userId: 2, role: 'guest' };
+
+    beforeEach(() => {
+      spaceMemberAccessor.findBySpaceAndUser.mockResolvedValue(existing);
+      spaceMemberAccessor.update.mockResolvedValue(buildMember({ id: 2 }));
+      spaceMemberAccessor.updateWithProfile.mockResolvedValue(
+        buildMember({ id: 2 }),
+      );
+      userAccessor.findById.mockResolvedValue({
+        id: 2,
+        email: 'old@example.com',
+      });
+      userAccessor.findByEmail.mockResolvedValue(null);
+    });
+
+    it('answers FORBIDDEN when the user belongs to other spaces', async () => {
+      spaceMemberAccessor.countByUser.mockResolvedValue(2);
+
+      const result = await service.update(spaceId, 1, 2, { firstName: 'Eve' });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.FORBIDDEN,
+      });
+      expect(spaceMemberAccessor.updateWithProfile).not.toHaveBeenCalled();
+    });
+
+    it('writes profile and membership together without revoking when email is unchanged', async () => {
+      const result = await service.update(spaceId, 1, 2, {
+        firstName: 'Eve',
+        phone: '+5491100000000',
+        email: ' OLD@Example.com ',
+        receiveAlerts: false,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(spaceMemberAccessor.updateWithProfile).toHaveBeenCalledWith(
+        spaceId,
+        2,
+        { receiveAlerts: false },
+        { firstName: 'Eve', phone: '+5491100000000' },
+      );
+      expect(
+        authTokenAccessor.revokeAllByUserAndPurpose,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('answers CONFLICT when the email belongs to another user', async () => {
+      userAccessor.findByEmail.mockResolvedValue({ id: 7 });
+
+      const result = await service.update(spaceId, 1, 2, {
+        email: 'taken@example.com',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        code: ErrorCode.CONFLICT,
+      });
+      expect(spaceMemberAccessor.updateWithProfile).not.toHaveBeenCalled();
+    });
+
+    it('stores the normalized email and revokes refresh sessions when it changes', async () => {
+      await service.update(spaceId, 1, 2, { email: 'New@Example.com' });
+
+      expect(spaceMemberAccessor.updateWithProfile).toHaveBeenCalledWith(
+        spaceId,
+        2,
+        {},
+        { email: 'new@example.com' },
+      );
+      expect(authTokenAccessor.revokeAllByUserAndPurpose).toHaveBeenCalledWith(
+        2,
+        'refresh',
+      );
+    });
+
+    it('leaves a permission-only patch alone: no membership count, no revoke', async () => {
+      await service.update(spaceId, 1, 2, { receiveAlerts: false });
+
+      expect(spaceMemberAccessor.countByUser).not.toHaveBeenCalled();
+      expect(spaceMemberAccessor.updateWithProfile).not.toHaveBeenCalled();
+      expect(spaceMemberAccessor.update).toHaveBeenCalled();
+      expect(
+        authTokenAccessor.revokeAllByUserAndPurpose,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  it('maps profileEditable false for a user in several spaces', async () => {
+    spaceMemberAccessor.listBySpace.mockResolvedValue([
+      buildMember({ _count: { memberships: 2 } }),
+    ]);
+
+    const result = await service.findAll(spaceId, true);
+
+    expect(result.ok && result.data.items[0].profileEditable).toBe(false);
   });
 
   describe('remove', () => {

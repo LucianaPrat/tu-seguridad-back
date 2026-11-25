@@ -5,6 +5,7 @@ import { normalizeEmail } from '../../cross/common/normalize-email';
 import { DEFAULT_MENU_ACCESS } from '../../cross/common/permissions';
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { PasswordHashService } from '../../cross/crypto/password-hash.service';
+import { AuthTokenAccessorService } from '../../data/accessors/auth-token.accessor';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { InvitationAccessorService } from '../../data/accessors/invitation.accessor';
@@ -17,6 +18,8 @@ import { toMemberDto } from './member.mapper';
 
 const UNIQUE_CONSTRAINT_ERROR = 'P2002';
 const SELF_ROLE_CHANGE_MESSAGE = 'An admin cannot change their own role';
+const OTHER_SPACES_MESSAGE =
+  'Profile fields cannot be edited: the member belongs to other spaces';
 const SELF_REMOVAL_MESSAGE = 'You cannot remove yourself from the space';
 
 @Injectable()
@@ -27,6 +30,7 @@ export class MembersService {
     private readonly userAccessor: UserAccessorService,
     private readonly invitationAccessor: InvitationAccessorService,
     private readonly passwordHash: PasswordHashService,
+    private readonly authTokenAccessor: AuthTokenAccessorService,
   ) {}
 
   /**
@@ -174,6 +178,35 @@ export class MembersService {
       }
     }
 
+    const { firstName, lastName, phone } = dto;
+    const profile: Prisma.UserUpdateInput = {};
+    if (firstName !== undefined) profile.firstName = firstName;
+    if (lastName !== undefined) profile.lastName = lastName;
+    if (phone !== undefined) profile.phone = phone;
+    let emailChanged = false;
+    if (Object.keys(profile).length > 0 || dto.email !== undefined) {
+      // A user is global: only an account that lives in this space alone is the
+      // admin's to edit, otherwise it could be taken over via password recovery.
+      if ((await this.spaceMemberAccessor.countByUser(userId)) > 1) {
+        return buildError(ErrorCode.FORBIDDEN, OTHER_SPACES_MESSAGE);
+      }
+    }
+    if (dto.email !== undefined) {
+      const email = normalizeEmail(dto.email);
+      const current = await this.userAccessor.findById(userId);
+      if (email !== current?.email) {
+        const taken = await this.userAccessor.findByEmail(email);
+        if (taken && taken.id !== userId) {
+          return buildError(
+            ErrorCode.CONFLICT,
+            'This email is already used by another user',
+          );
+        }
+        profile.email = email;
+        emailChanged = true;
+      }
+    }
+
     const data: Prisma.SpaceMemberUpdateInput = {};
     if (roleChanged) data.role = newRole;
     if (dto.menuAccess !== undefined) data.menuAccess = dto.menuAccess;
@@ -181,11 +214,33 @@ export class MembersService {
     if (dto.cameraIds !== undefined) data.cameraIds = dto.cameraIds;
     if (dto.receiveAlerts !== undefined) data.receiveAlerts = dto.receiveAlerts;
 
-    const updated = await this.spaceMemberAccessor.update(
-      spaceId,
-      userId,
-      data,
-    );
+    let updated;
+    try {
+      updated =
+        Object.keys(profile).length > 0
+          ? await this.spaceMemberAccessor.updateWithProfile(
+              spaceId,
+              userId,
+              data,
+              profile,
+            )
+          : await this.spaceMemberAccessor.update(spaceId, userId, data);
+    } catch (error) {
+      // Lost the race against another account taking the same email.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === UNIQUE_CONSTRAINT_ERROR
+      ) {
+        return buildError(
+          ErrorCode.CONFLICT,
+          'This email is already used by another user',
+        );
+      }
+      throw error;
+    }
+    if (emailChanged) {
+      await this.authTokenAccessor.revokeAllByUserAndPurpose(userId, 'refresh');
+    }
     return buildData(toMemberDto(updated, true));
   }
 
