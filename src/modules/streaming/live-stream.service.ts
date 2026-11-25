@@ -12,6 +12,7 @@ import {
 import { buildData, buildError, Either } from '../../cross/errors/either';
 import { CameraAccessorService } from '../../data/accessors/camera.accessor';
 import { DvrAccessorService } from '../../data/accessors/dvr.accessor';
+import { MemberActivityAccessorService } from '../../data/accessors/member-activity.accessor';
 import { SpaceMemberAccessorService } from '../../data/accessors/space-member.accessor';
 import { DvrClientPort } from '../dvr/dvr-client.port';
 import { LiveStreamDto } from './dto/live-stream.dto';
@@ -57,10 +58,45 @@ export class LiveStreamService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly spaceMemberAccessor: SpaceMemberAccessorService,
+    private readonly memberActivityAccessor: MemberActivityAccessorService,
   ) {}
 
   /** `(space, path)` to the moment the pair was last authorized. */
   private readonly recentAuthorizations = new Map<string, number>();
+
+  /** `space|user|camera|minuteISO` keys already written this minute. */
+  private readonly recordedWatches = new Set<string>();
+  private recordedMinute = 0;
+
+  /**
+   * Fire-and-forget: one row per minute a user pulls a camera. The hook fires
+   * per playlist and segment, so an in-memory set keeps it to one write per
+   * minute per instance; `skipDuplicates` covers several instances. A failure
+   * is logged and never reaches the hook's answer.
+   *
+   * ponytail: 1 minute granularity; a segment the browser served from cache
+   * does not count.
+   */
+  private recordWatch(spaceId: string, userId: number, cameraId: string): void {
+    const minuteMs = Math.floor(Date.now() / 60_000) * 60_000;
+    if (minuteMs !== this.recordedMinute) {
+      this.recordedWatches.clear();
+      this.recordedMinute = minuteMs;
+    }
+    const key = `${spaceId}|${userId}|${cameraId}`;
+    if (this.recordedWatches.has(key)) {
+      return;
+    }
+    this.recordedWatches.add(key);
+    this.memberActivityAccessor
+      .recordWatch(spaceId, userId, cameraId, new Date(minuteMs))
+      .catch((error: unknown) => {
+        this.recordedWatches.delete(key);
+        this.logger.warn(
+          `could not record watch minute: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
 
   /**
    * Registers the camera with the media server and answers where to play it.
@@ -190,6 +226,9 @@ export class LiveStreamService {
     ) {
       return buildError(ErrorCode.FORBIDDEN, CAMERA_FORBIDDEN_MESSAGE);
     }
+
+    // Before the memo: the memo is per space and path, not per viewer.
+    this.recordWatch(spaceId, sub, request.path);
 
     const memoKey = `${spaceId}\u0000${request.path}`;
     if (this.wasRecentlyAuthorized(memoKey)) {

@@ -67,7 +67,7 @@ export class AuthService {
       return buildError(ErrorCode.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
     }
 
-    await this.userAccessor.recordLogin(user.id);
+    await this.userAccessor.recordLogin(user.id, 'password');
     return buildData(
       await this.sessionService.issue(user, session.member, context),
     );

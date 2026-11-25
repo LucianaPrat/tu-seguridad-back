@@ -170,7 +170,7 @@ describe('AuthService', () => {
       const result = await service.login(user.email, 'correct', context);
 
       expect(result).toEqual({ ok: true, data: TOKEN_PAIR });
-      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1);
+      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1, 'password');
       expect(sessionService.issue).toHaveBeenCalledWith(user, member, context);
     });
   });
