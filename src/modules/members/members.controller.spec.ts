@@ -12,6 +12,7 @@ describe('MembersController', () => {
 
   let membersService: {
     findAll: jest.Mock;
+    create: jest.Mock;
     update: jest.Mock;
     remove: jest.Mock;
   };
@@ -20,6 +21,7 @@ describe('MembersController', () => {
   beforeEach(() => {
     membersService = {
       findAll: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
       remove: jest.fn(),
     };
@@ -37,6 +39,12 @@ describe('MembersController', () => {
       expect.any(String),
       false,
     );
+  });
+
+  it('delegates create with the caller space, caller id and body', async () => {
+    const dto = { email: 'new@example.com', role: 'guest' as const };
+    await controller.create(user, dto);
+    expect(membersService.create).toHaveBeenCalledWith('space-uuid', 1, dto);
   });
 
   it('delegates update with the caller space, caller id, target user and body', async () => {
