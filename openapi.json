@@ -6453,7 +6453,7 @@
     },
     "/api/v1/members/{userId}": {
       "patch": {
-        "description": "Admin only. The id is the user id the roster returns. Every field is optional. An admin cannot change their own role (409); the same role is a no-op.",
+        "description": "Admin only. The id is the user id the roster returns. Every field is optional. An admin cannot change their own role (409); the same role is a no-op. firstName, lastName, phone and email are only accepted while `profileEditable` (the user belongs to this space alone, 403 otherwise); a new email revokes all the user sessions.",
         "operationId": "MembersController_update_v1",
         "parameters": [
           {
@@ -6535,7 +6535,7 @@
             }
           },
           "403": {
-            "description": "`FORBIDDEN` — Caller is not a space admin, or has an incomplete profile.",
+            "description": "`FORBIDDEN` — Caller is not a space admin, has an incomplete profile, or profile fields were sent for a member of other spaces.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6583,7 +6583,7 @@
             }
           },
           "409": {
-            "description": "`CONFLICT` — An admin tried to change their own role.",
+            "description": "`CONFLICT` — An admin tried to change their own role, or the email belongs to another user.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8887,6 +8887,10 @@
             "type": "boolean",
             "description": "The per-member alert opt-in the channels screen toggles: false means the member stays in the space but no alert delivery is planned for them."
           },
+          "profileEditable": {
+            "type": "boolean",
+            "description": "True when the user belongs to this space only, so an admin may edit its name, phone and email."
+          },
           "role": {
             "type": "string",
             "enum": [
@@ -8927,6 +8931,7 @@
           "isActive",
           "profileCompleted",
           "receiveAlerts",
+          "profileEditable",
           "role"
         ]
       },
@@ -9203,6 +9208,25 @@
           },
           "receiveAlerts": {
             "type": "boolean"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada",
+            "description": "Profile fields only apply to a user of this space alone."
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Lovelace"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+5491122334455",
+            "description": "E.164"
+          },
+          "email": {
+            "type": "string",
+            "example": "member@example.com",
+            "description": "A change revokes every session of the user."
           }
         }
       },

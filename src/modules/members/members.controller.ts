@@ -125,7 +125,10 @@ export class MembersController {
     summary: 'Update a member: role, menu, cameras, alert opt-in',
     description:
       'Admin only. The id is the user id the roster returns. Every field is optional. ' +
-      'An admin cannot change their own role (409); the same role is a no-op.',
+      'An admin cannot change their own role (409); the same role is a no-op. ' +
+      'firstName, lastName, phone and email are only accepted while `profileEditable` ' +
+      '(the user belongs to this space alone, 403 otherwise); a new email revokes all ' +
+      'the user sessions.',
   })
   @ApiOkResponse({ type: MemberDto, description: 'Member after the update.' })
   @ApiFailures({
@@ -133,9 +136,10 @@ export class MembersController {
       'Malformed body, a non-numeric id, or cameraIds outside this space.',
     [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
     [ErrorCode.FORBIDDEN]:
-      'Caller is not a space admin, or has an incomplete profile.',
+      'Caller is not a space admin, has an incomplete profile, or profile fields were sent for a member of other spaces.',
     [ErrorCode.NOT_FOUND]: 'No such member in the caller space.',
-    [ErrorCode.CONFLICT]: 'An admin tried to change their own role.',
+    [ErrorCode.CONFLICT]:
+      'An admin tried to change their own role, or the email belongs to another user.',
   })
   update(
     @CurrentUser() user: JwtPayload,
