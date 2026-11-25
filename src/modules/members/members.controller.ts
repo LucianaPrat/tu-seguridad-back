@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -26,6 +27,11 @@ import { Roles } from '../../cross/decorators/roles.decorator';
 import { ApiFailures } from '../../cross/errors/api-failures.decorator';
 import { Either } from '../../cross/errors/either';
 import { CreateMemberDto } from './dto/create-member.dto';
+import {
+  MemberActivityDto,
+  QueryMemberActivityDto,
+} from './dto/member-activity.dto';
+import { MemberActivityService } from './member-activity.service';
 import { MemberDto } from './dto/member.dto';
 import { MemberListDto } from './dto/member-list.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
@@ -34,7 +40,10 @@ import { MembersService } from './members.service';
 @ApiTags('members')
 @Controller('members')
 export class MembersController {
-  constructor(private readonly membersService: MembersService) {}
+  constructor(
+    private readonly membersService: MembersService,
+    private readonly memberActivityService: MemberActivityService,
+  ) {}
 
   @RequireMenu('members')
   @Get()
@@ -56,6 +65,32 @@ export class MembersController {
       user.spaceId,
       user.role === SpaceMemberRole.admin,
     );
+  }
+
+  // Declared before any `:param` route so a literal path is never read as an id.
+  @Roles(SpaceMemberRole.admin)
+  @Get('activity')
+  @ApiOperation({
+    summary: 'Access and live-stream activity of the space members',
+    description:
+      'Admin only. An access is a session of authenticated API requests (a new one ' +
+      'starts after 30 idle minutes), so saved-token users count. Covers the last ' +
+      '`days` calendar days (7, 30 or 90; default 30) ending today in the space DVR ' +
+      'timezone, plus totals for the `days` before for deltas. `lastAccess` is all ' +
+      'time. Only current members are counted.',
+  })
+  @ApiOkResponse({ type: MemberActivityDto })
+  @ApiFailures({
+    [ErrorCode.VALIDATION_ERROR]: '`days` is not 7, 30 or 90.',
+    [ErrorCode.UNAUTHORIZED]: 'Missing or invalid bearer token.',
+    [ErrorCode.FORBIDDEN]:
+      'Caller is not a space admin, or has an incomplete profile.',
+  })
+  activity(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryMemberActivityDto,
+  ): Promise<Either<MemberActivityDto>> {
+    return this.memberActivityService.getActivity(user.spaceId, query.days);
   }
 
   @Roles(SpaceMemberRole.admin)

@@ -103,7 +103,7 @@ describe('FaceIdentityService', () => {
       expect(faceIdentityAccessor.recordUse).toHaveBeenCalledWith(
         'provider-token',
       );
-      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1);
+      expect(userAccessor.recordLogin).toHaveBeenCalledWith(1, 'face');
       expect(sessionService.issue).toHaveBeenCalledWith(user, member, CONTEXT);
     });
   });

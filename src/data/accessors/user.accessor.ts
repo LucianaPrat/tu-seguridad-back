@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Locale, Prisma, User } from '@prisma/client';
+import { Locale, LoginMethod, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface ProfileCompletionFields {
@@ -56,10 +56,18 @@ export class UserAccessorService {
     });
   }
 
-  recordLogin(id: number, now = new Date()): Promise<User> {
-    return this.prisma.user.update({
-      where: { id },
-      data: { lastLoginAt: now },
-    });
+  /** Stamps `lastLoginAt` and appends the history row, atomically. */
+  async recordLogin(
+    id: number,
+    method: LoginMethod,
+    now = new Date(),
+  ): Promise<User> {
+    const [user] = await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id }, data: { lastLoginAt: now } }),
+      this.prisma.loginEvent.create({
+        data: { userId: id, method, createdAt: now },
+      }),
+    ]);
+    return user;
   }
 }
